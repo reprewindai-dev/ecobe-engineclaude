@@ -8,6 +8,10 @@ dist/
 .env.*
 ecobe-engine/.env
 
+# Allow example env files
+!.env.example
+!ecobe-engine/.env.example
+
 # Engine build artifacts
 /ecobe-engine/dist/
 /ecobe-engine/node_modules/
