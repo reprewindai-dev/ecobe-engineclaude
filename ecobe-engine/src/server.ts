@@ -20,14 +20,24 @@ async function healthHandler(req: express.Request, res: express.Response) {
     // Check database
     await prisma.$queryRaw`SELECT 1`
 
-    // Check Redis
-    await redis.ping()
+    let redisOk = true
+    try {
+      await redis.ping()
+    } catch {
+      redisOk = false
+    }
 
-    res.json({
-      status: 'healthy',
+    const ok = redisOk
+
+    res.status(ok ? 200 : 503).json({
+      status: ok ? 'healthy' : 'unhealthy',
       service: 'ECOBE Engine',
       version: '1.0.0',
       timestamp: new Date().toISOString(),
+      checks: {
+        database: true,
+        redis: redisOk,
+      },
     })
   } catch (error) {
     res.status(503).json({
@@ -67,8 +77,13 @@ async function start() {
     console.log('✅ Database connected')
 
     // Test Redis connection
-    await redis.ping()
-    console.log('✅ Redis connected')
+    try {
+      await redis.ping()
+      console.log('✅ Redis connected')
+    } catch (error) {
+      console.error('Redis error:', error)
+      console.warn('⚠️  Redis unavailable at startup; continuing without Redis')
+    }
 
     app.listen(env.PORT, () => {
       console.log(`🌱 ECOBE Engine running on port ${env.PORT}`)
@@ -86,14 +101,14 @@ async function start() {
 process.on('SIGINT', async () => {
   console.log('Shutting down...')
   await prisma.$disconnect()
-  await redis.quit()
+  await redis.quit().catch(() => undefined)
   process.exit(0)
 })
 
 process.on('SIGTERM', async () => {
   console.log('Shutting down...')
   await prisma.$disconnect()
-  await redis.quit()
+  await redis.quit().catch(() => undefined)
   process.exit(0)
 })
 
