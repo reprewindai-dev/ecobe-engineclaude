@@ -1,0 +1,29 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "steps": {
+    "install": {
+      "inputs": ["."],
+      "commands": [
+        {
+          "cmd": "npm install",
+          "customName": "Install dependencies"
+        }
+      ]
+    },
+    "build": {
+      "inputs": [{ "step": "install" }, "."],
+      "commands": [
+        {
+          "cmd": "npm run build",
+          "customName": "Build"
+        }
+      ]
+    }
+  },
+  "deploy": {
+    "base": {
+      "step": "build"
+    },
+    "startCommand": "npm run start"
+  }
+}
