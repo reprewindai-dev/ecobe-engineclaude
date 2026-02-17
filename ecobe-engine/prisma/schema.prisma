@@ -1,0 +1,304 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// CARBON INTENSITY DATA
+// ============================================================================
+
+model CarbonIntensity {
+  id        String   @id @default(cuid())
+
+  region    String   // e.g., "US-CAL-CISO", "FR", "DE"
+
+  // Carbon metrics
+  carbonIntensity      Int      // gCO2eq/kWh
+  fossilFuelPercentage Float?
+  renewablePercentage  Float?
+
+  // Source
+  source    String   @default("ELECTRICITY_MAPS")
+
+  // Timestamp
+  timestamp DateTime
+
+  // Metadata
+  isEstimated Boolean  @default(false)
+  metadata    Json     @default("{}")
+
+  createdAt DateTime @default(now())
+
+  @@index([region, timestamp])
+  @@index([timestamp])
+  @@unique([region, timestamp, source])
+}
+
+// ============================================================================
+// WORKLOAD ROUTING
+// ============================================================================
+
+model WorkloadRequest {
+  id        String   @id @default(cuid())
+
+  // Request details
+  requestVolume Int
+  workloadType  String   // "inference", "training", "batch"
+  modelSize     String?  // "mixtral-70b", "llama-3-8b", etc.
+
+  // Routing
+  regionTargets String[] // Preferred regions
+
+  // Constraints
+  carbonBudget     Float?  // Max gCO2eq allowed
+  deadlineStart    DateTime?
+  deadlineEnd      DateTime?
+  maxLatencyMs     Int?
+
+  // Hardware mix (optional)
+  hardwareCpu      Float?  @default(0.6)
+  hardwareGpu      Float?  @default(0.3)
+  hardwareTpu      Float?  @default(0.1)
+
+  // Results
+  selectedRegion   String?
+  estimatedCO2     Float?
+  actualCO2        Float?
+
+  // Status
+  status    WorkloadStatus @default(PENDING)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  completedAt DateTime?
+
+  routingDecisions RoutingDecision[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum WorkloadStatus {
+  PENDING
+  ROUTED
+  EXECUTING
+  COMPLETED
+  FAILED
+}
+
+model RoutingDecision {
+  id        String   @id @default(cuid())
+
+  workloadRequestId String
+  workloadRequest   WorkloadRequest @relation(fields: [workloadRequestId], references: [id], onDelete: Cascade)
+
+  region            String
+  rank              Int      // 1 = best choice
+
+  // Metrics at decision time
+  carbonIntensity   Int      // gCO2eq/kWh
+  estimatedCO2      Float    // Total gCO2eq
+  estimatedLatency  Int?     // ms
+  estimatedCost     Float?   // USD
+
+  // Score components
+  carbonScore       Float
+  latencyScore      Float
+  costScore         Float
+  overallScore      Float
+
+  selected          Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([workloadRequestId])
+  @@index([region])
+}
+
+// ============================================================================
+// CARBON FORECASTING (ML Model)
+// ============================================================================
+
+model CarbonForecast {
+  id        String   @id @default(cuid())
+
+  region    String
+
+  // Forecast
+  forecastTime      DateTime
+  predictedIntensity Int     // gCO2eq/kWh
+  confidence         Float   // 0.0 - 1.0
+
+  // Model info
+  modelVersion      String  @default("v1.0")
+  features          Json    @default("{}")
+
+  // Actual (for training)
+  actualIntensity   Int?
+  error             Float?
+
+  createdAt DateTime @default(now())
+
+  @@index([region, forecastTime])
+  @@index([crecastTime])
+}
+
+// ============================================================================
+// CARBON CREDITS & TRACKING
+// ============================================================================
+
+model CarbonCredit {
+  id        String   @id @default(cuid())
+
+  // Credit details
+  creditType        String   // "OFFSET", "RENEWABLE", "REMOVAL"
+  amount            Float    // Tons CO2eq
+
+  // Source
+  provider          String?
+  certificateId     String?
+
+  // Usage
+  purchased         Boolean  @default(false)
+  purchasedAt       DateTime?
+  applied           Boolean  @default(false)
+  appliedAt         DateTime?
+
+  // Link to workload
+  workloadRequestId String?
+
+  // Cost
+  costUsd           Float?
+
+  metadata          Json     @default("{}")
+
+  createdAt DateTime @default(now())
+
+  @@index([creditType])
+  @@index([purchased, applied])
+}
+
+model EmissionLog {
+  id        String   @id @default(cuid())
+
+  // What
+  source            String   // "WORKLOAD", "INFRASTRUCTURE", "TRAINING"
+  sourceId          String?  // Reference to workload/resource
+
+  // Where
+  region            String
+
+  // Carbon
+  co2Grams          Float
+  energyKwh         Float
+  carbonIntensity   Int      // gCO2eq/kWh at time
+
+  // When
+  timestamp         DateTime
+
+  // Tags
+  tags              String[] @default([])
+
+  metadata          Json     @default("{}")
+
+  createdAt DateTime @default(now())
+
+  @@index([source, sourceId])
+  @@index([region, timestamp])
+  @@index([timestamp])
+}
+
+// ============================================================================
+// DEKES INTEGRATION
+// ============================================================================
+
+model DekesWorkload {
+  id        String   @id @default(cuid())
+
+  // DEKES query info
+  dekesQueryId      String?
+  dekesRunId        String?
+  queryString       String?
+
+  // Workload characteristics
+  estimatedQueries  Int
+  estimatedResults  Int
+
+  // Carbon optimization
+  carbonBudget      Float?   // gCO2eq
+  scheduledTime     DateTime?
+
+  // Selected routing
+  selectedRegion    String?
+  actualCO2         Float?
+
+  // Status
+  status            String   @default("PENDING")
+
+  createdAt DateTime @default(now())
+  completedAt DateTime?
+
+  @@index([status])
+  @@index([dekesQueryId])
+}
+
+// ============================================================================
+// REGION METADATA
+// ============================================================================
+
+model Region {
+  id        String   @id @default(cuid())
+
+  code      String   @unique  // "US-CAL-CISO", "FR", etc.
+  name      String            // "California", "France"
+  country   String
+
+  // Characteristics
+  typicalLatencyMs  Int?
+  costPerKwh        Float?
+  availableHardware String[] @default([])
+
+  // Grid mix
+  renewableCapacity Float?   // %
+  avgCarbonIntensity Int?    // gCO2eq/kWh
+
+  // Availability
+  enabled   Boolean  @default(true)
+
+  metadata  Json     @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([enabled])
+}
+
+// ============================================================================
+// ANALYTICS
+// ============================================================================
+
+model DailyMetrics {
+  id        String   @id @default(cuid())
+
+  date      DateTime @unique
+
+  // Workload stats
+  totalWorkloads    Int     @default(0)
+  totalCO2Grams     Float   @default(0)
+  totalEnergyKwh    Float   @default(0)
+
+  // Savings
+  savedCO2Grams     Float   @default(0)  // vs baseline
+  savedCostUsd      Float   @default(0)
+
+  // Avg metrics
+  avgCarbonIntensity Float?
+
+  createdAt DateTime @default(now())
+
+  @@index([date])
+}
