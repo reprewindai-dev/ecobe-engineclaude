@@ -19,6 +19,10 @@ const envSchema = z.object({
   // DEKES Integration
   DEKES_API_URL: z.string().optional(),
   DEKES_API_KEY: z.string().optional(),
+
+  // UI (debug)
+  UI_ENABLED: z.string().optional(),
+  UI_TOKEN: z.string().optional(),
 })
 
 const parsed = envSchema.safeParse(process.env)
@@ -33,6 +37,10 @@ export const env = {
   ...parsed.data,
   DEFAULT_MAX_CARBON_G_PER_KWH: parseInt(parsed.data.DEFAULT_MAX_CARBON_G_PER_KWH),
   PORT: parseInt(parsed.data.PORT),
+  UI_ENABLED:
+    parsed.data.UI_ENABLED !== undefined
+      ? parsed.data.UI_ENABLED === 'true'
+      : parsed.data.NODE_ENV !== 'production',
 }
 
 export type Env = typeof env
