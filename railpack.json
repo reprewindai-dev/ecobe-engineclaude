@@ -2,6 +2,7 @@
   "$schema": "https://schema.railpack.com",
   "steps": {
     "install": {
+      "inputs": ["..."],
       "commands": [
         {
           "cmd": "npm install",
@@ -10,7 +11,7 @@
       ]
     },
     "build": {
-      "inputs": [{ "step": "install" }],
+      "inputs": [{ "step": "install" }, "..."],
       "commands": [
         {
           "cmd": "npm run build",
