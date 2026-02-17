@@ -4,6 +4,9 @@
   "workspaces": [
     "ecobe-engine"
   ],
+  "prisma": {
+    "schema": "ecobe-engine/prisma/schema.prisma"
+  },
   "scripts": {
     "dev": "npm run dev -w ecobe-engine",
     "build": "npm run build -w ecobe-engine",
