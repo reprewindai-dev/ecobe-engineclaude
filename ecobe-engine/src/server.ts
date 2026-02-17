@@ -90,6 +90,53 @@ app.get('/ui', (_req, res) => {
 
       <div class="card">
         <div class="row" style="align-items: center;">
+          <strong>DEKES SaaS</strong>
+          <button class="secondary" id="dekesHealth">GET /api/v1/dekes/health</button>
+          <button class="secondary" id="dekesPing">GET /api/v1/dekes/health?ping=true</button>
+          <button class="secondary" id="dekesAnalytics">GET /api/v1/dekes/analytics</button>
+        </div>
+        <div class="muted" style="margin-top: 8px;">Ping requires <code>DEKES_API_URL</code> and <code>DEKES_API_KEY</code> set in Railway Variables.</div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="align-items: center; gap: 12px;">
+          <strong>DEKES optimize</strong>
+          <label class="muted">Query</label>
+          <input id="dekesQuery" style="min-width: 280px;" value="Find sustainable routing policies" />
+          <label class="muted">Estimated results</label>
+          <input id="dekesEstimated" style="width: 140px;" value="1000" />
+          <label class="muted">Budget (gCO2)</label>
+          <input id="dekesBudget" style="width: 140px;" value="200" />
+          <label class="muted">Regions</label>
+          <input id="dekesRegions" style="min-width: 260px;" value="US-EAST-4,FR" />
+          <button id="dekesOptimize">POST /api/v1/dekes/optimize</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="align-items: center; gap: 12px;">
+          <strong>DEKES schedule batch</strong>
+          <label class="muted">Look-ahead hours</label>
+          <input id="dekesLookAhead" style="width: 160px;" value="24" />
+          <label class="muted">Regions</label>
+          <input id="dekesScheduleRegions" style="min-width: 260px;" value="US-EAST-4,FR" />
+          <button class="secondary" id="dekesSchedule">POST /api/v1/dekes/schedule (2 sample queries)</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="align-items: center; gap: 12px;">
+          <strong>DEKES report</strong>
+          <label class="muted">Query ID</label>
+          <input id="dekesReportId" style="min-width: 260px;" value="demo-query-1" />
+          <label class="muted">Actual CO2 (g)</label>
+          <input id="dekesReportCO2" style="width: 160px;" value="123" />
+          <button class="secondary" id="dekesReport">POST /api/v1/dekes/report</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="align-items: center;">
           <button id="seedDecision">POST /api/v1/decisions (sample)</button>
           <span class="muted">Creates a decision so the dashboard endpoints return data.</span>
         </div>
@@ -145,6 +192,10 @@ app.get('/ui', (_req, res) => {
       document.getElementById('decisions').onclick = () => run(() => get('/api/v1/dashboard/decisions'))
       document.getElementById('mapping').onclick = () => run(() => get('/api/v1/dashboard/region-mapping'))
 
+      document.getElementById('dekesHealth').onclick = () => run(() => get('/api/v1/dekes/health'))
+      document.getElementById('dekesPing').onclick = () => run(() => get('/api/v1/dekes/health?ping=true'))
+      document.getElementById('dekesAnalytics').onclick = () => run(() => get('/api/v1/dekes/analytics'))
+
       document.getElementById('seedDecision').onclick = () => run(async () => {
         const now = new Date().toISOString()
         const body = {
@@ -171,6 +222,43 @@ app.get('/ui', (_req, res) => {
         const zonesRaw = document.getElementById('zones').value
         const zones = zonesRaw.split(',').map(s => s.trim()).filter(Boolean)
         return await post('/api/v1/dashboard/what-if/intensities', { zones })
+      })
+
+      document.getElementById('dekesOptimize').onclick = () => run(async () => {
+        const query = String(document.getElementById('dekesQuery').value || '')
+        const estimatedResults = parseInt(String(document.getElementById('dekesEstimated').value || '1000'), 10)
+        const carbonBudget = parseFloat(String(document.getElementById('dekesBudget').value || '200'))
+        const regionsRaw = String(document.getElementById('dekesRegions').value || '')
+        const regions = regionsRaw.split(',').map(s => s.trim()).filter(Boolean)
+
+        const body = {
+          query: { id: `ui-${Date.now()}`, query, estimatedResults },
+          carbonBudget,
+          regions,
+        }
+
+        return await post('/api/v1/dekes/optimize', body)
+      })
+
+      document.getElementById('dekesSchedule').onclick = () => run(async () => {
+        const lookAheadHours = parseFloat(String(document.getElementById('dekesLookAhead').value || '24'))
+        const regionsRaw = String(document.getElementById('dekesScheduleRegions').value || '')
+        const regions = regionsRaw.split(',').map(s => s.trim()).filter(Boolean)
+        const body = {
+          queries: [
+            { id: 'demo-query-1', query: 'Find carbon-efficient plans', estimatedResults: 1000 },
+            { id: 'demo-query-2', query: 'List regions with low CI', estimatedResults: 500 },
+          ],
+          regions,
+          lookAheadHours,
+        }
+        return await post('/api/v1/dekes/schedule', body)
+      })
+
+      document.getElementById('dekesReport').onclick = () => run(async () => {
+        const queryId = String(document.getElementById('dekesReportId').value || '')
+        const actualCO2 = parseFloat(String(document.getElementById('dekesReportCO2').value || '0'))
+        return await post('/api/v1/dekes/report', { queryId, actualCO2 })
       })
     </script>
   </body>
