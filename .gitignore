@@ -1,0 +1,22 @@
+node_modules/
+dist/
+.DS_Store
+.vscode/
+
+# Local env files
+.env
+.env.*
+ecobe-engine/.env
+
+# Engine build artifacts
+/ecobe-engine/dist/
+/ecobe-engine/node_modules/
+
+# Other repos cloned into this workspace (should not be committed here)
+/dekes-saas/
+/ecobe-dashboardclaude/
+/ecobe/
+
+# Windsurf
+.windsurf/
+ecobe-engine/.windsurf/

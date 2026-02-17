@@ -6,6 +6,8 @@ import energyRoutes from './routes/energy'
 import routingRoutes from './routes/routing'
 import dekesRoutes from './routes/dekes'
 import creditsRoutes from './routes/credits'
+import decisionsRoutes from './routes/decisions'
+import dashboardRoutes from './routes/dashboard'
 
 const app = express()
 
@@ -13,7 +15,7 @@ app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 
 // Health check
-app.get('/health', async (req, res) => {
+async function healthHandler(req: express.Request, res: express.Response) {
   try {
     // Check database
     await prisma.$queryRaw`SELECT 1`
@@ -33,13 +35,18 @@ app.get('/health', async (req, res) => {
       error: error instanceof Error ? error.message : 'Unknown error',
     })
   }
-})
+}
+
+app.get('/health', healthHandler)
+app.get('/api/v1/health', healthHandler)
 
 // API routes
 app.use('/api/v1/energy', energyRoutes)
 app.use('/api/v1/route', routingRoutes)
 app.use('/api/v1/dekes', dekesRoutes)
 app.use('/api/v1/credits', creditsRoutes)
+app.use('/api/v1/decisions', decisionsRoutes)
+app.use('/api/v1/dashboard', dashboardRoutes)
 
 // 404 handler
 app.use((req, res) => {

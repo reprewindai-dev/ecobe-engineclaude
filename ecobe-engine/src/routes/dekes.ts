@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { dekesIntegration } from '../lib/dekes-integration'
+import { env } from '../config/env'
 
 const router = Router()
 
@@ -8,6 +9,31 @@ const dekesQuerySchema = z.object({
   id: z.string(),
   query: z.string(),
   estimatedResults: z.number().positive(),
+})
+
+// DEKES integration health (validate-only)
+router.get('/health', async (req, res) => {
+  const configured = Boolean(env.DEKES_API_URL && env.DEKES_API_KEY)
+  const ping = req.query.ping === 'true'
+
+  if (!configured || !ping) {
+    return res.json({
+      configured,
+      hasUrl: Boolean(env.DEKES_API_URL),
+      hasKey: Boolean(env.DEKES_API_KEY),
+    })
+  }
+
+  const ok = await dekesIntegration.ping().catch(() => false)
+
+  return res.json({
+    configured,
+    hasUrl: true,
+    hasKey: true,
+    ping: {
+      ok,
+    },
+  })
 })
 
 const optimizeQuerySchema = z.object({

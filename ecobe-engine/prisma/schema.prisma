@@ -119,6 +119,43 @@ model RoutingDecision {
   @@index([region])
 }
 
+model DashboardRoutingDecision {
+  id        String   @id @default(cuid())
+
+  createdAt DateTime @default(now())
+
+  workloadName String?
+  opName       String?
+
+  baselineRegion String
+  chosenRegion   String
+
+  zoneBaseline String?
+  zoneChosen   String?
+
+  carbonIntensityBaselineGPerKwh Int?
+  carbonIntensityChosenGPerKwh   Int?
+
+  estimatedKwh Float?
+  co2BaselineG Float?
+  co2ChosenG   Float?
+
+  reason String?
+
+  latencyEstimateMs Int?
+  latencyActualMs   Int?
+
+  fallbackUsed        Boolean @default(false)
+  dataFreshnessSeconds Int?
+  requestCount         Int   @default(1)
+
+  meta Json @default("{}")
+
+  @@index([createdAt])
+  @@index([baselineRegion])
+  @@index([chosenRegion])
+}
+
 // ============================================================================
 // CARBON FORECASTING (ML Model)
 // ============================================================================
@@ -144,7 +181,7 @@ model CarbonForecast {
   createdAt DateTime @default(now())
 
   @@index([region, forecastTime])
-  @@index([crecastTime])
+  @@index([forecastTime])
 }
 
 // ============================================================================
@@ -154,60 +191,48 @@ model CarbonForecast {
 model CarbonCredit {
   id        String   @id @default(cuid())
 
-  // Credit details
-  creditType        String   // "OFFSET", "RENEWABLE", "REMOVAL"
-  amount            Float    // Tons CO2eq
+  organizationId String?
 
-  // Source
-  provider          String?
-  certificateId     String?
+  amountCO2      Float
+  provider       String
+  priceUsd       Float
+  certificateUrl String?
 
-  // Usage
-  purchased         Boolean  @default(false)
-  purchasedAt       DateTime?
-  applied           Boolean  @default(false)
-  appliedAt         DateTime?
-
-  // Link to workload
-  workloadRequestId String?
-
-  // Cost
-  costUsd           Float?
-
-  metadata          Json     @default("{}")
+  status     CarbonCreditStatus @default(ACTIVE)
+  purchasedAt DateTime          @default(now())
+  retiredAt   DateTime?
 
   createdAt DateTime @default(now())
 
-  @@index([creditType])
-  @@index([purchased, applied])
+  @@index([organizationId])
+  @@index([status])
+  @@index([purchasedAt])
+}
+
+enum CarbonCreditStatus {
+  ACTIVE
+  RETIRED
 }
 
 model EmissionLog {
   id        String   @id @default(cuid())
 
-  // What
-  source            String   // "WORKLOAD", "INFRASTRUCTURE", "TRAINING"
-  sourceId          String?  // Reference to workload/resource
+  organizationId   String?
+  workloadRequestId String?
 
-  // Where
-  region            String
+  emissionCO2 Float
+  offsetCO2   Float @default(0)
 
-  // Carbon
-  co2Grams          Float
-  energyKwh         Float
-  carbonIntensity   Int      // gCO2eq/kWh at time
+  region    String
+  source    String
+  timestamp DateTime
 
-  // When
-  timestamp         DateTime
-
-  // Tags
-  tags              String[] @default([])
-
-  metadata          Json     @default("{}")
+  metadata  Json     @default("{}")
 
   createdAt DateTime @default(now())
 
-  @@index([source, sourceId])
+  @@index([organizationId])
+  @@index([workloadRequestId])
   @@index([region, timestamp])
   @@index([timestamp])
 }

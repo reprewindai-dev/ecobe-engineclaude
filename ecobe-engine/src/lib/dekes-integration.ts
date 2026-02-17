@@ -19,6 +19,17 @@ export class DekesIntegration {
     this.apiKey = env.DEKES_API_KEY
   }
 
+  async ping(): Promise<boolean> {
+    if (!this.apiKey) return false
+
+    const { data } = await axios.get(`${this.baseUrl}/api/carbon/health`, {
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+      timeout: 5000,
+    })
+
+    return data?.status === 'ok'
+  }
+
   /**
    * Optimize DEKES query execution based on carbon budget
    */
@@ -155,15 +166,18 @@ export class DekesIntegration {
       take: 100,
     })
 
-    const totalCO2 = workloads.reduce((sum, w) => sum + w.actualCO2, 0)
+    const totalCO2 = workloads.reduce<number>((sum, w) => sum + (w.actualCO2 ?? 0), 0)
     const avgCarbonIntensity =
       workloads.length > 0
-        ? workloads.reduce((sum, w) => sum + (w.actualCO2 / ((w.estimatedResults / 1000) * 0.05 || 1)), 0) /
-          workloads.length
+        ? workloads.reduce<number>((sum, w) => {
+            const energy = (w.estimatedResults / 1000) * 0.05
+            const intensity = energy > 0 ? (w.actualCO2 ?? 0) / energy : 0
+            return sum + intensity
+          }, 0) / workloads.length
         : 0
 
     // Calculate CO2 saved vs default high-carbon region (assume 500 gCO2/kWh baseline)
-    const baselineCO2 = workloads.reduce(
+    const baselineCO2 = workloads.reduce<number>(
       (sum, w) => sum + (w.estimatedResults / 1000) * 0.05 * 500,
       0
     )
@@ -175,10 +189,10 @@ export class DekesIntegration {
       averageCarbonIntensity: Math.round(avgCarbonIntensity),
       workloads: workloads.map((w) => ({
         id: w.id,
-        dekesQueryId: w.dekesQueryId,
-        queryString: w.queryString,
-        selectedRegion: w.selectedRegion,
-        actualCO2: w.actualCO2,
+        dekesQueryId: w.dekesQueryId ?? '',
+        queryString: w.queryString ?? '',
+        selectedRegion: w.selectedRegion ?? '',
+        actualCO2: w.actualCO2 ?? 0,
         status: w.status,
         createdAt: w.createdAt,
       })),
