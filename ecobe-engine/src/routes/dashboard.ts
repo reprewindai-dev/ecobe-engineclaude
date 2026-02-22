@@ -133,7 +133,7 @@ router.get('/metrics', async (req, res) => {
 
     const since = new Date(Date.now() - windowHours * 60 * 60 * 1000)
 
-    const decisionsPromise = prisma.dashboardRoutingDecision.findMany<DecisionMetricsRow>({
+    const decisionsPromise = prisma.dashboardRoutingDecision.findMany({
       where: { createdAt: { gte: since } },
       select: {
         createdAt: true,
