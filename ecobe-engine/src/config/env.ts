@@ -19,9 +19,6 @@ const envSchema = z.object({
   FORECAST_REFRESH_ENABLED: z.string().optional(),
   FORECAST_REFRESH_CRON: z.string().default('*/30 * * * *'),
 
-  // DEKES Integration (outbound from ECOBE)
-  DEKES_API_URL: z.string().optional(),
-
   // UI (debug)
   UI_ENABLED: z.string().optional(),
   UI_TOKEN: z.string().optional(),

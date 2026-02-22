@@ -81,8 +81,7 @@ router.post('/schedule', async (req, res) => {
 
     const result = await dekesIntegration.scheduleBatchQueries(
       data.queries,
-      data.regions,
-      data.lookAheadHours
+      data.regions
     )
 
     res.json(result)
