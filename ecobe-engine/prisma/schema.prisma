@@ -36,7 +36,8 @@ model CarbonIntensity {
 
   @@index([region, timestamp])
   @@index([timestamp])
-  @@unique([region, timestamp, source])
+  @@unique([region, timestamp], name: "region_timestamp")
+  @@unique([region, timestamp, source], name: "region_timestamp_source")
 }
 
 // ============================================================================
@@ -183,6 +184,29 @@ model CarbonForecast {
 
   @@index([region, forecastTime])
   @@index([forecastTime])
+  @@unique([region, forecastTime], name: "region_forecastTime")
+}
+
+model ForecastRefresh {
+  id        String   @id @default(cuid())
+
+  region    String
+  refreshedAt DateTime @default(now())
+
+  recordsIngested    Int      @default(0)
+  forecastsGenerated Int      @default(0)
+  status             ForecastRefreshStatus @default(SUCCESS)
+  message            String?
+
+  createdAt DateTime @default(now())
+
+  @@index([region, refreshedAt])
+  @@index([refreshedAt])
+}
+
+enum ForecastRefreshStatus {
+  SUCCESS
+  FAILURE
 }
 
 // ============================================================================
@@ -327,4 +351,22 @@ model DailyMetrics {
   createdAt DateTime @default(now())
 
   @@index([date])
+}
+
+// ============================================================================
+// INTEGRATION HEALTH METRICS
+// ============================================================================
+
+model IntegrationMetric {
+  id             String   @id @default(cuid())
+
+  source         String   @unique
+  successCount   Int      @default(0)
+  failureCount   Int      @default(0)
+  lastSuccessAt  DateTime?
+  lastFailureAt  DateTime?
+  lastError      String?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }

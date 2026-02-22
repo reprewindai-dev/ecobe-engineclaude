@@ -13,7 +13,7 @@ import { prisma } from './db'
 import { electricityMaps } from './electricity-maps'
 import { addHours, subDays } from 'date-fns'
 
-export interface CarbonForecast {
+export interface CarbonForecastResult {
   region: string
   forecastTime: Date
   predictedIntensity: number
@@ -34,7 +34,7 @@ export interface CarbonForecast {
 export async function forecastCarbonIntensity(
   region: string,
   hoursAhead: number = 24
-): Promise<CarbonForecast[]> {
+): Promise<CarbonForecastResult[]> {
   // Get historical data
   const historicalData = await prisma.carbonIntensity.findMany({
     where: {
@@ -49,17 +49,43 @@ export async function forecastCarbonIntensity(
   if (historicalData.length < 24) {
     // Not enough data, use Electricity Maps forecast
     const forecast = await electricityMaps.getForecast(region)
-    return forecast.map((f) => ({
-      region: f.zone,
-      forecastTime: new Date(f.datetime),
-      predictedIntensity: f.carbonIntensity,
-      confidence: 0.7,
-      trend: 'stable' as const,
-    }))
+    const mapped = await Promise.all(
+      forecast.map(async (f) => {
+        const forecastTime = new Date(f.datetime)
+        const predictedIntensity = Math.round(f.carbonIntensity)
+        const result: CarbonForecastResult = {
+          region: f.zone,
+          forecastTime,
+          predictedIntensity,
+          confidence: 0.7,
+          trend: 'stable',
+        }
+        await prisma.carbonForecast.upsert({
+          where: { region_forecastTime: { region: f.zone, forecastTime } },
+          update: {
+            predictedIntensity,
+            confidence: result.confidence,
+            modelVersion: 'electricity-maps',
+            features: { provider: 'electricity-maps' },
+          },
+          create: {
+            region: f.zone,
+            forecastTime,
+            predictedIntensity,
+            confidence: result.confidence,
+            modelVersion: 'electricity-maps',
+            features: { provider: 'electricity-maps' },
+          },
+        }).catch(() => {})
+        return result
+      })
+    )
+
+    return mapped
   }
 
   // Generate forecasts
-  const forecasts: CarbonForecast[] = []
+  const forecasts: CarbonForecastResult[] = []
   const now = new Date()
 
   for (let h = 1; h <= hoursAhead; h++) {
@@ -86,14 +112,14 @@ export async function forecastCarbonIntensity(
       totalWeight += weight
     })
 
-    const predictedIntensity = Math.round(weightedSum / totalWeight)
+    const predictedIntensity = Math.max(1, Math.round(weightedSum / totalWeight))
 
     // Calculate confidence based on data variance
     const variance =
       similarPeriods.reduce((sum, d) => sum + Math.pow(d.carbonIntensity - predictedIntensity, 2), 0) /
       similarPeriods.length
     const stdDev = Math.sqrt(variance)
-    const confidence = Math.max(0.5, Math.min(0.95, 1 - stdDev / predictedIntensity))
+    const confidence = Math.max(0.5, Math.min(0.95, predictedIntensity === 0 ? 0.5 : 1 - stdDev / predictedIntensity))
 
     // Determine trend
     const recentAvg =
@@ -107,17 +133,33 @@ export async function forecastCarbonIntensity(
           ? 'decreasing'
           : 'stable'
 
-    forecasts.push({
+    const result: CarbonForecastResult = {
       region,
       forecastTime,
       predictedIntensity,
       confidence,
       trend,
-    })
+    }
+    forecasts.push(result)
 
     // Store forecast
-    await prisma.carbonForecast.create({
-      data: {
+    await prisma.carbonForecast.upsert({
+      where: {
+        region_forecastTime: {
+          region,
+          forecastTime,
+        },
+      },
+      update: {
+        predictedIntensity,
+        confidence,
+        features: {
+          hour,
+          dayOfWeek,
+          historicalCount: similarPeriods.length,
+        },
+      },
+      create: {
         region,
         forecastTime,
         predictedIntensity,

@@ -2,8 +2,22 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/db'
 import { electricityMaps } from '../lib/electricity-maps'
+import { getIntegrationMetric, computeIntegrationSuccessRate } from '../lib/integration-metrics'
+import { getForecastRefreshSummary, getLastForecastRefreshState } from '../lib/forecast-refresh'
 
 const router = Router()
+
+type DecisionMetricsRow = {
+  createdAt: Date
+  chosenRegion: string | null
+  requestCount: number | null
+  co2BaselineG: number | null
+  co2ChosenG: number | null
+  fallbackUsed: boolean | null
+  latencyEstimateMs: number | null
+  latencyActualMs: number | null
+  dataFreshnessSeconds: number | null
+}
 
 const listDecisionsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(100),
@@ -119,7 +133,7 @@ router.get('/metrics', async (req, res) => {
 
     const since = new Date(Date.now() - windowHours * 60 * 60 * 1000)
 
-    const decisions = await prisma.dashboardRoutingDecision.findMany({
+    const decisionsPromise = prisma.dashboardRoutingDecision.findMany<DecisionMetricsRow>({
       where: { createdAt: { gte: since } },
       select: {
         createdAt: true,
@@ -134,10 +148,34 @@ router.get('/metrics', async (req, res) => {
       },
     })
 
-    const totalDecisions = decisions.length
-    const totalRequests = decisions.reduce<number>((sum, d) => sum + (d.requestCount ?? 0), 0)
+    const topChosenRegionPromise = prisma.dashboardRoutingDecision.groupBy({
+      by: ['chosenRegion'],
+      where: { createdAt: { gte: since } },
+      _count: { chosenRegion: true },
+      orderBy: { _count: { chosenRegion: 'desc' } },
+      take: 1,
+    })
 
-    const co2SavedG = decisions.reduce<number>((sum, d) => {
+    const integrationMetricPromise = getIntegrationMetric('ELECTRICITY_MAPS')
+    const refreshSummaryPromise = getForecastRefreshSummary(windowHours)
+    const refreshStatePromise = getLastForecastRefreshState()
+
+    const [decisions, topChosenRegionAgg, integrationMetric, refreshSummary, refreshState] =
+      await Promise.all([
+        decisionsPromise,
+        topChosenRegionPromise,
+        integrationMetricPromise,
+        refreshSummaryPromise,
+        refreshStatePromise,
+      ])
+
+    const totalDecisions = decisions.length
+    const totalRequests = decisions.reduce<number>(
+      (sum: number, d: DecisionMetricsRow) => sum + (d.requestCount ?? 0),
+      0
+    )
+
+    const co2SavedG = decisions.reduce<number>((sum: number, d: DecisionMetricsRow) => {
       const base = d.co2BaselineG ?? 0
       const chosen = d.co2ChosenG ?? 0
       const delta = base - chosen
@@ -146,7 +184,7 @@ router.get('/metrics', async (req, res) => {
 
     const greenRouteRate =
       totalDecisions > 0
-        ? decisions.reduce<number>((sum, d) => {
+        ? decisions.reduce<number>((sum: number, d: DecisionMetricsRow) => {
             const base = d.co2BaselineG ?? 0
             const chosen = d.co2ChosenG ?? 0
             return sum + (base > chosen ? 1 : 0)
@@ -155,21 +193,17 @@ router.get('/metrics', async (req, res) => {
 
     const fallbackRate =
       totalDecisions > 0
-        ? decisions.reduce<number>((sum, d) => sum + (d.fallbackUsed ? 1 : 0), 0) / totalDecisions
+        ?
+          decisions.reduce<number>(
+            (sum: number, d: DecisionMetricsRow) => sum + (d.fallbackUsed ? 1 : 0),
+            0
+          ) / totalDecisions
         : 0
-
-    const topChosenRegionAgg = await prisma.dashboardRoutingDecision.groupBy({
-      by: ['chosenRegion'],
-      where: { createdAt: { gte: since } },
-      _count: { chosenRegion: true },
-      orderBy: { _count: { chosenRegion: 'desc' } },
-      take: 1,
-    })
 
     const topChosenRegion = topChosenRegionAgg[0]?.chosenRegion ?? null
 
     const deltas = decisions
-      .map((d) => {
+      .map((d: DecisionMetricsRow) => {
         if (d.latencyActualMs === null || d.latencyActualMs === undefined) return null
         if (d.latencyEstimateMs === null || d.latencyEstimateMs === undefined) return null
         return d.latencyActualMs - d.latencyEstimateMs
@@ -179,7 +213,7 @@ router.get('/metrics', async (req, res) => {
 
     const p95LatencyDeltaMs = percentile(deltas, 0.95)
 
-    const dataFreshnessMaxSeconds = decisions.reduce<number | null>((max, d) => {
+    const dataFreshnessMaxSeconds = decisions.reduce<number | null>((max: number | null, d: DecisionMetricsRow) => {
       const v = d.dataFreshnessSeconds
       if (v === null || v === undefined) return max
       if (max === null) return v
@@ -187,6 +221,31 @@ router.get('/metrics', async (req, res) => {
     }, null)
 
     const co2AvoidedPer1kRequestsG = totalRequests > 0 ? (co2SavedG / totalRequests) * 1000 : 0
+
+    const electricityMapsMetric = integrationMetric
+      ? {
+          successRate: computeIntegrationSuccessRate(integrationMetric) ?? null,
+          successCount: integrationMetric.successCount,
+          failureCount: integrationMetric.failureCount,
+          lastSuccessAt: integrationMetric.lastSuccessAt ?? null,
+          lastFailureAt: integrationMetric.lastFailureAt ?? null,
+          lastError: integrationMetric.lastError ?? null,
+        }
+      : null
+
+    const forecastRefresh = {
+      ...refreshSummary,
+      lastRun: refreshState
+        ? {
+            timestamp: refreshState.timestamp,
+            totalRegions: refreshState.totalRegions,
+            totalRecords: refreshState.totalRecords,
+            totalForecasts: refreshState.totalForecasts,
+            status: refreshState.status,
+            message: refreshState.message ?? null,
+          }
+        : null,
+    }
 
     return res.json({
       window,
@@ -200,7 +259,9 @@ router.get('/metrics', async (req, res) => {
       topChosenRegion,
       p95LatencyDeltaMs,
       dataFreshnessMaxSeconds,
-      electricityMapsSuccessRate: null,
+      electricityMapsSuccessRate: electricityMapsMetric?.successRate ?? null,
+      electricityMaps: electricityMapsMetric,
+      forecastRefresh,
     })
   } catch (error: any) {
     if (error instanceof z.ZodError) {
