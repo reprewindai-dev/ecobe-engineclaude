@@ -13,14 +13,14 @@ const dekesQuerySchema = z.object({
 
 // DEKES integration health (validate-only)
 router.get('/health', async (req, res) => {
-  const configured = Boolean(env.DEKES_API_URL && env.DEKES_API_KEY)
+  const configured = Boolean(env.DEKES_API_URL)
   const ping = req.query.ping === 'true'
 
   if (!configured || !ping) {
     return res.json({
       configured,
       hasUrl: Boolean(env.DEKES_API_URL),
-      hasKey: Boolean(env.DEKES_API_KEY),
+      hasKey: false, // ECOBE Engine doesn't need DEKES API key
     })
   }
 
@@ -29,7 +29,7 @@ router.get('/health', async (req, res) => {
   return res.json({
     configured,
     hasUrl: true,
-    hasKey: true,
+    hasKey: false, // ECOBE Engine doesn't need DEKES API key
     ping: {
       ok,
     },

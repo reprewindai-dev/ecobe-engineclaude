@@ -2,7 +2,6 @@ import axios from 'axios'
 import { env } from '../config/env'
 import { prisma } from './db'
 import { routeGreen } from './green-routing'
-import { calculateEnergyEquation } from './energy-equation'
 
 export interface DekesQuery {
   id: string
@@ -16,7 +15,8 @@ export class DekesIntegration {
 
   constructor() {
     this.baseUrl = env.DEKES_API_URL || 'http://localhost:3000'
-    this.apiKey = env.DEKES_API_KEY
+    // ECOBE Engine doesn't need DEKES API key - it's the backend
+    this.apiKey = undefined
   }
 
   async ping(): Promise<boolean> {
@@ -80,8 +80,7 @@ export class DekesIntegration {
    */
   async scheduleBatchQueries(
     queries: DekesQuery[],
-    regions: string[],
-    windowHours: number = 24
+    regions: string[]
   ): Promise<{
     optimalTime: Date
     region: string
