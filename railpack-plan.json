@@ -1,1 +1,0 @@
-{"version": "0.17.2", "build": {"packages": {"node": {"version": "20.20.0"}}, "steps": [{"name": "install", "command": "npm install"}, {"name": "build", "command": "npm run build"}], "deploy": {"command": "npm run start"}}}
