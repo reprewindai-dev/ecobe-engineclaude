@@ -16,6 +16,9 @@ const envSchema = z.object({
   ELECTRICITY_MAPS_BASE_URL: z.string().default('https://api.electricitymap.org'),
   DEFAULT_MAX_CARBON_G_PER_KWH: z.string().default('400'),
 
+  FORECAST_REFRESH_ENABLED: z.string().optional(),
+  FORECAST_REFRESH_CRON: z.string().default('*/30 * * * *'),
+
   // DEKES Integration
   DEKES_API_URL: z.string().optional(),
   DEKES_API_KEY: z.string().optional(),
@@ -23,6 +26,10 @@ const envSchema = z.object({
   // UI (debug)
   UI_ENABLED: z.string().optional(),
   UI_TOKEN: z.string().optional(),
+
+  // External integrations
+  ECOBE_ENGINE_URL: z.string().optional(),
+  ECOBE_ENGINE_API_KEY: z.string().optional(),
 })
 
 const parsed = envSchema.safeParse(process.env)
@@ -41,6 +48,11 @@ export const env = {
     parsed.data.UI_ENABLED !== undefined
       ? parsed.data.UI_ENABLED === 'true'
       : parsed.data.NODE_ENV !== 'production',
+  FORECAST_REFRESH_ENABLED:
+    parsed.data.FORECAST_REFRESH_ENABLED !== undefined
+      ? parsed.data.FORECAST_REFRESH_ENABLED === 'true'
+      : parsed.data.NODE_ENV !== 'test',
+  FORECAST_REFRESH_CRON: parsed.data.FORECAST_REFRESH_CRON,
 }
 
 export type Env = typeof env
