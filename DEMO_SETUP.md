@@ -16,7 +16,7 @@ DATABASE_URL=your_postgres_connection_string
 JWT_SECRET=your_jwt_secret_here
 SESSION_SECRET=your_session_secret_here
 
-# Optional: ECOBE Engine Integration (for full functionality)
+# REQUIRED: ECOBE Engine Integration (for REAL functionality)
 ECOBE_ENGINE_URL=https://your-ecobe-engine-url.railway.app
 ECOBE_ENGINE_API_KEY=your_ecobe_api_key_here
 ```
@@ -40,16 +40,18 @@ DEKES_API_KEY=your_dekes_api_key_here
 When `DEMO_MODE=true`, the system will:
 
 1. **Bypass Authentication** - No login required to use the demo
-2. **Mock ECOBE Responses** - Returns realistic optimization data without needing the ECOBE Engine
-3. **Accept Any Query** - Users can enter any search query they want to test
+2. **Use REAL ECOBE APIs** - Makes actual API calls to the ECOBE Engine for real optimization
+3. **Limit to One Search** - Each demo user can only perform ONE search to prevent abuse
+4. **Accept Any Query** - Users can enter any search query they want to test
 
 ## Testing the Demo
 
 1. Set `DEMO_MODE=true` in your DEKES SaaS Railway environment variables
-2. Deploy/restart the service
-3. Navigate to `/runs/new` 
-4. Enter any search query (e.g., "SaaS companies looking for AI solutions")
-5. Click "Run Intent Scan" to see the optimization results
+2. Ensure `ECOBE_ENGINE_URL` and `ECOBE_ENGINE_API_KEY` are properly configured
+3. Deploy/restart the service
+4. Navigate to `/runs/new` 
+5. Enter any search query (e.g., "SaaS companies looking for AI solutions")
+6. Click "Run Intent Scan" to see REAL optimization results from the ECOBE Engine
 
 ## Production Mode
 
@@ -57,3 +59,10 @@ For production, set `DEMO_MODE=false` or remove it entirely. The system will the
 - Valid authentication (JWT tokens)
 - Real ECOBE Engine URL and API key
 - Proper database setup with users and organizations
+
+## Important Notes
+
+- The demo uses REAL API calls and REAL data - no mock responses
+- Each demo session is limited to ONE search per organization
+- The ECOBE Engine must be deployed and accessible for the demo to work
+- This showcases the actual lead generation functionality, not a simulation
