@@ -104,7 +104,12 @@ export async function calculateEnergyEquation(
           timestamp: new Date(),
           source: 'ELECTRICITY_MAPS',
         },
-      }).catch(() => {}) // Ignore duplicates
+      }).catch((err: any) => {
+        if (err?.code !== 'P2002') {
+          console.error('[energy-equation] carbonIntensity DB write failed:', err?.message ?? err)
+        }
+        // P2002 = unique constraint violation (duplicate) — safe to ignore
+      })
 
       return {
         region,

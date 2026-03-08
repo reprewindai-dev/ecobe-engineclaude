@@ -6,9 +6,6 @@ const router = Router()
 
 const decisionSchema = z
   .object({
-    ts: z.string().datetime().optional(),
-    createdAt: z.string().datetime().optional(),
-
     workspace_id: z.string().optional(),
     operation: z.string().optional(),
 
@@ -105,12 +102,8 @@ router.post('/', async (req, res) => {
     const fallbackUsed = value.fallbackUsed ?? value.fallback ?? false
     const dataFreshnessSeconds = value.dataFreshnessSeconds ?? value.data_freshness_seconds ?? null
 
-    const createdAtStr = value.ts ?? value.createdAt
-    const createdAt = createdAtStr ? new Date(createdAtStr) : undefined
-
     const created = await prisma.dashboardRoutingDecision.create({
       data: {
-        createdAt,
         workloadName,
         opName,
         baselineRegion,

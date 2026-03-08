@@ -4,8 +4,14 @@ import { prisma } from '../lib/db'
 
 const router = Router()
 
+const orgIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[a-zA-Z0-9_-]+$/, 'organizationId must contain only alphanumeric characters, hyphens, or underscores')
+
 const purchaseCreditSchema = z.object({
-  organizationId: z.string().optional(),
+  organizationId: orgIdSchema.optional(),
   amountCO2: z.number().positive(),
   provider: z.string(),
   priceUsd: z.number().positive(),
@@ -14,7 +20,7 @@ const purchaseCreditSchema = z.object({
 
 const retireCreditSchema = z.object({
   creditIds: z.array(z.string()).min(1),
-  organizationId: z.string().optional(),
+  organizationId: orgIdSchema.optional(),
   reason: z.string().optional(),
   workloadRequestId: z.string().optional(),
 })
@@ -51,50 +57,59 @@ router.post('/retire', async (req, res) => {
   try {
     const data = retireCreditSchema.parse(req.body)
 
-    // Update credits to retired status
-    const updated = await prisma.carbonCredit.updateMany({
-      where: {
-        id: { in: data.creditIds },
-        status: 'ACTIVE',
-      },
-      data: {
-        status: 'RETIRED',
-        retiredAt: new Date(),
-      },
-    })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await prisma.$transaction(async (tx: any) => {
+      // Update credits to retired status
+      const updated = await tx.carbonCredit.updateMany({
+        where: {
+          id: { in: data.creditIds },
+          status: 'ACTIVE',
+        },
+        data: {
+          status: 'RETIRED',
+          retiredAt: new Date(),
+        },
+      })
 
-    if (updated.count === 0) {
-      return res.status(404).json({ error: 'No active credits found with provided IDs' })
-    }
+      if (updated.count === 0) {
+        throw Object.assign(new Error('No active credits found with provided IDs'), { statusCode: 404 })
+      }
 
-    // Log emission offset
-    const credits = await prisma.carbonCredit.findMany({
-      where: { id: { in: data.creditIds } },
-    })
+      // Fetch within the same transaction to get accurate amounts
+      const credits = await tx.carbonCredit.findMany({
+        where: { id: { in: data.creditIds } },
+        select: { amountCO2: true },
+      })
 
-    const totalOffsetCO2 = credits.reduce<number>((sum, c) => sum + c.amountCO2, 0)
+      const totalOffsetCO2 = (credits as Array<{ amountCO2: number }>).reduce((sum, c) => sum + c.amountCO2, 0)
 
-    await prisma.emissionLog.create({
-      data: {
-        organizationId: data.organizationId,
-        workloadRequestId: data.workloadRequestId,
-        emissionCO2: -totalOffsetCO2, // Negative for offset
-        offsetCO2: totalOffsetCO2,
-        region: 'OFFSET',
-        source: 'CARBON_CREDIT',
-        timestamp: new Date(),
-      },
+      await tx.emissionLog.create({
+        data: {
+          organizationId: data.organizationId,
+          workloadRequestId: data.workloadRequestId,
+          emissionCO2: -totalOffsetCO2, // Negative for offset
+          offsetCO2: totalOffsetCO2,
+          region: 'OFFSET',
+          source: 'CARBON_CREDIT',
+          timestamp: new Date(),
+        },
+      })
+
+      return { creditsRetired: updated.count, totalOffsetCO2 }
     })
 
     res.json({
       success: true,
-      creditsRetired: updated.count,
-      totalOffsetCO2,
+      creditsRetired: result.creditsRetired,
+      totalOffsetCO2: result.totalOffsetCO2,
       message: 'Credits retired successfully',
     })
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid request', details: error.errors })
+    }
+    if (error?.statusCode === 404) {
+      return res.status(404).json({ error: error.message })
     }
     console.error('Retire credit error:', error)
     res.status(500).json({ error: 'Internal server error' })
@@ -106,7 +121,19 @@ router.get('/', async (req, res) => {
   try {
     const { organizationId, status, provider } = req.query
 
-    const where: any = {}
+    // Validate organizationId format if provided
+    if (organizationId !== undefined) {
+      const parsed = orgIdSchema.safeParse(organizationId)
+      if (!parsed.success) {
+        return res.status(400).json({ error: 'Invalid organizationId', details: parsed.error.errors })
+      }
+    }
+
+    const where: {
+      organizationId?: string
+      status?: string
+      provider?: string
+    } = {}
 
     if (organizationId) {
       where.organizationId = organizationId as string
@@ -152,6 +179,10 @@ router.get('/', async (req, res) => {
 // Get carbon balance for organization
 router.get('/balance/:organizationId', async (req, res) => {
   try {
+    const parsed = orgIdSchema.safeParse(req.params.organizationId)
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid organizationId', details: parsed.error.errors })
+    }
     const { organizationId } = req.params
 
     // Get active credits
@@ -200,13 +231,13 @@ router.get('/balance/:organizationId', async (req, res) => {
 // Auto-retire credits to offset emissions
 router.post('/auto-offset', async (req, res) => {
   try {
-    const { organizationId, targetOffsetPercentage = 100 } = req.body
+    const bodySchema = z.object({
+      organizationId: orgIdSchema,
+      targetOffsetPercentage: z.number().min(0).max(100).default(100),
+    })
+    const { organizationId, targetOffsetPercentage } = bodySchema.parse(req.body)
 
-    if (!organizationId) {
-      return res.status(400).json({ error: 'organizationId is required' })
-    }
-
-    // Calculate emissions needing offset
+    // Calculate emissions needing offset (read phase — outside transaction)
     const emissions = await prisma.emissionLog.findMany({
       where: { organizationId },
     })
@@ -226,7 +257,7 @@ router.post('/auto-offset', async (req, res) => {
       return res.json({
         success: true,
         message: 'Already at or above target offset percentage',
-        currentOffsetPercentage: (totalOffset / totalEmissions) * 100,
+        currentOffsetPercentage: totalEmissions > 0 ? (totalOffset / totalEmissions) * 100 : 0,
       })
     }
 
@@ -250,7 +281,7 @@ router.post('/auto-offset', async (req, res) => {
       })
     }
 
-    // Retire credits until offset target met
+    // Select credits to retire
     let offsetAccumulated = 0
     const creditsToRetire: string[] = []
 
@@ -260,35 +291,40 @@ router.post('/auto-offset', async (req, res) => {
       offsetAccumulated += credit.amountCO2
     }
 
-    // Retire selected credits
-    await prisma.carbonCredit.updateMany({
-      where: { id: { in: creditsToRetire } },
-      data: {
-        status: 'RETIRED',
-        retiredAt: new Date(),
-      },
-    })
+    // Atomically retire selected credits and log the offset
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await prisma.$transaction(async (tx: any) => {
+      await tx.carbonCredit.updateMany({
+        where: { id: { in: creditsToRetire }, status: 'ACTIVE' },
+        data: {
+          status: 'RETIRED',
+          retiredAt: new Date(),
+        },
+      })
 
-    // Log offset
-    await prisma.emissionLog.create({
-      data: {
-        organizationId,
-        emissionCO2: -offsetAccumulated,
-        offsetCO2: offsetAccumulated,
-        region: 'OFFSET',
-        source: 'AUTO_OFFSET',
-        timestamp: new Date(),
-      },
+      await tx.emissionLog.create({
+        data: {
+          organizationId,
+          emissionCO2: -offsetAccumulated,
+          offsetCO2: offsetAccumulated,
+          region: 'OFFSET',
+          source: 'AUTO_OFFSET',
+          timestamp: new Date(),
+        },
+      })
     })
 
     res.json({
       success: true,
       creditsRetired: creditsToRetire.length,
       totalOffsetCO2: offsetAccumulated,
-      newOffsetPercentage: ((totalOffset + offsetAccumulated) / totalEmissions) * 100,
+      newOffsetPercentage: totalEmissions > 0 ? ((totalOffset + offsetAccumulated) / totalEmissions) * 100 : 0,
       message: 'Credits auto-retired successfully',
     })
-  } catch (error) {
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Invalid request', details: error.errors })
+    }
     console.error('Auto-offset error:', error)
     res.status(500).json({ error: 'Internal server error' })
   }

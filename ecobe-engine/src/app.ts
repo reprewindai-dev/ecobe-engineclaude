@@ -1,6 +1,7 @@
 import express from 'express'
 
 import { env } from './config/env'
+import { requireApiKey } from './middleware/auth'
 import { prisma } from './lib/db'
 import { redis } from './lib/redis'
 import energyRoutes from './routes/energy'
@@ -250,6 +251,7 @@ function attachUiRoute(app: express.Express) {
 }
 
 function attachApiRoutes(app: express.Express) {
+  app.use('/api/v1', requireApiKey)
   app.use('/api/v1/energy', energyRoutes)
   app.use('/api/v1/route', routingRoutes)
   app.use('/api/v1/credits', creditsRoutes)

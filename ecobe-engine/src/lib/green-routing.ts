@@ -64,7 +64,12 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
             timestamp: new Date(),
             source: 'ELECTRICITY_MAPS',
           },
-        }).catch(() => {}) // Ignore duplicates
+        }).catch((err: any) => {
+          if (err?.code !== 'P2002') {
+            console.error('[green-routing] carbonIntensity DB write failed:', err?.message ?? err)
+          }
+          // P2002 = unique constraint violation (duplicate) — safe to ignore
+        })
       }
 
       return {
