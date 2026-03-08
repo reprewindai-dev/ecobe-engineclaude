@@ -1,6 +1,9 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/db'
+import { writeAuditLog } from '../lib/governance/audit'
+import { checkOrgPolicy } from '../lib/governance/risk'
+import { detectAnomaly } from '../lib/governance/watchtower'
 
 const router = Router()
 
@@ -102,7 +105,30 @@ router.post('/', async (req, res) => {
     const fallbackUsed = value.fallbackUsed ?? value.fallback ?? false
     const dataFreshnessSeconds = value.dataFreshnessSeconds ?? value.data_freshness_seconds ?? null
 
-    const created = await prisma.dashboardRoutingDecision.create({
+    const organizationId = req.headers['x-organization-id'] as string | undefined
+
+    // Enforce org carbon policy before writing
+    const policyCheck = await checkOrgPolicy({
+      organizationId,
+      carbonIntensityChosenGPerKwh: carbonIntensityChosenGPerKwh ?? undefined,
+      carbonIntensityBaselineGPerKwh: carbonIntensityBaselineGPerKwh ?? undefined,
+    })
+
+    if (!policyCheck.allowed) {
+      void writeAuditLog({
+        organizationId,
+        actorType: 'API_KEY',
+        action: 'DECISION_CREATED',
+        entityType: 'DashboardRoutingDecision',
+        entityId: 'blocked',
+        payload: { baselineRegion, chosenRegion, carbonIntensityChosenGPerKwh, reason: policyCheck.reason },
+        result: 'BLOCKED',
+        riskTier: policyCheck.tier,
+      })
+      return res.status(403).json({ error: 'Policy violation', reason: policyCheck.reason })
+    }
+
+    const created = await (prisma as any).dashboardRoutingDecision.create({
       data: {
         workloadName,
         opName,
@@ -123,7 +149,41 @@ router.post('/', async (req, res) => {
         requestCount,
         meta: (value.meta ?? {}) as any,
       },
-      select: { id: true },
+      select: {
+        id: true,
+        baselineRegion: true,
+        chosenRegion: true,
+        carbonIntensityChosenGPerKwh: true,
+        co2BaselineG: true,
+        co2ChosenG: true,
+      },
+    })
+
+    const carbonSavedG = (created.co2BaselineG ?? 0) - (created.co2ChosenG ?? 0)
+
+    // Non-blocking: write audit log and run anomaly detection
+    void writeAuditLog({
+      organizationId,
+      actorType: 'API_KEY',
+      action: 'DECISION_CREATED',
+      entityType: 'DashboardRoutingDecision',
+      entityId: created.id,
+      payload: {
+        baselineRegion: created.baselineRegion,
+        chosenRegion: created.chosenRegion,
+        co2BaselineG: created.co2BaselineG,
+        co2ChosenG: created.co2ChosenG,
+      },
+      result: 'SUCCESS',
+      carbonSavedG,
+      riskTier: policyCheck.tier,
+    })
+
+    void detectAnomaly({
+      organizationId,
+      carbonIntensityChosenGPerKwh: created.carbonIntensityChosenGPerKwh ?? 0,
+      entityId: created.id,
+      entityType: 'DashboardRoutingDecision',
     })
 
     return res.status(201).json({ ok: true, id: created.id })

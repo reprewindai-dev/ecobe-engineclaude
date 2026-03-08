@@ -12,8 +12,14 @@ import dashboardRoutes from './routes/dashboard'
 import forecastingRoutes from './routes/forecasting'
 import dekesRoutes from './routes/dekes'
 import ciRoutes from './routes/ci'
+import governanceRoutes from './routes/governance'
+import { attachOrgContext } from './middleware/governance'
 
 function attachHealthRoutes(app: express.Express) {
+  // Health routes are intentionally PUBLIC — no auth required.
+  // Load balancers, uptime monitors, and orchestrators must reach these without credentials.
+  // IMPORTANT: these must be registered BEFORE attachApiRoutes() so Express fires them
+  // before the requireApiKey middleware is mounted on /api/v1.
   async function healthHandler(req: express.Request, res: express.Response) {
     try {
       await prisma.$queryRaw`SELECT 1`
@@ -141,11 +147,18 @@ function attachUiRoute(app: express.Express) {
       const base = window.location.origin
       document.getElementById('base').textContent = base
 
+      // Server-injected API key — safe because this page is already protected by UI_TOKEN.
+      const __apiKey = '${env.ECOBE_ENGINE_API_KEY ?? ''}'
+
       const out = document.getElementById('out')
       function show(v) { out.textContent = typeof v === 'string' ? v : JSON.stringify(v, null, 2) }
 
+      function authHeaders(extra) {
+        return __apiKey ? { 'Authorization': 'Bearer ' + __apiKey, ...extra } : { ...extra }
+      }
+
       async function get(path) {
-        const r = await fetch(path)
+        const r = await fetch(path, { headers: authHeaders({}) })
         const t = await r.text()
         let data
         try { data = JSON.parse(t) } catch { data = t }
@@ -153,7 +166,7 @@ function attachUiRoute(app: express.Express) {
       }
 
       async function post(path, body) {
-        const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+        const r = await fetch(path, { method: 'POST', headers: authHeaders({ 'content-type': 'application/json' }), body: JSON.stringify(body) })
         const t = await r.text()
         let data
         try { data = JSON.parse(t) } catch { data = t }
@@ -252,6 +265,7 @@ function attachUiRoute(app: express.Express) {
 
 function attachApiRoutes(app: express.Express) {
   app.use('/api/v1', requireApiKey)
+  app.use('/api/v1', attachOrgContext)
   app.use('/api/v1/energy', energyRoutes)
   app.use('/api/v1/route', routingRoutes)
   app.use('/api/v1/credits', creditsRoutes)
@@ -260,6 +274,7 @@ function attachApiRoutes(app: express.Express) {
   app.use('/api/v1/forecasting', forecastingRoutes)
   app.use('/api/v1/dekes', dekesRoutes)
   app.use('/api/v1/ci', ciRoutes)
+  app.use('/api/v1/governance', governanceRoutes)
 }
 
 function attachFallbackHandlers(app: express.Express) {

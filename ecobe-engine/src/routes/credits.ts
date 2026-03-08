@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/db'
+import { writeAuditLog } from '../lib/governance/audit'
 
 const router = Router()
 
@@ -42,6 +43,16 @@ router.post('/purchase', async (req, res) => {
       },
     })
 
+    void writeAuditLog({
+      organizationId: data.organizationId,
+      actorType: 'API_KEY',
+      action: 'CREDIT_PURCHASED',
+      entityType: 'CarbonCredit',
+      entityId: credit.id,
+      payload: { amountCO2: data.amountCO2, provider: data.provider, priceUsd: data.priceUsd },
+      result: 'SUCCESS',
+    })
+
     res.json(credit)
   } catch (error: any) {
     if (error instanceof z.ZodError) {
@@ -59,35 +70,39 @@ router.post('/retire', async (req, res) => {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await prisma.$transaction(async (tx: any) => {
-      // Update credits to retired status
-      const updated = await tx.carbonCredit.updateMany({
+      // 1. Read BEFORE writing — scope to org and active status only.
+      //    This is the authoritative list of what we will retire.
+      const creditsToRetire = await tx.carbonCredit.findMany({
         where: {
           id: { in: data.creditIds },
           status: 'ACTIVE',
+          ...(data.organizationId ? { organizationId: data.organizationId } : {}),
         },
-        data: {
-          status: 'RETIRED',
-          retiredAt: new Date(),
-        },
+        select: { id: true, amountCO2: true },
       })
 
-      if (updated.count === 0) {
+      if (creditsToRetire.length === 0) {
         throw Object.assign(new Error('No active credits found with provided IDs'), { statusCode: 404 })
       }
 
-      // Fetch within the same transaction to get accurate amounts
-      const credits = await tx.carbonCredit.findMany({
-        where: { id: { in: data.creditIds } },
-        select: { amountCO2: true },
+      const retirableIds = (creditsToRetire as Array<{ id: string; amountCO2: number }>).map((c) => c.id)
+      const totalOffsetCO2 = (creditsToRetire as Array<{ id: string; amountCO2: number }>).reduce(
+        (sum, c) => sum + c.amountCO2,
+        0
+      )
+
+      // 2. Retire exactly the credits we just read — no phantom-read risk
+      await tx.carbonCredit.updateMany({
+        where: { id: { in: retirableIds }, status: 'ACTIVE' },
+        data: { status: 'RETIRED', retiredAt: new Date() },
       })
 
-      const totalOffsetCO2 = (credits as Array<{ amountCO2: number }>).reduce((sum, c) => sum + c.amountCO2, 0)
-
+      // 3. Log the offset using the sum we computed from the read — not from a post-write fetch
       await tx.emissionLog.create({
         data: {
           organizationId: data.organizationId,
           workloadRequestId: data.workloadRequestId,
-          emissionCO2: -totalOffsetCO2, // Negative for offset
+          emissionCO2: -totalOffsetCO2,
           offsetCO2: totalOffsetCO2,
           region: 'OFFSET',
           source: 'CARBON_CREDIT',
@@ -95,7 +110,18 @@ router.post('/retire', async (req, res) => {
         },
       })
 
-      return { creditsRetired: updated.count, totalOffsetCO2 }
+      return { creditsRetired: creditsToRetire.length, totalOffsetCO2 }
+    })
+
+    void writeAuditLog({
+      organizationId: data.organizationId,
+      actorType: 'API_KEY',
+      action: 'CREDIT_RETIRED',
+      entityType: 'CarbonCredit',
+      entityId: data.creditIds.join(','),
+      payload: { creditIds: data.creditIds, totalOffsetCO2: result.totalOffsetCO2, creditsRetired: result.creditsRetired },
+      result: 'SUCCESS',
+      carbonSavedG: result.totalOffsetCO2,
     })
 
     res.json({
@@ -129,11 +155,7 @@ router.get('/', async (req, res) => {
       }
     }
 
-    const where: {
-      organizationId?: string
-      status?: string
-      provider?: string
-    } = {}
+    const where: Record<string, unknown> = {}
 
     if (organizationId) {
       where.organizationId = organizationId as string
@@ -147,27 +169,29 @@ router.get('/', async (req, res) => {
       where.provider = provider as string
     }
 
-    const credits = await prisma.carbonCredit.findMany({
+    const credits = await (prisma as any).carbonCredit.findMany({
       where,
       orderBy: { purchasedAt: 'desc' },
       take: 100,
     })
 
-    const totalActive = credits
+    const creditList = credits as Array<{ status: string; amountCO2: number; priceUsd: number }>
+
+    const totalActive = creditList
       .filter((c) => c.status === 'ACTIVE')
       .reduce<number>((sum, c) => sum + c.amountCO2, 0)
 
-    const totalRetired = credits
+    const totalRetired = creditList
       .filter((c) => c.status === 'RETIRED')
       .reduce<number>((sum, c) => sum + c.amountCO2, 0)
 
     res.json({
       credits,
       summary: {
-        totalCredits: credits.length,
+        totalCredits: creditList.length,
         totalActiveCO2: totalActive,
         totalRetiredCO2: totalRetired,
-        totalPurchased: credits.reduce<number>((sum, c) => sum + c.priceUsd, 0),
+        totalPurchased: creditList.reduce<number>((sum, c) => sum + c.priceUsd, 0),
       },
     })
   } catch (error) {
@@ -312,6 +336,17 @@ router.post('/auto-offset', async (req, res) => {
           timestamp: new Date(),
         },
       })
+    })
+
+    void writeAuditLog({
+      organizationId,
+      actorType: 'API_KEY',
+      action: 'CREDIT_AUTO_OFFSET',
+      entityType: 'CarbonCredit',
+      entityId: creditsToRetire.join(','),
+      payload: { creditsRetired: creditsToRetire.length, totalOffsetCO2: offsetAccumulated, targetOffsetPercentage },
+      result: 'SUCCESS',
+      carbonSavedG: offsetAccumulated,
     })
 
     res.json({

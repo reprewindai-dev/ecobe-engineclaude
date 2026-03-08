@@ -52,12 +52,13 @@ export class ElectricityMapsClient {
         headers: { 'auth-token': this.apiKey },
       })
 
+      const data = response.data as any
       const result = {
-        zone: response.data.zone,
-        carbonIntensity: response.data.carbonIntensity,
-        datetime: response.data.datetime,
-        fossilFuelPercentage: response.data.fossilFuelPercentage,
-        renewablePercentage: response.data.renewablePercentage,
+        zone: data.zone,
+        carbonIntensity: data.carbonIntensity,
+        datetime: data.datetime,
+        fossilFuelPercentage: data.fossilFuelPercentage,
+        renewablePercentage: data.renewablePercentage,
       }
       await this.logSuccess()
       return result
@@ -88,7 +89,7 @@ export class ElectricityMapsClient {
         headers: { 'auth-token': this.apiKey },
       })
 
-      const history = response.data.history.map((item: any) => ({
+      const history = (response.data as any).history.map((item: any) => ({
         zone: item.zone,
         carbonIntensity: item.carbonIntensity,
         datetime: item.datetime,
@@ -116,7 +117,7 @@ export class ElectricityMapsClient {
         headers: { 'auth-token': this.apiKey },
       })
 
-      const forecast = response.data.forecast.map((item: any) => ({
+      const forecast = (response.data as any).forecast.map((item: any) => ({
         zone: item.zone,
         carbonIntensity: item.carbonIntensity,
         datetime: item.datetime,

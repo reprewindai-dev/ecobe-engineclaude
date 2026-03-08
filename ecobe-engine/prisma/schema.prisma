@@ -4,8 +4,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
-  directUrl = env("DATABASE_URL")
 }
 
 // ============================================================================
@@ -369,4 +367,98 @@ model IntegrationMetric {
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+// ============================================================================
+// GOVERNANCE LAYER
+// ============================================================================
+
+// Tamper-evident audit log — every write is chained via SHA256
+model GovernanceAuditLog {
+  id             String   @id @default(cuid())
+  sequence       Int      // monotonically increasing
+
+  organizationId String?
+  actorId        String?  // SHA256 of API key — raw key never stored
+  actorType      String   // "API_KEY" | "SYSTEM" | "CRON"
+
+  action         String   // "DECISION_CREATED" | "CREDIT_RETIRED" | "CREDIT_PURCHASED" | "CREDIT_AUTO_OFFSET" | "POLICY_UPDATED" | "ANOMALY_DETECTED" | "CHAIN_VERIFIED"
+  entityType     String   // "DashboardRoutingDecision" | "CarbonCredit" | "EmissionLog" | "OrganizationPolicy"
+  entityId       String
+
+  payload        Json     // snapshot of the entity at event time
+  result         String   // "SUCCESS" | "FAILURE" | "BLOCKED"
+
+  // Tamper-evident chain
+  chainHash      String   // SHA256(previousHash|sequence|entityId|action|JSON(payload)|createdAt.toISOString())
+  previousHash   String?  // null only for genesis record
+
+  // Governance context
+  carbonSavedG   Float?
+  riskTier       String?
+  policyVersion  String   @default("1.0")
+
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([entityType, entityId])
+  @@index([action, createdAt])
+  @@index([sequence])
+  @@index([chainHash])
+}
+
+// Per-organization governance policy — carbon ceilings, routing requirements, anomaly thresholds
+model OrganizationPolicy {
+  id             String   @id @default(cuid())
+  organizationId String   @unique
+
+  tier           String   @default("STANDARD") // "BASIC" | "STANDARD" | "PREMIUM" | "INVESTOR_GRADE"
+
+  // Carbon policy
+  maxCarbonGPerKwh      Int?
+  requireGreenRouting   Boolean @default(false)
+  autoOffsetEnabled     Boolean @default(false)
+  autoOffsetThresholdG  Float?
+
+  // Audit settings
+  auditRetentionDays    Int     @default(365)
+  requireChainVerify    Boolean @default(false)
+
+  // Anomaly detection
+  anomalyDetectionEnabled Boolean @default(true)
+  anomalyThresholdSigma   Float   @default(2.0)
+
+  policyVersion  String   @default("1.0")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+// Point-in-time investor summary snapshot
+model GovernanceSnapshot {
+  id             String   @id @default(cuid())
+  organizationId String?
+
+  snapshotType   String   // "DAILY_SUMMARY" | "COMPLIANCE_REPORT" | "INVESTOR_BRIEF"
+  windowStart    DateTime
+  windowEnd      DateTime
+
+  totalDecisions      Int   @default(0)
+  greenRoutedCount    Int   @default(0)
+  totalCO2SavedG      Float @default(0)
+  totalCO2EmittedG    Float @default(0)
+  totalCreditsActive  Float @default(0)
+  totalCreditsRetired Float @default(0)
+  offsetPercentage    Float @default(0)
+
+  chainIntact      Boolean  @default(true)
+  chainVerifiedAt  DateTime?
+  auditLogCount    Int      @default(0)
+
+  complianceScore  Float    @default(0)  // 0.0–1.0
+
+  payload          Json     @default("{}")
+  createdAt        DateTime @default(now())
+
+  @@index([organizationId, snapshotType, windowStart])
+  @@index([snapshotType, createdAt])
 }

@@ -50,7 +50,7 @@ export interface DekesScheduleEntry {
 export interface DekesAnalytics {
   totalWorkloads: number
   totalCO2SavedG: number
-  avgCarbonIntensity: number | null
+  avgActualCO2G: number | null   // average actualCO2 (grams) per completed workload — NOT carbon intensity (gCO2/kWh)
   completedWorkloads: number
   pendingWorkloads: number
   recentWorkloads: Array<{
@@ -226,7 +226,7 @@ export async function getDekesAnalytics(): Promise<DekesAnalytics> {
     completedWorkloads: completedCount,
     pendingWorkloads: pendingCount,
     totalCO2SavedG,
-    avgCarbonIntensity: co2Agg._avg.actualCO2 ?? null,
+    avgActualCO2G: co2Agg._avg.actualCO2 ?? null,
     recentWorkloads: recent,
   }
 }

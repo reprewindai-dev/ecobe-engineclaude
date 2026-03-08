@@ -200,7 +200,7 @@ router.get('/metrics', async (req, res) => {
           ) / totalDecisions
         : 0
 
-    const topChosenRegion = topChosenRegionAgg[0]?.chosenRegion ?? null
+    const topChosenRegion = (topChosenRegionAgg[0] as any)?.chosenRegion ?? null
 
     const deltas = decisions
       .map((d: DecisionMetricsRow) => {
