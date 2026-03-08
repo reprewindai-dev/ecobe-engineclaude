@@ -25,7 +25,7 @@
 
 import { addMinutes } from 'date-fns'
 import { prisma } from './db'
-import { getForecastSignals, getBestCarbonSignal } from './carbon/provider-router'
+import { getForecastSignals } from './carbon/provider-router'
 import { CarbonSignal } from './carbon/types'
 
 // ─── Public types ─────────────────────────────────────────────────────────────
@@ -159,8 +159,16 @@ export async function assembleDecisionFrame(req: DecisionRequest): Promise<Decis
     const latencyMs = req.latencyMsByRegion?.[region] ?? 100
 
     if (signals.length === 0) {
-      // No fresh forecast — fall back to most recent historical reading
+      // No forecast signals available — fall back to most recent historical reading.
+      // This is always logged explicitly so silent failures are impossible to miss.
       const fallbackIntensity = historical?.carbonIntensity ?? 400
+      const fallbackSource = historical
+        ? `DB historical (timestamp=${historical.timestamp.toISOString()}, resolution=${historical.resolutionMinutes}min)`
+        : 'hardcoded-default (400 gCO2/kWh — no historical data found)'
+      console.warn(
+        `[dda] FORECAST_FALLBACK region=${region} target=${req.targetTime.toISOString()} ` +
+        `intensity=${fallbackIntensity} source=${fallbackSource}`
+      )
       return {
         region,
         targetCarbonIntensity: fallbackIntensity,

@@ -6,10 +6,11 @@
  * queries for optimal time windows.
  */
 
-import { addHours } from 'date-fns'
+import { addHours, addMinutes } from 'date-fns'
 import { prisma } from './db'
 import { routeGreen } from './green-routing'
-import { assembleDecisionFrame, selectBestRegion } from './decision-data-assembler'
+import { getForecastSignals } from './carbon/provider-router'
+import { CarbonSignal } from './carbon/types'
 
 // kWh consumed per 1 000 result records — conservative estimate for web scraping/API queries
 const KWH_PER_1K_RESULTS = 0.0001
@@ -126,64 +127,88 @@ export async function optimizeQuery(
 /**
  * Schedule a batch of DEKES queries, distributing each to the lowest-carbon
  * window within the look-ahead period.
+ *
+ * Performance model (bounded, single-pass):
+ *   1. Fetch forecast signals for ALL regions for the FULL window — ONE API call per region.
+ *   2. Fetch recent historical readings — ONE DB query covering all regions.
+ *   3. Scan up to 48 hourly slots entirely in-memory — zero additional I/O.
+ *
+ * This replaces the previous implementation which called assembleDecisionFrame
+ * 48+ times sequentially, causing 48 DB queries and 48×N API calls.
  */
 export async function scheduleBatchQueries(
   queries: DekesQuery[],
   regions: string[],
   lookAheadHours: number = 24
 ): Promise<DekesScheduleEntry[]> {
-  // Find best routing region first (one routing call covers all regions)
-  const routingResult = await routeGreen({
-    preferredRegions: regions,
-    carbonWeight: 0.8,
-    latencyWeight: 0.1,
-    costWeight: 0.1,
-  })
-
-  // Use DecisionDataAssembler to find the lowest-carbon window within the
-  // look-ahead period. We scan hourly slots and pick the one whose
-  // forecast window avg is lowest — this is query-time alignment: all
-  // signals are aligned to the candidate targetTime, not ingestion time.
   const now = new Date()
-  const lookAheadMs = lookAheadHours * 60 * 60 * 1000
-  const slotCount = Math.min(lookAheadHours, 48) // cap scan at 48 slots
+  const slotCount = Math.min(lookAheadHours, 48) // hard cap at 48 slots
+  const windowEnd = addHours(now, slotCount + 1)
 
-  let bestSlotTime: Date = addHours(now, 1)
-  let bestSlotIntensity = Infinity
-  let bestSlotConfidence = 0.5
-  let bestFrameId = ''
-  let bestRegion = routingResult.selectedRegion
-
-  // Scan hourly slots — lazy planning means each assembleDecisionFrame call
-  // only fetches the columns + time-range it needs.
-  for (let h = 1; h <= slotCount; h++) {
-    const slotTime = addHours(now, h)
-    if (slotTime.getTime() - now.getTime() > lookAheadMs) break
-
-    const frame = await assembleDecisionFrame({
-      regions,
-      targetTime: slotTime,
-      durationMinutes: 60,
+  // ── 1. Fetch all forecast signals for all regions in one pass ─────────────
+  // Each region makes ONE provider call that returns the full forecast window.
+  // The slot scan below filters this in-memory — no additional API calls.
+  const allSignalsByRegion = new Map<string, CarbonSignal[]>()
+  await Promise.all(
+    regions.map(async (region) => {
+      const signals = await getForecastSignals(region, addHours(now, 1), windowEnd)
+      allSignalsByRegion.set(region, signals)
+      if (signals.length === 0) {
+        console.warn(`[dekes] No forecast signals for region ${region} — will use historical fallback`)
+      }
     })
+  )
 
-    const best = selectBestRegion(frame, { carbonWeight: 0.8, latencyWeight: 0.2 })
-    if (best.windowAvgIntensity < bestSlotIntensity) {
-      bestSlotIntensity = best.windowAvgIntensity
-      bestSlotTime = slotTime
-      bestSlotConfidence = best.forecastConfidence
-      bestFrameId = frame.frameId
-      bestRegion = best.region
+  // ── 2. Fetch historical baseline once — fallback when forecasts are absent ─
+  const historyRows = await (prisma as any).carbonIntensity.findMany({
+    where: { region: { in: regions } },
+    select: { region: true, carbonIntensity: true, timestamp: true },
+    orderBy: { timestamp: 'desc' },
+    take: regions.length * 5,
+  }) as Array<{ region: string; carbonIntensity: number; timestamp: Date }>
+
+  const historyByRegion = new Map<string, number>()
+  for (const row of historyRows) {
+    if (!historyByRegion.has(row.region)) {
+      historyByRegion.set(row.region, row.carbonIntensity)
     }
   }
 
-  // Savings vs immediate execution (first slot)
-  const immediateFrame = await assembleDecisionFrame({
-    regions,
-    targetTime: addHours(now, 1),
-    durationMinutes: 60,
-  })
-  const immediateIntensity = selectBestRegion(immediateFrame).windowAvgIntensity
-  const savings = bestSlotIntensity < immediateIntensity
+  // ── 3. Scan slots in-memory — no I/O ─────────────────────────────────────
+  // For each hourly slot, compute the avg intensity for each region across
+  // the 60-minute window, then pick the globally best region × slot pair.
+  function avgIntensityForSlot(region: string, slotStart: Date): number {
+    const slotEnd = addMinutes(slotStart, 60)
+    const startIso = slotStart.toISOString()
+    const endIso = slotEnd.toISOString()
+    const signals = allSignalsByRegion.get(region) ?? []
+    const inWindow = signals.filter((s) => {
+      const t = s.forecast_time ?? s.observed_time ?? ''
+      return t >= startIso && t <= endIso
+    })
+    if (inWindow.length === 0) return historyByRegion.get(region) ?? 400
+    return inWindow.reduce((sum, s) => sum + s.intensity_gco2_per_kwh, 0) / inWindow.length
+  }
+
+  let bestSlotTime: Date = addHours(now, 1)
+  let bestSlotIntensity: number = Infinity
+  let bestRegion: string = regions[0]
+
+  for (let h = 1; h <= slotCount; h++) {
+    const slotTime = addHours(now, h)
+    for (const region of regions) {
+      const avg = avgIntensityForSlot(region, slotTime)
+      if (avg < bestSlotIntensity) {
+        bestSlotIntensity = avg
+        bestSlotTime = slotTime
+        bestRegion = region
+      }
+    }
+  }
+
+  // Savings vs immediate execution (h=1, best region at that slot)
+  const immediateIntensity = Math.min(...regions.map((r) => avgIntensityForSlot(r, addHours(now, 1))))
+  const savings = bestSlotIntensity < immediateIntensity && immediateIntensity > 0
     ? ((immediateIntensity - bestSlotIntensity) / immediateIntensity) * 100
     : 0
 
@@ -210,7 +235,7 @@ export async function scheduleBatchQueries(
       queryString: query.query,
       selectedRegion: bestRegion,
       scheduledTime: bestSlotTime,
-      predictedCarbonIntensity: bestSlotIntensity,
+      predictedCarbonIntensity: Math.round(bestSlotIntensity),
       estimatedCO2,
       estimatedKwh,
       savings: Math.max(0, savings),

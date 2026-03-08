@@ -59,6 +59,13 @@ const decisionSchema = z
     data_freshness_seconds: z.number().int().nonnegative().optional(),
     dataFreshnessSeconds: z.number().int().nonnegative().optional(),
 
+    // Provider provenance — populated by routing layer; required for full audit trail
+    source_used: z.string().optional(),           // e.g. 'electricity_maps', 'ember'
+    referenceTime: z.string().datetime().optional(), // ISO-8601: when forecast/signal was generated
+    resolutionMinutes: z.number().int().positive().optional(), // native data resolution
+    windowAvgIntensity: z.number().nonnegative().optional(),  // avg gCO2/kWh across decision window
+    decisionFrameId: z.string().optional(),        // assembler frame ID for cross-referencing
+
     meta: z.unknown().optional(),
   })
   .superRefine((value, ctx) => {
@@ -169,10 +176,18 @@ router.post('/', async (req, res) => {
       entityType: 'DashboardRoutingDecision',
       entityId: created.id,
       payload: {
+        // Core routing fields
         baselineRegion: created.baselineRegion,
         chosenRegion: created.chosenRegion,
         co2BaselineG: created.co2BaselineG,
         co2ChosenG: created.co2ChosenG,
+        // Provider provenance — every decision records where its data came from
+        source_used: value.source_used ?? null,
+        referenceTime: value.referenceTime ?? null,
+        fallback_used: fallbackUsed,
+        resolutionMinutes: value.resolutionMinutes ?? null,
+        windowAvgIntensity: value.windowAvgIntensity ?? null,
+        decisionFrameId: value.decisionFrameId ?? null,
       },
       result: 'SUCCESS',
       carbonSavedG,

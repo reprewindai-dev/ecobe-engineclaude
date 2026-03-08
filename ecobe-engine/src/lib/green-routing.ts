@@ -69,18 +69,35 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
       latencyWeight,
     })
 
+    // Compute a weighted score using the same formula as the live path so the
+    // `score` field has identical semantics regardless of which path ran.
+    // (Score = 0–1, higher is better; carbon penalty is primary driver.)
+    const allCandidates = frame.regions
+    const maxIntensity = Math.max(...allCandidates.map((r) => r.windowAvgIntensity)) || 1
+    const maxLatency = Math.max(...allCandidates.map((r) => r.latencyMs)) || 1
+    const totalW = carbonWeight + latencyWeight + costWeight
+    const wC = carbonWeight / totalW
+    const wL = latencyWeight / totalW
+    const wCo = costWeight / totalW
+
+    function computeScore(r: typeof best): number {
+      const cScore = 1 - r.windowAvgIntensity / maxIntensity
+      const lScore = 1 - r.latencyMs / maxLatency
+      return wC * cScore + wL * lScore + wCo * cScore // cost ∝ carbon
+    }
+
     const others = frame.regions.filter((r) => r.region !== best.region)
     return {
       selectedRegion: best.region,
       carbonIntensity: best.targetCarbonIntensity,
       estimatedLatency: best.latencyMs,
-      score: best.forecastConfidence,
+      score: computeScore(best),
       decisionFrameId: frame.frameId,
       forecastAvailable: best.forecastAvailable,
       alternatives: others.slice(0, 2).map((r) => ({
         region: r.region,
         carbonIntensity: r.targetCarbonIntensity,
-        score: r.forecastConfidence,
+        score: computeScore(r),
         reason: best.forecastAvailable
           ? `Forecast window avg: ${r.windowAvgIntensity} gCO2/kWh`
           : 'Historical fallback used',

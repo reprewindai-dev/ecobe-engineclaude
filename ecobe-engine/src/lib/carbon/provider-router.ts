@@ -26,6 +26,7 @@ import { validateFreshness, validateShape, calcDisagreementPct } from './provide
 import { auditProviderDecision } from './provider-audit'
 import { CarbonSignal, ProviderResult, QueryMode } from './types'
 import { env } from '../../config/env'
+import { redis } from '../redis'
 
 // ─── Public result ─────────────────────────────────────────────────────────────
 
@@ -224,6 +225,13 @@ export async function getBestCarbonSignal(
 /**
  * Fetch forecast signals for a region via the provider layer.
  * Returns an ordered array of signals (ascending forecastTime).
+ *
+ * Caching: forecast responses are cached in Redis for MAX_STALENESS_MINUTES
+ * so that DEKES batch scheduling (which calls this N times) hits the cache
+ * instead of making repeated live API calls for the same window.
+ *
+ * Freshness gate: signals whose referenceTime (fetched_at) is older than
+ * MAX_STALENESS_MINUTES are filtered out before returning.
  */
 export async function getForecastSignals(
   region: string,
@@ -232,36 +240,82 @@ export async function getForecastSignals(
   orgId?: string
 ): Promise<CarbonSignal[]> {
   const cfg = carbonProviderConfig
-  const provider = getProvider(cfg.primary)
-  if (!provider?.supportsRegion(region)) {
-    // Try validation provider as fallback for forecasts
-    const fallback = cfg.validation ? getProvider(cfg.validation) : undefined
-    if (!fallback?.supportsRegion(region)) return []
-    const results = await fallback.getForecast(region, from, to)
-    return results.filter((r) => r.ok && r.signal).map((r) => r.signal!)
+  const cacheKey = `carbon:v2:forecast:${region}:${from.toISOString().slice(0, 13)}:${to.toISOString().slice(0, 13)}`
+  const staleLimitMs = cfg.maxStalenessMinutes * 60 * 1000
+
+  // ── Cache check ─────────────────────────────────────────────────────────────
+  try {
+    const cached = await redis.get(cacheKey)
+    if (cached) {
+      const parsed: { signals: CarbonSignal[]; cachedAt: number } = JSON.parse(cached)
+      if (Date.now() - parsed.cachedAt < staleLimitMs) {
+        diag('Forecast cache hit', { region, from: from.toISOString(), signalCount: parsed.signals.length })
+        return parsed.signals
+      }
+    }
+  } catch {
+    // Cache read failure is non-fatal
   }
 
-  const results = await provider.getForecast(region, from, to)
-  const signals = results.filter((r) => r.ok && r.signal).map((r) => {
-    const s = r.signal!
-    // Stamp provenance — forecasts don't go through full validation but need flags
-    return stampProvenance(s, {
-      fallbackUsed: false,
-      validationUsed: false,
-      disagreementFlag: false,
-      disagreementPct: null,
+  // ── Live fetch ──────────────────────────────────────────────────────────────
+  const provider = getProvider(cfg.primary)
+  let rawSignals: CarbonSignal[] = []
+
+  if (provider?.supportsRegion(region)) {
+    const results = await provider.getForecast(region, from, to)
+    rawSignals = results.filter((r) => r.ok && r.signal).map((r) => {
+      const s = r.signal!
+      return stampProvenance(s, {
+        fallbackUsed: false,
+        validationUsed: false,
+        disagreementFlag: false,
+        disagreementPct: null,
+      })
     })
+  }
+
+  // Fallback to validation provider if primary returned nothing
+  if (rawSignals.length === 0 && cfg.validation) {
+    const fallback = getProvider(cfg.validation)
+    if (fallback?.supportsRegion(region)) {
+      const results = await fallback.getForecast(region, from, to)
+      rawSignals = results.filter((r) => r.ok && r.signal).map((r) =>
+        stampProvenance(r.signal!, { fallbackUsed: true, validationUsed: false, disagreementFlag: false, disagreementPct: null })
+      )
+      if (rawSignals.length > 0) {
+        diag('Forecast fallback provider used', { region, provider: cfg.validation })
+      }
+    }
+  }
+
+  // ── Freshness gate — remove signals with stale referenceTime ───────────────
+  const freshSignals = rawSignals.filter((s) => {
+    const refMs = new Date(s.fetched_at).getTime()
+    const fresh = Date.now() - refMs < staleLimitMs
+    if (!fresh) {
+      console.warn(`[carbon-router] Stale forecast signal excluded region=${region} fetched_at=${s.fetched_at}`)
+    }
+    return fresh
   })
 
-  if (signals.length > 0) {
+  // ── Cache result ────────────────────────────────────────────────────────────
+  if (freshSignals.length > 0) {
+    try {
+      await redis.setex(cacheKey, cfg.maxStalenessMinutes * 60, JSON.stringify({ signals: freshSignals, cachedAt: Date.now() }))
+    } catch {
+      // Cache write failure is non-fatal
+    }
+
     auditProviderDecision({
       region,
       mode: 'forecast',
-      primarySignal: signals[0],
-      finalSignal: signals[0],
+      primarySignal: freshSignals[0],
+      finalSignal: freshSignals[0],
       organizationId: orgId,
     })
+  } else {
+    console.warn(`[carbon-router] getForecastSignals returned 0 fresh signals for region=${region}`)
   }
 
-  return signals
+  return freshSignals
 }
