@@ -6,9 +6,10 @@
  * queries for optimal time windows.
  */
 
+import { addHours } from 'date-fns'
 import { prisma } from './db'
 import { routeGreen } from './green-routing'
-import { findOptimalWindow } from './carbon-forecasting'
+import { assembleDecisionFrame, selectBestRegion } from './decision-data-assembler'
 
 // kWh consumed per 1 000 result records — conservative estimate for web scraping/API queries
 const KWH_PER_1K_RESULTS = 0.0001
@@ -139,16 +140,58 @@ export async function scheduleBatchQueries(
     costWeight: 0.1,
   })
 
-  const bestRegion = routingResult.selectedRegion
+  // Use DecisionDataAssembler to find the lowest-carbon window within the
+  // look-ahead period. We scan hourly slots and pick the one whose
+  // forecast window avg is lowest — this is query-time alignment: all
+  // signals are aligned to the candidate targetTime, not ingestion time.
+  const now = new Date()
+  const lookAheadMs = lookAheadHours * 60 * 60 * 1000
+  const slotCount = Math.min(lookAheadHours, 48) // cap scan at 48 slots
 
-  // Find optimal execution window in that region
-  const optimalWindow = await findOptimalWindow(bestRegion, 1, lookAheadHours)
+  let bestSlotTime: Date = addHours(now, 1)
+  let bestSlotIntensity = Infinity
+  let bestSlotConfidence = 0.5
+  let bestFrameId = ''
+  let bestRegion = routingResult.selectedRegion
+
+  // Scan hourly slots — lazy planning means each assembleDecisionFrame call
+  // only fetches the columns + time-range it needs.
+  for (let h = 1; h <= slotCount; h++) {
+    const slotTime = addHours(now, h)
+    if (slotTime.getTime() - now.getTime() > lookAheadMs) break
+
+    const frame = await assembleDecisionFrame({
+      regions,
+      targetTime: slotTime,
+      durationMinutes: 60,
+    })
+
+    const best = selectBestRegion(frame, { carbonWeight: 0.8, latencyWeight: 0.2 })
+    if (best.windowAvgIntensity < bestSlotIntensity) {
+      bestSlotIntensity = best.windowAvgIntensity
+      bestSlotTime = slotTime
+      bestSlotConfidence = best.forecastConfidence
+      bestFrameId = frame.frameId
+      bestRegion = best.region
+    }
+  }
+
+  // Savings vs immediate execution (first slot)
+  const immediateFrame = await assembleDecisionFrame({
+    regions,
+    targetTime: addHours(now, 1),
+    durationMinutes: 60,
+  })
+  const immediateIntensity = selectBestRegion(immediateFrame).windowAvgIntensity
+  const savings = bestSlotIntensity < immediateIntensity
+    ? ((immediateIntensity - bestSlotIntensity) / immediateIntensity) * 100
+    : 0
 
   const schedule: DekesScheduleEntry[] = []
 
   for (const query of queries) {
     const estimatedKwh = (query.estimatedResults / 1000) * KWH_PER_1K_RESULTS
-    const estimatedCO2 = estimatedKwh * optimalWindow.avgCarbonIntensity
+    const estimatedCO2 = estimatedKwh * bestSlotIntensity
 
     const workload = await prisma.dekesWorkload.create({
       data: {
@@ -156,7 +199,7 @@ export async function scheduleBatchQueries(
         queryString: query.query,
         estimatedQueries: 1,
         estimatedResults: query.estimatedResults,
-        scheduledTime: optimalWindow.startTime,
+        scheduledTime: bestSlotTime,
         selectedRegion: bestRegion,
         status: 'SCHEDULED',
       },
@@ -166,11 +209,11 @@ export async function scheduleBatchQueries(
       queryId: query.id,
       queryString: query.query,
       selectedRegion: bestRegion,
-      scheduledTime: optimalWindow.startTime,
-      predictedCarbonIntensity: optimalWindow.avgCarbonIntensity,
+      scheduledTime: bestSlotTime,
+      predictedCarbonIntensity: bestSlotIntensity,
       estimatedCO2,
       estimatedKwh,
-      savings: Math.max(0, optimalWindow.savings),
+      savings: Math.max(0, savings),
       workloadId: workload.id,
     })
   }

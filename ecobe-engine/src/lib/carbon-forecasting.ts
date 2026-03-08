@@ -48,6 +48,7 @@ export async function forecastCarbonIntensity(
 
   if (historicalData.length < 24) {
     // Not enough data, use Electricity Maps forecast
+    const now = new Date()
     const forecast = await electricityMaps.getForecast(region)
     const mapped = await Promise.all(
       forecast.map(async (f) => {
@@ -60,17 +61,22 @@ export async function forecastCarbonIntensity(
           confidence: 0.7,
           trend: 'stable',
         }
+        // referenceTime = now (when Electricity Maps generated/returned this forecast)
+        // forecastTime  = the future slot being predicted (two-time model)
+        const referenceTime = now
         await prisma.carbonForecast.upsert({
           where: { region_forecastTime: { region: f.zone, forecastTime } },
           update: {
             predictedIntensity,
             confidence: result.confidence,
+            referenceTime,
             modelVersion: 'electricity-maps',
             features: { provider: 'electricity-maps' },
           },
           create: {
             region: f.zone,
             forecastTime,
+            referenceTime,
             predictedIntensity,
             confidence: result.confidence,
             modelVersion: 'electricity-maps',
@@ -142,7 +148,8 @@ export async function forecastCarbonIntensity(
     }
     forecasts.push(result)
 
-    // Store forecast
+    // Store forecast — referenceTime = when this model run was executed (= now)
+    // forecastTime = the future slot being predicted (two-time model)
     await prisma.carbonForecast.upsert({
       where: {
         region_forecastTime: {
@@ -153,6 +160,7 @@ export async function forecastCarbonIntensity(
       update: {
         predictedIntensity,
         confidence,
+        referenceTime: now,
         features: {
           hour,
           dayOfWeek,
@@ -162,6 +170,7 @@ export async function forecastCarbonIntensity(
       create: {
         region,
         forecastTime,
+        referenceTime: now,
         predictedIntensity,
         confidence,
         modelVersion: 'v1.0',

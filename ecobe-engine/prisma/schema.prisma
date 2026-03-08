@@ -23,6 +23,11 @@ model CarbonIntensity {
   // Source
   source    String   @default("ELECTRICITY_MAPS")
 
+  // Native resolution — store data exactly as received; do NOT normalize to a uniform interval.
+  // 5 = 5-minute readings, 15 = 15-minute readings, 60 = hourly (default).
+  // Alignment to a common resolution happens at query time inside DecisionDataAssembler.
+  resolutionMinutes Int @default(60)
+
   // Timestamp
   timestamp DateTime
 
@@ -170,17 +175,25 @@ model CarbonForecast {
   predictedIntensity Int     // gCO2eq/kWh
   confidence         Float   // 0.0 - 1.0
 
+  // Two-time model (critical for forecast accuracy):
+  //   referenceTime = when this forecast was generated / data was observed
+  //   forecastTime  = the future moment being predicted (targetTime in queries)
+  // Separating these lets DecisionDataAssembler pick the freshest forecast
+  // for any given targetTime rather than relying on insertion order.
+  referenceTime     DateTime @default(now())
+
   // Model info
   modelVersion      String  @default("v1.0")
   features          Json    @default("{}")
 
-  // Actual (for training)
+  // Actual (for training / back-test)
   actualIntensity   Int?
   error             Float?
 
   createdAt DateTime @default(now())
 
   @@index([region, forecastTime])
+  @@index([region, referenceTime])
   @@index([forecastTime])
   @@unique([region, forecastTime], name: "region_forecastTime")
 }

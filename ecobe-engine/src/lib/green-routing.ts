@@ -1,14 +1,24 @@
 import { prisma } from './db'
 import { redis } from './redis'
 import { electricityMaps } from './electricity-maps'
+import { assembleDecisionFrame, selectBestRegion } from './decision-data-assembler'
 
 export interface RoutingRequest {
   preferredRegions: string[]
   maxCarbonGPerKwh?: number
   latencyMsByRegion?: Record<string, number>
-  costWeight?: number  // 0-1, default 0.3
+  costWeight?: number    // 0-1, default 0.3
   carbonWeight?: number  // 0-1, default 0.5
-  latencyWeight?: number  // 0-1, default 0.2
+  latencyWeight?: number // 0-1, default 0.2
+  /**
+   * When the workload is scheduled to run (defaults to now).
+   * When set to a future time, routing uses DecisionDataAssembler's
+   * forecast-based path (query-time alignment, lazy query planning)
+   * instead of the live Redis/Electricity Maps path.
+   */
+  targetTime?: Date
+  /** Expected workload duration in minutes — used by forecast-based path */
+  durationMinutes?: number
 }
 
 export interface RoutingResult {
@@ -22,6 +32,9 @@ export interface RoutingResult {
     score: number
     reason?: string
   }>
+  /** Present when the forecast-based assembler path was used */
+  decisionFrameId?: string
+  forecastAvailable?: boolean
 }
 
 export async function routeGreen(request: RoutingRequest): Promise<RoutingResult> {
@@ -32,18 +45,60 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     carbonWeight = 0.5,
     latencyWeight = 0.2,
     costWeight = 0.3,
+    targetTime,
+    durationMinutes,
   } = request
 
+  // ── FORECAST PATH (future targetTime) ───────────────────────────────────────
+  // When the caller supplies a targetTime in the future (scheduled workloads,
+  // DEKES jobs, CI pipelines), use DecisionDataAssembler to align all inputs to
+  // that window with lazy query planning + query-time resolution alignment.
+  const now = new Date()
+  const isFuture = targetTime && targetTime.getTime() > now.getTime() + 60_000 // >1 min ahead
+
+  if (isFuture && targetTime) {
+    const frame = await assembleDecisionFrame({
+      regions: preferredRegions,
+      targetTime,
+      durationMinutes: durationMinutes ?? 60,
+      latencyMsByRegion,
+    })
+
+    const best = selectBestRegion(frame, {
+      maxCarbonGPerKwh,
+      carbonWeight,
+      latencyWeight,
+    })
+
+    const others = frame.regions.filter((r) => r.region !== best.region)
+    return {
+      selectedRegion: best.region,
+      carbonIntensity: best.targetCarbonIntensity,
+      estimatedLatency: best.latencyMs,
+      score: best.forecastConfidence,
+      decisionFrameId: frame.frameId,
+      forecastAvailable: best.forecastAvailable,
+      alternatives: others.slice(0, 2).map((r) => ({
+        region: r.region,
+        carbonIntensity: r.targetCarbonIntensity,
+        score: r.forecastConfidence,
+        reason: best.forecastAvailable
+          ? `Forecast window avg: ${r.windowAvgIntensity} gCO2/kWh`
+          : 'Historical fallback used',
+      })),
+    }
+  }
+
+  // ── LIVE PATH (immediate execution) ─────────────────────────────────────────
   // Normalize weights
   const totalWeight = carbonWeight + latencyWeight + costWeight
   const normalizedCarbon = carbonWeight / totalWeight
   const normalizedLatency = latencyWeight / totalWeight
   const normalizedCost = costWeight / totalWeight
 
-  // Get carbon intensity for all regions
+  // Get current carbon intensity for all regions (Redis cache → Electricity Maps → DB)
   const regionData = await Promise.all(
     preferredRegions.map(async (region) => {
-      // Try cache first
       const cached = await redis.get(`carbon:${region}`)
       let carbonIntensity: number
 
@@ -56,19 +111,19 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
         // Cache for 15 minutes
         await redis.setex(`carbon:${region}`, 900, carbonIntensity.toString())
 
-        // Store in DB
+        // Store at native resolution (60 min for live readings)
         await prisma.carbonIntensity.create({
           data: {
             region,
             carbonIntensity,
             timestamp: new Date(),
             source: 'ELECTRICITY_MAPS',
+            resolutionMinutes: 60,
           },
         }).catch((err: any) => {
           if (err?.code !== 'P2002') {
             console.error('[green-routing] carbonIntensity DB write failed:', err?.message ?? err)
           }
-          // P2002 = unique constraint violation (duplicate) — safe to ignore
         })
       }
 
@@ -86,10 +141,8 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     : regionData
 
   if (filtered.length === 0) {
-    // All regions exceed carbon budget - pick lowest carbon anyway
     const sorted = [...regionData].sort((a, b) => a.carbonIntensity - b.carbonIntensity)
     const best = sorted[0]
-
     return {
       selectedRegion: best.region,
       carbonIntensity: best.carbonIntensity,
@@ -104,37 +157,24 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     }
   }
 
-  // Score each region
   const scored = filtered.map((r) => {
-    // Carbon score (lower is better, normalize to 0-1)
     const maxCarbon = Math.max(...filtered.map((x) => x.carbonIntensity))
     const carbonScore = 1 - r.carbonIntensity / maxCarbon
 
-    // Latency score (lower is better, normalize to 0-1)
     const maxLatency = Math.max(...filtered.map((x) => x.latency))
     const latencyScore = 1 - r.latency / maxLatency
 
-    // Cost score (assume cost proportional to carbon for now)
-    const costScore = carbonScore
+    const costScore = carbonScore // cost ∝ carbon for now
 
-    // Overall score
     const score =
       normalizedCarbon * carbonScore +
       normalizedLatency * latencyScore +
       normalizedCost * costScore
 
-    return {
-      ...r,
-      score,
-      carbonScore,
-      latencyScore,
-      costScore,
-    }
+    return { ...r, score, carbonScore, latencyScore, costScore }
   })
 
-  // Sort by score (highest first)
   scored.sort((a, b) => b.score - a.score)
-
   const best = scored[0]
 
   return {
