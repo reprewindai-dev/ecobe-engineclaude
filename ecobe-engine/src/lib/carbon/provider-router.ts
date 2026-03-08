@@ -259,44 +259,44 @@ export async function getForecastSignals(
 
   // ── Live fetch ──────────────────────────────────────────────────────────────
   const provider = getProvider(cfg.primary)
-  let rawSignals: CarbonSignal[] = []
+  let freshSignals: CarbonSignal[] = []
 
-  if (provider?.supportsRegion(region)) {
-    const results = await provider.getForecast(region, from, to)
-    rawSignals = results.filter((r) => r.ok && r.signal).map((r) => {
-      const s = r.signal!
-      return stampProvenance(s, {
-        fallbackUsed: false,
-        validationUsed: false,
-        disagreementFlag: false,
-        disagreementPct: null,
-      })
+  function applyFreshnessGate(signals: CarbonSignal[]): CarbonSignal[] {
+    return signals.filter((s) => {
+      const refMs = new Date(s.fetched_at).getTime()
+      const fresh = Date.now() - refMs < staleLimitMs
+      if (!fresh) {
+        console.warn(`[carbon-router] Stale forecast signal excluded region=${region} fetched_at=${s.fetched_at}`)
+      }
+      return fresh
     })
   }
 
-  // Fallback to validation provider if primary returned nothing
-  if (rawSignals.length === 0 && cfg.validation) {
+  if (provider?.supportsRegion(region)) {
+    const results = await provider.getForecast(region, from, to)
+    const stamped = results.filter((r) => r.ok && r.signal).map((r) =>
+      stampProvenance(r.signal!, { fallbackUsed: false, validationUsed: false, disagreementFlag: false, disagreementPct: null })
+    )
+    // Apply freshness gate BEFORE checking whether to trigger fallback.
+    // If primary returns only stale signals, they must be excluded and the
+    // validation provider must be tried — same as if primary returned nothing.
+    freshSignals = applyFreshnessGate(stamped)
+  }
+
+  // Fallback to validation provider if primary returned no FRESH signals
+  if (freshSignals.length === 0 && cfg.validation) {
     const fallback = getProvider(cfg.validation)
     if (fallback?.supportsRegion(region)) {
       const results = await fallback.getForecast(region, from, to)
-      rawSignals = results.filter((r) => r.ok && r.signal).map((r) =>
+      const stamped = results.filter((r) => r.ok && r.signal).map((r) =>
         stampProvenance(r.signal!, { fallbackUsed: true, validationUsed: false, disagreementFlag: false, disagreementPct: null })
       )
-      if (rawSignals.length > 0) {
+      freshSignals = applyFreshnessGate(stamped)
+      if (freshSignals.length > 0) {
         diag('Forecast fallback provider used', { region, provider: cfg.validation })
       }
     }
   }
-
-  // ── Freshness gate — remove signals with stale referenceTime ───────────────
-  const freshSignals = rawSignals.filter((s) => {
-    const refMs = new Date(s.fetched_at).getTime()
-    const fresh = Date.now() - refMs < staleLimitMs
-    if (!fresh) {
-      console.warn(`[carbon-router] Stale forecast signal excluded region=${region} fetched_at=${s.fetched_at}`)
-    }
-    return fresh
-  })
 
   // ── Cache result ────────────────────────────────────────────────────────────
   if (freshSignals.length > 0) {

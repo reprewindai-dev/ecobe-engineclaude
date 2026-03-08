@@ -39,4 +39,15 @@ export const prisma = {
   $connect: jest.fn().mockResolvedValue(undefined),
   $disconnect: jest.fn().mockResolvedValue(undefined),
   $queryRaw: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
+  // Needed by writeAuditLog (governance/audit.ts) which wraps every write in a transaction
+  $transaction: jest.fn().mockImplementation((fn: (tx: any) => Promise<any>) => fn({
+    governanceAuditLog: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockResolvedValue({ id: 'audit-mock-id' }),
+    },
+  })),
+  governanceAuditLog: {
+    findFirst: jest.fn().mockResolvedValue(null),
+    create: jest.fn().mockResolvedValue({ id: 'audit-mock-id' }),
+  },
 }
