@@ -23,8 +23,10 @@
  *    biggest performance win.
  */
 
-import { addMinutes, subHours } from 'date-fns'
+import { addMinutes } from 'date-fns'
 import { prisma } from './db'
+import { getForecastSignals, getBestCarbonSignal } from './carbon/provider-router'
+import { CarbonSignal } from './carbon/types'
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -75,41 +77,26 @@ export interface DecisionFrame {
 
 // ─── Internal planner ─────────────────────────────────────────────────────────
 
+/**
+ * Lazy query plan — defines WHAT to fetch before any I/O happens.
+ * The provider router executes the plan with the appropriate columns,
+ * freshness gate, and caching strategy.  Keeping plan construction
+ * separate from execution is the core of the lazy query planning pattern.
+ */
 interface DecisionQueryPlan {
   regions: string[]
   /** Earliest timestamp we need forecast data for */
   forecastWindowStart: Date
   /** Latest timestamp we need forecast data for */
   forecastWindowEnd: Date
-  /** Only fetch forecasts generated after this (freshness filter) */
-  referenceTimeFloor: Date
-  /** Prisma select — only the columns we actually need */
-  selectFields: {
-    region: boolean
-    forecastTime: boolean
-    predictedIntensity: boolean
-    confidence: boolean
-    referenceTime: boolean
-    features: boolean
-  }
 }
 
-function buildQueryPlan(req: DecisionRequest, now: Date): DecisionQueryPlan {
+function buildQueryPlan(req: DecisionRequest, _now: Date): DecisionQueryPlan {
   const lookAheadMinutes = req.lookAheadMinutes ?? 48 * 60
   return {
     regions: req.regions,
     forecastWindowStart: req.targetTime,
     forecastWindowEnd: addMinutes(req.targetTime, Math.max(req.durationMinutes, lookAheadMinutes)),
-    // Only use forecasts that were generated within the last 6 hours (freshness gate)
-    referenceTimeFloor: subHours(now, 6),
-    selectFields: {
-      region: true,
-      forecastTime: true,
-      predictedIntensity: true,
-      confidence: true,
-      referenceTime: true,
-      features: true,
-    },
   }
 }
 
@@ -120,7 +107,7 @@ function buildQueryPlan(req: DecisionRequest, now: Date): DecisionQueryPlan {
  *
  * Steps:
  *   1. Build query plan (lazy — no I/O yet)
- *   2. Execute plan (one DB round-trip per region, columns pre-filtered)
+ *   2. Execute plan via provider router (handles multi-provider, cache, fallback)
  *   3. Align data to the targetTime window (query-time alignment)
  *   4. Return a DecisionFrame ready for green-routing / DEKES
  */
@@ -128,28 +115,18 @@ export async function assembleDecisionFrame(req: DecisionRequest): Promise<Decis
   const now = new Date()
   const plan = buildQueryPlan(req, now)
 
-  // Execute plan — fetch forecasts for all regions in one query, minimal columns
-  const forecastRows = await (prisma as any).carbonForecast.findMany({
-    where: {
-      region: { in: plan.regions },
-      forecastTime: {
-        gte: plan.forecastWindowStart,
-        lte: plan.forecastWindowEnd,
-      },
-      referenceTime: { gte: plan.referenceTimeFloor },
-    },
-    select: plan.selectFields,
-    orderBy: [{ region: 'asc' }, { forecastTime: 'asc' }],
-  }) as Array<{
-    region: string
-    forecastTime: Date
-    predictedIntensity: number
-    confidence: number
-    referenceTime: Date
-    features: Record<string, unknown>
-  }>
+  // Execute plan — fetch forecasts for all regions via provider router.
+  // The router applies lazy query planning, Redis caching, multi-provider
+  // fallback, and provenance stamping before we see any signals here.
+  const forecastSignalsByRegion = new Map<string, CarbonSignal[]>()
+  await Promise.all(
+    plan.regions.map(async (region) => {
+      const signals = await getForecastSignals(region, plan.forecastWindowStart, plan.forecastWindowEnd)
+      forecastSignalsByRegion.set(region, signals)
+    })
+  )
 
-  // Also fetch the most recent historical reading as a fallback baseline
+  // Fetch most-recent historical reading as fallback baseline (direct DB — always available)
   const historyRows = await (prisma as any).carbonIntensity.findMany({
     where: { region: { in: plan.regions } },
     select: {
@@ -159,7 +136,6 @@ export async function assembleDecisionFrame(req: DecisionRequest): Promise<Decis
       timestamp: true,
     },
     orderBy: { timestamp: 'desc' },
-    // Take at most 1 row per region — deduplicate below
     take: plan.regions.length * 5,
   }) as Array<{
     region: string
@@ -167,13 +143,6 @@ export async function assembleDecisionFrame(req: DecisionRequest): Promise<Decis
     resolutionMinutes: number
     timestamp: Date
   }>
-
-  // Index by region for O(1) lookups
-  const forecastByRegion = new Map<string, typeof forecastRows>()
-  for (const row of forecastRows) {
-    if (!forecastByRegion.has(row.region)) forecastByRegion.set(row.region, [])
-    forecastByRegion.get(row.region)!.push(row)
-  }
 
   const latestHistoryByRegion = new Map<string, (typeof historyRows)[0]>()
   for (const row of historyRows) {
@@ -183,12 +152,13 @@ export async function assembleDecisionFrame(req: DecisionRequest): Promise<Decis
   }
 
   // ── Align each region to targetTime ──────────────────────────────────────
+  // CarbonSignal from provider router — already has provenance stamps
   const regions: RegionDecisionData[] = req.regions.map((region) => {
-    const forecasts = forecastByRegion.get(region) ?? []
+    const signals: CarbonSignal[] = forecastSignalsByRegion.get(region) ?? []
     const historical = latestHistoryByRegion.get(region)
     const latencyMs = req.latencyMsByRegion?.[region] ?? 100
 
-    if (forecasts.length === 0) {
+    if (signals.length === 0) {
       // No fresh forecast — fall back to most recent historical reading
       const fallbackIntensity = historical?.carbonIntensity ?? 400
       return {
@@ -205,38 +175,42 @@ export async function assembleDecisionFrame(req: DecisionRequest): Promise<Decis
       }
     }
 
-    // Find the forecast slot closest to targetTime
+    // Filter to the exact targetTime window (query-time alignment)
     const windowEnd = addMinutes(req.targetTime, req.durationMinutes)
-    const windowForecasts = forecasts.filter(
-      (f) => f.forecastTime >= req.targetTime && f.forecastTime <= windowEnd
-    )
-    const relevantForecasts = windowForecasts.length > 0 ? windowForecasts : [forecasts[0]]
+    const targetIso = req.targetTime.toISOString()
+    const windowEndIso = windowEnd.toISOString()
+    const windowSignals = signals.filter((s) => {
+      const t = s.forecast_time ?? s.observed_time ?? ''
+      return t >= targetIso && t <= windowEndIso
+    })
+    const relevant = windowSignals.length > 0 ? windowSignals : [signals[0]]
 
-    // Average intensity across the window (query-time alignment)
+    // Average intensity across the window
     const windowAvgIntensity = Math.round(
-      relevantForecasts.reduce((s, f) => s + f.predictedIntensity, 0) / relevantForecasts.length
+      relevant.reduce((s, sig) => s + sig.intensity_gco2_per_kwh, 0) / relevant.length
     )
-    const targetCarbonIntensity = relevantForecasts[0].predictedIntensity
+    const targetCarbonIntensity = relevant[0].intensity_gco2_per_kwh
     const avgConfidence =
-      relevantForecasts.reduce((s, f) => s + f.confidence, 0) / relevantForecasts.length
+      relevant.reduce((s, sig) => s + (sig.confidence ?? 0.6), 0) / relevant.length
 
     // Trend: compare first half vs second half of window
-    const mid = Math.floor(relevantForecasts.length / 2)
-    const firstHalf = relevantForecasts.slice(0, mid || 1)
-    const secondHalf = relevantForecasts.slice(mid || 1)
-    const firstAvg = firstHalf.reduce((s, f) => s + f.predictedIntensity, 0) / firstHalf.length
-    const secondAvg = secondHalf.reduce((s, f) => s + f.predictedIntensity, 0) / secondHalf.length
+    const mid = Math.floor(relevant.length / 2)
+    const firstHalf = relevant.slice(0, mid || 1)
+    const secondHalf = relevant.slice(mid || 1)
+    const firstAvg = firstHalf.reduce((s, sig) => s + sig.intensity_gco2_per_kwh, 0) / firstHalf.length
+    const secondAvg = secondHalf.reduce((s, sig) => s + sig.intensity_gco2_per_kwh, 0) / secondHalf.length
     const forecastTrend: 'increasing' | 'decreasing' | 'stable' =
-      secondAvg > firstAvg * 1.05
-        ? 'increasing'
-        : secondAvg < firstAvg * 0.95
-          ? 'decreasing'
-          : 'stable'
+      secondAvg > firstAvg * 1.05 ? 'increasing'
+        : secondAvg < firstAvg * 0.95 ? 'decreasing'
+        : 'stable'
 
-    // Most recent referenceTime from the contributing forecast rows
-    const latestRef = relevantForecasts.reduce(
-      (latest, f) => (f.referenceTime > latest ? f.referenceTime : latest),
-      relevantForecasts[0].referenceTime
+    // Most recent referenceTime across contributing signals
+    const latestRefIso = relevant.reduce(
+      (latest, sig) => {
+        const ref = sig.observed_time ?? sig.fetched_at
+        return ref > latest ? ref : latest
+      },
+      relevant[0].observed_time ?? relevant[0].fetched_at
     )
 
     return {
@@ -246,7 +220,7 @@ export async function assembleDecisionFrame(req: DecisionRequest): Promise<Decis
       forecastConfidence: avgConfidence,
       forecastTrend,
       dataResolutionMinutes: historical?.resolutionMinutes ?? 60,
-      referenceTime: latestRef,
+      referenceTime: new Date(latestRefIso),
       targetTime: req.targetTime,
       latencyMs,
       forecastAvailable: true,

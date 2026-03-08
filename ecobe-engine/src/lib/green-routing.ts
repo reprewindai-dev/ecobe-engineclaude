@@ -1,6 +1,5 @@
 import { prisma } from './db'
-import { redis } from './redis'
-import { electricityMaps } from './electricity-maps'
+import { getBestCarbonSignal } from './carbon/provider-router'
 import { assembleDecisionFrame, selectBestRegion } from './decision-data-assembler'
 
 export interface RoutingRequest {
@@ -96,41 +95,34 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
   const normalizedLatency = latencyWeight / totalWeight
   const normalizedCost = costWeight / totalWeight
 
-  // Get current carbon intensity for all regions (Redis cache → Electricity Maps → DB)
+  // Get current carbon intensity via multi-provider router (handles cache, fallback, validation)
   const regionData = await Promise.all(
     preferredRegions.map(async (region) => {
-      const cached = await redis.get(`carbon:${region}`)
-      let carbonIntensity: number
+      const result = await getBestCarbonSignal(region, 'realtime')
+      const carbonIntensity = result.ok && result.signal
+        ? result.signal.intensity_gco2_per_kwh
+        : 400 // hard fallback if all providers fail
 
-      if (cached) {
-        carbonIntensity = parseInt(cached)
-      } else {
-        const data = await electricityMaps.getCarbonIntensity(region)
-        carbonIntensity = data?.carbonIntensity ?? 400
-
-        // Cache for 15 minutes
-        await redis.setex(`carbon:${region}`, 900, carbonIntensity.toString())
-
-        // Store at native resolution (60 min for live readings)
-        await prisma.carbonIntensity.create({
-          data: {
-            region,
-            carbonIntensity,
-            timestamp: new Date(),
-            source: 'ELECTRICITY_MAPS',
-            resolutionMinutes: 60,
-          },
-        }).catch((err: any) => {
-          if (err?.code !== 'P2002') {
-            console.error('[green-routing] carbonIntensity DB write failed:', err?.message ?? err)
-          }
-        })
-      }
+      // Persist to CarbonIntensity history table at native resolution
+      await prisma.carbonIntensity.create({
+        data: {
+          region,
+          carbonIntensity,
+          timestamp: new Date(),
+          source: result.signal?.source?.toUpperCase() ?? 'UNKNOWN',
+          resolutionMinutes: 60,
+        },
+      }).catch((err: any) => {
+        if (err?.code !== 'P2002') {
+          console.error('[green-routing] carbonIntensity DB write failed:', err?.message ?? err)
+        }
+      })
 
       return {
         region,
         carbonIntensity,
         latency: latencyMsByRegion[region] ?? 100,
+        providerSignal: result.signal,
       }
     })
   )

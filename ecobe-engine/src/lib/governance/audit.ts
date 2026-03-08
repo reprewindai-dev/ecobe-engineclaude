@@ -10,6 +10,7 @@ export type AuditAction =
   | 'POLICY_UPDATED'
   | 'ANOMALY_DETECTED'
   | 'CHAIN_VERIFIED'
+  | 'CARBON_SIGNAL_SELECTED'
 
 interface AuditParams {
   organizationId?: string

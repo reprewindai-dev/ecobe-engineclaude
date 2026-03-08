@@ -18,10 +18,24 @@ const envSchema = z.object({
   GOVERNANCE_AUDIT_ENABLED: z.string().default('true'),
   GOVERNANCE_CHAIN_VERIFY: z.string().default('false'),
 
-  // Optional
+  // Optional — carbon data layer
   ELECTRICITY_MAPS_API_KEY: z.string().optional(),
   ELECTRICITY_MAPS_BASE_URL: z.string().default('https://api.electricitymap.org'),
   DEFAULT_MAX_CARBON_G_PER_KWH: z.string().default('400'),
+
+  // Multi-provider carbon layer
+  EMBER_ENERGY_API_KEY: z.string().optional(),
+  EMBER_BASE_URL: z.string().optional(),
+  WATTTIME_API_KEY: z.string().optional(),
+  CARBON_PROVIDER_PRIMARY: z.string().default('electricity_maps'),
+  CARBON_PROVIDER_VALIDATION: z.string().optional(),
+  CARBON_PROVIDER_ALLOW_FALLBACK: z.string().default('true'),
+  CARBON_PROVIDER_MAX_STALENESS_MINUTES: z.string().default('10'),
+  CARBON_PROVIDER_DISAGREEMENT_THRESHOLD_PCT: z.string().default('15'),
+  CARBON_PROVIDER_DEV_DIAGNOSTICS: z.string().optional(),
+  CARBON_PROVIDER_EM_ROLE: z.string().optional(),
+  CARBON_PROVIDER_EMBER_ROLE: z.string().optional(),
+  CARBON_PROVIDER_WATTTIME_ROLE: z.string().optional(),
 
   FORECAST_REFRESH_ENABLED: z.string().optional(),
   FORECAST_REFRESH_CRON: z.string().default('*/30 * * * *'),
