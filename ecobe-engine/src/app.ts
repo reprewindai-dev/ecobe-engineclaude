@@ -9,6 +9,8 @@ import creditsRoutes from './routes/credits'
 import decisionsRoutes from './routes/decisions'
 import dashboardRoutes from './routes/dashboard'
 import forecastingRoutes from './routes/forecasting'
+import dekesRoutes from './routes/dekes'
+import ciRoutes from './routes/ci'
 
 function attachHealthRoutes(app: express.Express) {
   async function healthHandler(req: express.Request, res: express.Response) {
@@ -254,6 +256,8 @@ function attachApiRoutes(app: express.Express) {
   app.use('/api/v1/decisions', decisionsRoutes)
   app.use('/api/v1/dashboard', dashboardRoutes)
   app.use('/api/v1/forecasting', forecastingRoutes)
+  app.use('/api/v1/dekes', dekesRoutes)
+  app.use('/api/v1/ci', ciRoutes)
 }
 
 function attachFallbackHandlers(app: express.Express) {
