@@ -623,6 +623,34 @@ model DecisionSnapshot {
 }
 
 // ============================================================================
+// TEMPORAL CARBON INTELLIGENCE
+// Learned per-region hourly intensity patterns — what Google's scheduler lacks.
+// Built from historical CarbonIntensity records; enables probability-weighted
+// routing decisions rather than purely reactive signal-following.
+// ============================================================================
+
+// 168 rows per region (7 days × 24 hours, Monday=0 through Sunday=167).
+// Populated/refreshed by computeTemporalPatterns() — typically nightly.
+model RegionTemporalPattern {
+  id         String @id @default(cuid())
+  region     String
+  hourOfWeek Int    // 0 = Mon 00:00 UTC … 167 = Sun 23:00 UTC
+
+  avgIntensity Float
+  p10Intensity Float  // optimistic / clean end of distribution
+  p50Intensity Float  // median
+  p90Intensity Float  // pessimistic / dirty end
+  stddev       Float
+
+  sampleCount Int
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([region, hourOfWeek])
+  @@index([region])
+}
+
+// ============================================================================
 // DECISION LEASE (execution drift prevention)
 // Prevents stale decisions from executing after grid/policy state has changed.
 // ============================================================================
