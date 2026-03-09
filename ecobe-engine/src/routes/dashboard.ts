@@ -160,13 +160,26 @@ router.get('/metrics', async (req, res) => {
     const refreshSummaryPromise = getForecastRefreshSummary(windowHours)
     const refreshStatePromise = getLastForecastRefreshState()
 
-    const [decisions, topChosenRegionAgg, integrationMetric, refreshSummary, refreshState] =
+    // Execution integrity — lease counts and drift events for the same window
+    const leaseStatsPromise = (prisma as any).decisionLease.groupBy({
+      by: ['status'],
+      where: { createdAt: { gte: since } },
+      _count: { status: true },
+    })
+    const driftCountPromise = (prisma as any).executionDriftEvent.count({
+      where: { createdAt: { gte: since } },
+    })
+
+    const [decisions, topChosenRegionAgg, integrationMetric, refreshSummary, refreshState,
+      leaseStatGroups, driftCount] =
       await Promise.all([
         decisionsPromise,
         topChosenRegionPromise,
         integrationMetricPromise,
         refreshSummaryPromise,
         refreshStatePromise,
+        leaseStatsPromise,
+        driftCountPromise,
       ])
 
     const totalDecisions = decisions.length
@@ -247,6 +260,24 @@ router.get('/metrics', async (req, res) => {
         : null,
     }
 
+    // Build executionIntegrity block from lease groupBy results
+    type LeaseStatGroup = { status: string; _count: { status: number } }
+    const leaseStat = (status: string): number =>
+      ((leaseStatGroups as LeaseStatGroup[]).find((g) => g.status === status)?._count?.status ?? 0)
+
+    const totalLeases     = (leaseStatGroups as LeaseStatGroup[]).reduce((s, g) => s + g._count.status, 0)
+    const validLeases     = leaseStat('VALID')
+    const revalidated     = leaseStat('REVALIDATED')
+    const executionIntegrity = {
+      totalLeases,
+      valid:              validLeases,
+      revalidated,
+      driftDetected:      driftCount as number,
+      driftPreventedPct:  revalidated > 0
+        ? Math.round(((revalidated - (driftCount as number)) / revalidated) * 100)
+        : 100,
+    }
+
     return res.json({
       window,
       windowHours,
@@ -262,6 +293,7 @@ router.get('/metrics', async (req, res) => {
       electricityMapsSuccessRate: electricityMapsMetric?.successRate ?? null,
       electricityMaps: electricityMapsMetric,
       forecastRefresh,
+      executionIntegrity,
     })
   } catch (error: any) {
     if (error instanceof z.ZodError) {

@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { routeGreen } from '../lib/green-routing'
 import { saveDecisionSnapshot } from '../lib/decision-snapshot'
 import { predictCleanWindow } from '../lib/carbon-window-prediction'
+import { createLease, revalidateLease } from '../lib/decision-lease'
 import { prisma } from '../lib/db'
 import { logger } from '../lib/logger'
 
@@ -79,6 +80,8 @@ router.post('/green', async (req, res) => {
     ).catch(() => null)
 
     // Persist decision snapshot for replay (fire-and-forget)
+    let leaseFields: import('../lib/decision-lease').LeaseFields | null = null
+
     if (result.decisionFrameId) {
       const signalSnapshot = Object.fromEntries(
         data.preferredRegions.map((region) => {
@@ -99,11 +102,20 @@ router.post('/green', async (req, res) => {
         result,
         signalSnapshot,
       })
+
+      // Create execution lease (fire-and-forget — don't block the response)
+      leaseFields = await createLease(
+        result.decisionFrameId,
+        organizationId,
+        result,
+        data,
+      ).catch(() => null)
     }
 
     res.json({
       ...result,
       ...(windowPrediction ? { predicted_clean_window: windowPrediction } : {}),
+      ...(leaseFields ?? {}),
     })
   } catch (error: any) {
     if (error instanceof z.ZodError) {
@@ -111,6 +123,23 @@ router.post('/green', async (req, res) => {
     }
     logger.error({ err: error }, 'Green routing error')
     res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// POST /api/v1/route/:id/revalidate — check whether a leased decision is still valid
+// before a queued workload executes. Prevents execution drift.
+router.post('/:id/revalidate', async (req, res) => {
+  try {
+    const callerOrgId: string | undefined =
+      (req as any).resolvedOrgId ?? (req.headers['x-organization-id'] as string | undefined)
+
+    const result = await revalidateLease(req.params.id, callerOrgId)
+
+    const status = result.action === 'deny' ? 403 : 200
+    return res.status(status).json(result)
+  } catch (error) {
+    logger.error({ err: error }, 'Lease revalidation error')
+    return res.status(500).json({ error: 'Internal server error' })
   }
 })
 

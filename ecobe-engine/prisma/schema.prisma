@@ -621,3 +621,63 @@ model DecisionSnapshot {
   @@index([organizationId, createdAt])
   @@index([selectedRegion, createdAt])
 }
+
+// ============================================================================
+// DECISION LEASE (execution drift prevention)
+// Prevents stale decisions from executing after grid/policy state has changed.
+// ============================================================================
+
+// Execution validity window attached to every routed decision.
+// Status lifecycle: VALID → REVALIDATED | EXECUTED | EXPIRED | DRIFT_BLOCKED
+model DecisionLease {
+  id             String  @id // = decisionFrameId from routing result
+  organizationId String?
+
+  createdAt DateTime @default(now())
+
+  // Original request inputs — used to re-route on revalidation
+  regions          Json   // string[]
+  maxCarbonGPerKwh Int?
+  weights          Json   // { carbon, latency, cost }
+  qualityTier      String // high | medium | low
+
+  // Lease window boundaries
+  leaseExpiresAt         DateTime
+  revalidationRequiredAt DateTime
+
+  // Decision at creation time
+  selectedRegion  String
+  carbonIntensity Int
+
+  // Current status
+  status String @default("VALID") // VALID | REVALIDATED | EXECUTED | EXPIRED | DRIFT_BLOCKED
+
+  // Revalidation outcome (populated when POST /:id/revalidate is called)
+  revalidatedAt      DateTime?
+  revalidationAction String?   // execute | reroute | delay | deny
+  revalidationReason String?
+  driftDetected      Boolean   @default(false)
+  newRegion          String?   // populated when rerouted
+
+  @@index([organizationId, createdAt])
+  @@index([status, leaseExpiresAt])
+}
+
+// Emitted whenever revalidation finds a materially different routing outcome.
+// Powers the executionIntegrity panel in the dashboard.
+model ExecutionDriftEvent {
+  id             String  @id @default(cuid())
+  organizationId String?
+
+  decisionLeaseId String
+  createdAt       DateTime @default(now())
+
+  originalRegion    String
+  newRegion         String
+  originalIntensity Int
+  newIntensity      Int
+  reason            String
+
+  @@index([organizationId, createdAt])
+  @@index([decisionLeaseId])
+}
