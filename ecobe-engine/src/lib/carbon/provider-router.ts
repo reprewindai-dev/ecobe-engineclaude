@@ -1,7 +1,7 @@
 /**
  * Provider router — the single orchestration entry point.
  *
- * ALL carbon intensity lookups inside ECOBE must go through here.
+ * ALL carbon intensity lookups inside CO2 Router must go through here.
  * No route handler, lib module, or integration may call a provider adapter
  * directly (rule #3).
  *

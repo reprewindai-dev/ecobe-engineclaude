@@ -10,7 +10,7 @@ export interface CarbonIntensityData {
   renewablePercentage?: number
   /**
    * ISO-8601 timestamp — when Electricity Maps generated this forecast.
-   * Maps to ECOBE's referenceTime (two-time model).
+   * Maps to CO2 Router's referenceTime (two-time model).
    * Present on forecast responses (updatedAt); null on live readings.
    */
   updatedAt?: string

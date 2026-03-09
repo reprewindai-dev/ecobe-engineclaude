@@ -1,11 +1,11 @@
 {
-  "name": "ecobe-engine",
+  "name": "co2router",
   "version": "1.0.0",
-  "description": "Environmental Carbon and Optimization Backend Engine",
+  "description": "Carbon-aware compute routing and scheduling — route workloads to cleaner energy grids automatically.",
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "prebuild": "node -e \"console.log('ECOBE_ENGINE_URL present:', Boolean(process.env.ECOBE_ENGINE_URL))\"",
+    "prebuild": "node -e \"console.log('CO2ROUTER_URL present:', Boolean(process.env.CO2ROUTER_URL))\"",
     "build": "tsc && prisma generate",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "start": "npm run prisma:migrate:deploy && node dist/server.js",
@@ -22,10 +22,13 @@
   },
   "keywords": [
     "carbon",
-    "sustainability",
+    "carbon-routing",
+    "carbon-aware",
     "green-computing",
-    "optimization",
-    "emissions"
+    "emissions",
+    "sustainability",
+    "co2",
+    "scheduling"
   ],
   "author": "",
   "license": "MIT",

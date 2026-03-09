@@ -150,7 +150,7 @@ router.post('/carbon-route', async (req, res) => {
  * Simple liveness check for the CI integration layer.
  */
 router.get('/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'ECOBE CI Integration', timestamp: new Date().toISOString() })
+  res.json({ status: 'ok', service: 'CO2 Router CI Integration', timestamp: new Date().toISOString() })
 })
 
 export default router

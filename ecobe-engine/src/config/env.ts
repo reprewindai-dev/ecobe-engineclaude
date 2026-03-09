@@ -44,9 +44,9 @@ const envSchema = z.object({
   UI_ENABLED: z.string().optional(),
   UI_TOKEN: z.string().optional(),
 
-  // External integrations
-  ECOBE_ENGINE_URL: z.string().optional(),
-  ECOBE_ENGINE_API_KEY: z.string().optional(),
+  // External integrations / self-referential API key
+  CO2ROUTER_URL: z.string().optional(),
+  CO2ROUTER_API_KEY: z.string().optional(),
 
   // Dev-only escape hatch: allow unauthenticated access when no API key is configured.
   // NEVER set to true in production.

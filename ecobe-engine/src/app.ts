@@ -37,7 +37,7 @@ function attachHealthRoutes(app: express.Express) {
 
       res.status(ok ? 200 : 503).json({
         status: ok ? 'healthy' : 'unhealthy',
-        service: 'ECOBE Engine',
+        service: 'CO2 Router',
         version: '1.0.0',
         timestamp: new Date().toISOString(),
         checks: {
@@ -77,7 +77,7 @@ function attachUiRoute(app: express.Express) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ECOBE Engine UI</title>
+    <title>CO2 Router UI</title>
     <style>
       body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 0; padding: 24px; background: #0b1020; color: #e7eaf3; }
       a { color: #9ecbff; }
@@ -94,7 +94,7 @@ function attachUiRoute(app: express.Express) {
     </style>
   </head>
   <body>
-    <h1>ECOBE Engine UI</h1>
+    <h1>CO2 Router UI</h1>
     <div class="muted">Use this page to test the deployed engine without any separate dashboard deploy. Same-origin API base: <code id="base"></code></div>
     <div class="grid" style="margin-top: 16px;">
       <div class="card">
@@ -150,7 +150,7 @@ function attachUiRoute(app: express.Express) {
       document.getElementById('base').textContent = base
 
       // Server-injected API key — safe because this page is already protected by UI_TOKEN.
-      const __apiKey = '${env.ECOBE_ENGINE_API_KEY ?? ''}'
+      const __apiKey = '${env.CO2ROUTER_API_KEY ?? ''}'
 
       const out = document.getElementById('out')
       function show(v) { out.textContent = typeof v === 'string' ? v : JSON.stringify(v, null, 2) }

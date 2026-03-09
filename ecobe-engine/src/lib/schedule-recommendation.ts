@@ -1,5 +1,5 @@
 /**
- * ScheduleRecommendation — unified output shape for all ECOBE routing decisions.
+ * ScheduleRecommendation — unified output shape for all CO2 Router routing decisions.
  *
  * Whether a decision came from:
  *   - immediate live routing (routeGreen, no targetTime)

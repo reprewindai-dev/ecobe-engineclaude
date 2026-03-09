@@ -22,7 +22,7 @@ async function start() {
     }
 
     app.listen(env.PORT, () => {
-      console.log(`🌱 ECOBE Engine running on port ${env.PORT}`)
+      console.log(`🌿 CO2 Router running on port ${env.PORT}`)
       console.log(`   Environment: ${env.NODE_ENV}`)
       console.log(`   Health: http://localhost:${env.PORT}/health`)
       console.log(`   API: http://localhost:${env.PORT}/api/v1`)

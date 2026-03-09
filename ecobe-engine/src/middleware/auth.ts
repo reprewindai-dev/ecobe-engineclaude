@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express'
 import { env } from '../config/env'
 
 export function requireApiKey(req: Request, res: Response, next: NextFunction) {
-  const apiKey = env.ECOBE_ENGINE_API_KEY
+  const apiKey = env.CO2ROUTER_API_KEY
 
   if (!apiKey) {
     // Fail closed by default — a production deploy missing the key must not silently open.

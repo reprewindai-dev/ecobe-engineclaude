@@ -2,7 +2,7 @@
  * Ember Climate provider adapter.
  *
  * Ember (https://ember-climate.org) publishes country-level electricity
- * generation and carbon intensity data.  ECOBE uses it as:
+ * generation and carbon intensity data.  CO2 Router uses it as:
  *   - secondary validation against Electricity Maps
  *   - historical enrichment for back-testing
  *   - fallback when primary is unavailable
@@ -12,7 +12,7 @@
  * Auth: Bearer token via EMBER_ENERGY_API_KEY env var.
  *
  * Zone mapping: Ember uses ISO 3166-1 alpha-2 country codes (e.g. 'US', 'FR').
- * ECOBE regions may be more granular (e.g. 'US-CAL-CISO').  The adapter
+ * CO2 Router regions may be more granular (e.g. 'US-CAL-CISO').  The adapter
  * maps region → country for Ember queries and records a quality downgrade
  * ('medium') when a sub-national region is approximated by country average.
  */
@@ -25,7 +25,7 @@ import { recordIntegrationFailure, recordIntegrationSuccess } from '../../integr
 const EMBER_BASE_URL = process.env.EMBER_BASE_URL ?? 'https://api.ember-climate.org/v2'
 
 /**
- * Maps ECOBE region codes to Ember country codes.
+ * Maps CO2 Router region codes to Ember country codes.
  * Sub-national regions lose precision; this is flagged in data_quality.
  */
 const REGION_TO_COUNTRY: Record<string, string> = {

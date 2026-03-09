@@ -58,7 +58,7 @@ router.get('/decisions/export', async (req, res) => {
 
     if (format === 'json') {
       res.setHeader('Content-Type', 'application/json; charset=utf-8')
-      res.setHeader('Content-Disposition', 'attachment; filename="ecobe-receipts.json"')
+      res.setHeader('Content-Disposition', 'attachment; filename="co2router-receipts.json"')
       return res.send(JSON.stringify({ decisions }, null, 2))
     }
 
@@ -98,7 +98,7 @@ router.get('/decisions/export', async (req, res) => {
     }
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8')
-    res.setHeader('Content-Disposition', 'attachment; filename="ecobe-receipts.csv"')
+    res.setHeader('Content-Disposition', 'attachment; filename="co2router-receipts.csv"')
     return res.send(lines.join('\n'))
   } catch (error: any) {
     if (error instanceof z.ZodError) {
@@ -386,7 +386,7 @@ const savingsQuerySchema = z.object({
  * GET /api/v1/dashboard/savings
  *
  * Surfaces the "baseline vs actual" CO₂ delta across all routing decisions —
- * the primary proof metric that ECOBE is doing something real.
+ * the primary proof metric that CO2 Router is doing something real.
  *
  * Response includes:
  *  - totalCO2SavedG / totalCO2BaselineG

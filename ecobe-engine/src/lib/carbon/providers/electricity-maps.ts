@@ -96,7 +96,7 @@ export class ElectricityMapsProvider implements CarbonProvider {
             region,
             intensity_gco2_per_kwh: f.carbonIntensity,
             // observed_time = updatedAt = when EM generated this forecast run
-            // This is ECOBE's referenceTime in the two-time model.
+            // This is CO2 Router's referenceTime in the two-time model.
             // Assembler uses it to select the most recent forecast covering targetTime.
             observed_time: f.updatedAt ?? null,
             forecast_time: f.datetime,

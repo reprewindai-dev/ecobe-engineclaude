@@ -22,7 +22,7 @@ export type DataQuality = 'high' | 'medium' | 'low'
 // ─── Normalized carbon signal ─────────────────────────────────────────────────
 
 /**
- * The canonical shape for any carbon intensity data point inside ECOBE.
+ * The canonical shape for any carbon intensity data point inside CO2 Router.
  * Every provider adapter must normalise into this shape before returning.
  *
  * Provenance fields (source, fetched_at, fallback_used, etc.) are required —
@@ -39,7 +39,7 @@ export interface CarbonSignal {
   observed_time: string | null
   /** ISO-8601: the future moment this point predicts (null for realtime) */
   forecast_time: string | null
-  /** ISO-8601: when ECOBE fetched this data from the provider */
+  /** ISO-8601: when CO2 Router fetched this data from the provider */
   fetched_at: string
 
   // ── Provenance ────────────────────────────────────────────────────────────

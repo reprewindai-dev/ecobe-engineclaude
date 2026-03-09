@@ -1,5 +1,5 @@
 /**
- * Methodology endpoint — machine-readable model card for ECOBE's routing engine.
+ * Methodology endpoint — machine-readable model card for CO2 Router's routing engine.
  *
  * Inspired by CarbonCast's methodology page and Carbon Aware SDK's transparency goals.
  * Returns a versioned JSON document that:
@@ -23,11 +23,11 @@ const router = Router()
 // Static model card — describes the decision methodology
 const METHODOLOGY_DOC = {
   version: '2c',
-  name: 'ECOBE Carbon-Aware Routing Engine',
+  name: 'CO2 Router — Carbon-Aware Routing Engine',
   description:
-    'ECOBE routes compute workloads to minimize carbon emissions using real-time ' +
-    'and forecast carbon intensity signals, weighted multi-objective scoring, ' +
-    'and transparent uncertainty quantification.',
+    'CO2 Router routes compute workloads to cleaner energy grids automatically, ' +
+    'minimizing carbon emissions using real-time and forecast carbon intensity signals, ' +
+    'weighted multi-objective scoring, and transparent uncertainty quantification.',
 
   scoring: {
     formula: 'score = wC × (1 − ci/maxCI) + wL × (1 − lat/maxLat) + wCo × (1 − cost/maxCost)',
@@ -112,7 +112,7 @@ const METHODOLOGY_DOC = {
       referenceTime: 'When a forecast was generated or a live reading was observed.',
       targetTime:    'When the workload is scheduled to execute.',
       significance:
-        'ECOBE always selects the most recent forecast (referenceTime ≤ now) that ' +
+        'CO2 Router always selects the most recent forecast (referenceTime ≤ now) that ' +
         'covers the targetTime window. This prevents stale forecasts from influencing decisions.',
     },
     native_resolution:
@@ -129,7 +129,7 @@ const METHODOLOGY_DOC = {
 
   forecast_scorecard: {
     description:
-      'ECOBE backtests its own forecast predictions against actuals to compute ' +
+      'CO2 Router backtests its own forecast predictions against actuals to compute ' +
       'rolling regional accuracy metrics.',
     metrics: ['MAE by horizon (24h/48h/72h)', 'MAPE by horizon', 'fallbackRate', 'staleRejectionRate'],
     rolling_window_days: 30,
