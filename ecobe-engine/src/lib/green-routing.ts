@@ -1,6 +1,7 @@
 import { prisma } from './db'
 import { getBestCarbonSignal } from './carbon/provider-router'
 import { assembleDecisionFrame, selectBestRegion } from './decision-data-assembler'
+import { reconcileForecastActuals } from './forecast-scorecard'
 
 export interface RoutingRequest {
   preferredRegions: string[]
@@ -157,12 +158,14 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
         ? result.signal.intensity_gco2_per_kwh
         : 400 // hard fallback if all providers fail
 
+      const readingTime = new Date()
+
       // Persist to CarbonIntensity history table at native resolution
       await prisma.carbonIntensity.create({
         data: {
           region,
           carbonIntensity,
-          timestamp: new Date(),
+          timestamp: readingTime,
           source: result.signal?.source?.toUpperCase() ?? 'UNKNOWN',
           resolutionMinutes: 60,
         },
@@ -171,6 +174,11 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
           console.error('[green-routing] carbonIntensity DB write failed:', err?.message ?? err)
         }
       })
+
+      // Non-blocking: reconcile past forecast predictions against this live reading.
+      // This populates actualIntensity + error on CarbonForecast rows that predicted
+      // this region + time slot, which feeds the rolling accuracy scorecard.
+      void reconcileForecastActuals(region, readingTime, carbonIntensity)
 
       return {
         region,

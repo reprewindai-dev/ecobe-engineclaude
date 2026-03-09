@@ -27,6 +27,12 @@ import { addMinutes } from 'date-fns'
 import { prisma } from './db'
 import { getForecastSignals } from './carbon/provider-router'
 import { CarbonSignal } from './carbon/types'
+import {
+  recordForecastPrediction,
+  getRegionScorecard,
+  adjustConfidenceForRegion,
+  computeRankingStability,
+} from './forecast-scorecard'
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -50,12 +56,22 @@ export interface ConfidenceBand {
   mid: number
   /** Optimistic estimate — actual intensity may be this low (p10 or equivalent) */
   low: number
+  /** Band width as a percentage of mid: (high - low) / mid * 100 */
+  bandWidthPct: number
   /**
    * Whether the band was derived from an actual signal distribution (true)
    * or estimated from the confidence score of a single point (false).
    * Use this to tell users how to weight the band.
    */
   empirical: boolean
+  /**
+   * Whether this region's ranking is robust to forecast uncertainty.
+   * stable   → winner beats all alternatives even in the pessimistic (p90) case
+   * medium   → winner might be beaten in some scenarios
+   * unstable → winner could realistically swap ranks with an alternative
+   * Populated by selectBestRegion after all candidates are compared.
+   */
+  rankingStability: 'stable' | 'medium' | 'unstable' | 'sole_candidate'
 }
 
 export interface RegionDecisionData {
@@ -128,13 +144,19 @@ function buildQueryPlan(req: DecisionRequest, _now: Date): DecisionQueryPlan {
  * Derive an empirical confidence band from the actual distribution of
  * intensity values across the window.  Uses real percentile positions.
  */
+function makeBand(low: number, mid: number, high: number, empirical: boolean): ConfidenceBand {
+  const l = Math.round(low), m = Math.round(mid), h = Math.round(high)
+  const bandWidthPct = m > 0 ? Math.round(((h - l) / m) * 100) : 0
+  return { low: l, mid: m, high: h, bandWidthPct, empirical, rankingStability: 'sole_candidate' }
+}
+
 function empiricalBand(values: number[]): ConfidenceBand {
   const sorted = [...values].sort((a, b) => a - b)
   const n = sorted.length
   const p10 = sorted[Math.max(0, Math.floor(n * 0.1))]
   const p50 = sorted[Math.floor((n - 1) * 0.5)]
   const p90 = sorted[Math.min(n - 1, Math.floor(n * 0.9))]
-  return { low: Math.round(p10), mid: Math.round(p50), high: Math.round(p90), empirical: true }
+  return makeBand(p10, p50, p90, true)
 }
 
 /**
@@ -145,12 +167,7 @@ function empiricalBand(values: number[]): ConfidenceBand {
  */
 function estimatedBand(intensity: number, confidence: number): ConfidenceBand {
   const spreadPct = (1 - confidence) * 0.25  // 0 at conf=1.0, 0.15 at conf=0.4
-  return {
-    low:  Math.round(intensity * (1 - spreadPct)),
-    mid:  Math.round(intensity),
-    high: Math.round(intensity * (1 + spreadPct)),
-    empirical: false,
-  }
+  return makeBand(intensity * (1 - spreadPct), intensity, intensity * (1 + spreadPct), false)
 }
 
 // ─── Core assembler ───────────────────────────────────────────────────────────
@@ -168,14 +185,20 @@ export async function assembleDecisionFrame(req: DecisionRequest): Promise<Decis
   const now = new Date()
   const plan = buildQueryPlan(req, now)
 
-  // Execute plan — fetch forecasts for all regions via provider router.
+  // Execute plan — fetch forecasts + scorecards for all regions in parallel.
   // The router applies lazy query planning, Redis caching, multi-provider
   // fallback, and provenance stamping before we see any signals here.
   const forecastSignalsByRegion = new Map<string, CarbonSignal[]>()
+  const scorecardsByRegion = new Map<string, Awaited<ReturnType<typeof getRegionScorecard>>>()
+
   await Promise.all(
     plan.regions.map(async (region) => {
-      const signals = await getForecastSignals(region, plan.forecastWindowStart, plan.forecastWindowEnd)
+      const [signals, scorecard] = await Promise.all([
+        getForecastSignals(region, plan.forecastWindowStart, plan.forecastWindowEnd),
+        getRegionScorecard(region),
+      ])
       forecastSignalsByRegion.set(region, signals)
+      scorecardsByRegion.set(region, scorecard)
     })
   )
 
@@ -209,6 +232,7 @@ export async function assembleDecisionFrame(req: DecisionRequest): Promise<Decis
   const regions: RegionDecisionData[] = req.regions.map((region) => {
     const signals: CarbonSignal[] = forecastSignalsByRegion.get(region) ?? []
     const historical = latestHistoryByRegion.get(region)
+    const scorecard = scorecardsByRegion.get(region)!
     const latencyMs = req.latencyMsByRegion?.[region] ?? 100
 
     if (signals.length === 0) {
@@ -222,6 +246,18 @@ export async function assembleDecisionFrame(req: DecisionRequest): Promise<Decis
         `[dda] FORECAST_FALLBACK region=${region} target=${req.targetTime.toISOString()} ` +
         `intensity=${fallbackIntensity} source=${fallbackSource}`
       )
+
+      // Record the fallback prediction non-blocking (for scorecard accuracy tracking)
+      void recordForecastPrediction({
+        region,
+        forecastTime: req.targetTime,
+        referenceTime: now,
+        predictedIntensity: fallbackIntensity,
+        confidence: 0.4,
+        source: 'historical_fallback',
+        fallbackUsed: true,
+      })
+
       return {
         region,
         targetCarbonIntensity: fallbackIntensity,
@@ -276,17 +312,34 @@ export async function assembleDecisionFrame(req: DecisionRequest): Promise<Decis
       relevant[0].observed_time ?? relevant[0].fetched_at
     )
 
-    // Confidence band — empirical when we have multiple signals, estimated otherwise
+    // Scorecard-adjusted confidence — penalises regions with poor forecast history.
+    // This widens the uncertainty band for historically unreliable regions.
+    const adjustedConfidence = adjustConfidenceForRegion(avgConfidence, scorecard)
+
+    // Confidence band — empirical when we have multiple signals, estimated otherwise.
+    // Always uses the scorecard-adjusted confidence so the band reflects real accuracy.
     const windowValues = relevant.map((s) => s.intensity_gco2_per_kwh)
     const confidenceBand = windowValues.length >= 3
       ? empiricalBand(windowValues)
-      : estimatedBand(windowAvgIntensity, avgConfidence)
+      : estimatedBand(windowAvgIntensity, adjustedConfidence)
+
+    // Record this prediction non-blocking (for future scorecard accuracy tracking)
+    const primarySource = relevant[0].source ?? 'electricity_maps'
+    void recordForecastPrediction({
+      region,
+      forecastTime: req.targetTime,
+      referenceTime: new Date(latestRefIso),
+      predictedIntensity: windowAvgIntensity,
+      confidence: adjustedConfidence,
+      source: primarySource,
+      fallbackUsed: false,
+    })
 
     return {
       region,
       targetCarbonIntensity,
       windowAvgIntensity,
-      forecastConfidence: avgConfidence,
+      forecastConfidence: adjustedConfidence,
       forecastTrend,
       dataResolutionMinutes: historical?.resolutionMinutes ?? 60,
       referenceTime: new Date(latestRefIso),
@@ -338,5 +391,17 @@ export function selectBestRegion(
   })
 
   scored.sort((a, b) => b.score - a.score)
-  return scored[0].region
+  const winner = scored[0].region
+  const altBands = scored.slice(1).map((s) => s.region.confidenceBand)
+
+  // Compute ranking_stability: does the winner beat alternatives even at p10/p90?
+  const stability = candidates.length === 1
+    ? 'sole_candidate' as const
+    : computeRankingStability(winner.confidenceBand, altBands)
+
+  // Mutate the winner's confidenceBand in-place to stamp ranking_stability.
+  // The band object is unique per region per frame so mutation is safe here.
+  winner.confidenceBand = { ...winner.confidenceBand, rankingStability: stability }
+
+  return winner
 }

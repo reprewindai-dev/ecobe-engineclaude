@@ -169,6 +169,7 @@ model CarbonForecast {
   id        String   @id @default(cuid())
 
   region    String
+  source    String   @default("electricity_maps")  // which provider generated this prediction
 
   // Forecast
   forecastTime      DateTime
@@ -182,20 +183,63 @@ model CarbonForecast {
   // for any given targetTime rather than relying on insertion order.
   referenceTime     DateTime @default(now())
 
+  // Horizon in hours at prediction time (derived from forecastTime - referenceTime)
+  horizonHours      Float    @default(0)
+
   // Model info
   modelVersion      String  @default("v1.0")
   features          Json    @default("{}")
 
-  // Actual (for training / back-test)
+  // Actual (for training / back-test) — filled in by reconcileForecastActuals
   actualIntensity   Int?
-  error             Float?
+  error             Float?  // signed error: predicted - actual
 
   createdAt DateTime @default(now())
 
   @@index([region, forecastTime])
   @@index([region, referenceTime])
   @@index([forecastTime])
-  @@unique([region, forecastTime], name: "region_forecastTime")
+  @@index([region, source, forecastTime])
+  // Allow multiple sources per (region, forecastTime) — source is the differentiator
+  @@unique([region, forecastTime, source], name: "region_forecastTime_source")
+}
+
+/**
+ * Rolling accuracy scorecard per region, recomputed after each reconciliation run.
+ * Stored so the assembler can read it cheaply without a full aggregate query.
+ */
+model RegionForecastScorecard {
+  id     String @id @default(cuid())
+  region String @unique
+
+  // MAE = mean absolute error (gCO2/kWh)
+  mae24h   Float?  // 0–24 h horizon
+  mae48h   Float?  // 24–48 h horizon
+  mae72h   Float?  // 48–72 h horizon
+
+  // MAPE = mean absolute percentage error (0–1)
+  mape24h  Float?
+  mape48h  Float?
+  mape72h  Float?
+
+  // Operational health rates (0–1, fraction of attempts)
+  fallbackRate          Float  @default(0)   // predictions that used historical fallback
+  staleRejectionRate    Float  @default(0)   // predictions where fresh forecast was unavailable
+  providerDisagreementRate Float @default(0) // predictions with disagreement_flag set
+  forecastHitRate       Float  @default(0)  // fraction where predicted best slot was actually best
+
+  // Reliability tier derived from combined metrics
+  // 'high'    → mape24h < 10%, low fallback rate
+  // 'medium'  → mape24h 10–25%
+  // 'low'     → mape24h > 25% or high fallback rate
+  // 'unknown' → fewer than MIN_SAMPLE_COUNT observations
+  reliabilityTier  String  @default("unknown")
+  sampleCount      Int     @default(0)
+  lastComputedAt   DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  @@index([region])
 }
 
 model ForecastRefresh {
