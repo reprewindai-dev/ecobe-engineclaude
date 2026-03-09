@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ecobeApi } from '@/lib/api'
 import { Shield, Clock, ArrowRight, Loader2 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
+import { isDecisionDelayed } from '@/lib/decisions'
 
 export function PolicyEnforcementPanel() {
   const { data, isLoading, isError } = useQuery({
@@ -14,16 +15,19 @@ export function PolicyEnforcementPanel() {
 
   const decisions = data?.decisions ?? []
 
-  // Policy-relevant events: fallbacks, stale data, delayed routing
+  // Policy-relevant events: use shared utility so definition matches all other DEKES surfaces.
+  // Also catch explicit policy-reason text as a secondary signal.
   const policyEvents = decisions.filter(
     (d) =>
-      d.fallbackUsed ||
-      (d.dataFreshnessSeconds != null && d.dataFreshnessSeconds > 900) ||
+      isDecisionDelayed(d) ||
       (d.reason && d.reason.toLowerCase().includes('policy'))
   )
 
+  // "delayed" = reason explicitly mentions delay OR signal was stale/fallback
   const delayed = decisions.filter(
-    (d) => d.reason && d.reason.toLowerCase().includes('delay')
+    (d) =>
+      isDecisionDelayed(d) ||
+      (d.reason && d.reason.toLowerCase().includes('delay'))
   )
   const rerouted = decisions.filter(
     (d) =>
@@ -72,7 +76,7 @@ export function PolicyEnforcementPanel() {
           <p className="text-xs text-slate-400 mb-2">Recent policy actions</p>
           <div className="space-y-2 max-h-64 overflow-y-auto">
             {policyEvents.slice(0, 10).map((d) => {
-              const isDeleyed = d.reason?.toLowerCase().includes('delay')
+              const isDelayed = isDecisionDelayed(d) || d.reason?.toLowerCase().includes('delay')
               const isRerouted = d.baselineRegion !== d.chosenRegion && !d.fallbackUsed
               const isFallback = d.fallbackUsed
 
@@ -82,7 +86,7 @@ export function PolicyEnforcementPanel() {
                   className="p-3 rounded-lg bg-slate-800/30 border border-slate-700/50 font-mono text-xs"
                 >
                   <div className="flex items-center gap-2 mb-1.5">
-                    {isDeleyed && (
+                    {isDelayed && (
                       <span className="flex items-center gap-1 text-yellow-400">
                         <Clock className="w-3 h-3" /> delayed
                       </span>

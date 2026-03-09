@@ -18,9 +18,10 @@ function getFilterOptions(decisions: DashboardDecision[]) {
   for (const d of decisions) {
     sources.add(getDecisionSource(d))
     if (d.organizationId) orgs.add(d.organizationId)
+    // Only include workload types from explicit meta.workloadType —
+    // raw opName values are job IDs and pollute the filter dropdown.
     const wt = d.meta?.workloadType as string | undefined
     if (wt) workloadTypes.add(wt)
-    else if (d.opName) workloadTypes.add(d.opName)
   }
   return { sources: Array.from(sources), orgs: Array.from(orgs), workloadTypes: Array.from(workloadTypes) }
 }

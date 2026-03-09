@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { ecobeApi } from '@/lib/api'
 import { Loader2 } from 'lucide-react'
+import { deriveQualityTier } from '@/lib/decisions'
 import {
   BarChart,
   Bar,
@@ -27,13 +28,12 @@ export function DecisionConfidencePanel() {
     refetchInterval: 60_000,
   })
 
-  // Derive tier distribution from decisions
+  // Derive tier distribution using the shared utility — keeps thresholds consistent
+  // with DecisionStream, DekesImpactCard, IntegrationSourcesPanel, and the timeline.
   const decisions = decisionsData?.decisions ?? []
-  const high = decisions.filter(
-    (d) => !d.fallbackUsed && (d.dataFreshnessSeconds == null || d.dataFreshnessSeconds < 600)
-  ).length
-  const low = decisions.filter((d) => d.fallbackUsed).length
-  const medium = decisions.length - high - low
+  const high = decisions.filter((d) => deriveQualityTier(d) === 'high').length
+  const low = decisions.filter((d) => deriveQualityTier(d) === 'low').length
+  const medium = decisions.filter((d) => deriveQualityTier(d) === 'medium').length
 
   const total = decisions.length || 1
 
