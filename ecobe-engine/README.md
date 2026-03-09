@@ -4,6 +4,12 @@
 
 Route workloads to cleaner energy grids automatically.
 
+> Most carbon-aware schedulers pick the lowest number. CO₂ Router picks the lowest **defensible** number.
+
+Before routing a workload, CO₂ Router validates the signal — checking provider agreement, data freshness, forecast resolution, and fallback state. Every decision ships with a confidence tier, a carbon delta, and a forecast stability rating so the system can be audited, not just trusted. When providers disagree or data goes stale, CO₂ Router downgrades the decision quality rather than silently proceeding.
+
+The result: routing decisions that are explainable, reproducible, and policy-aware.
+
 ## Platform Architecture
 
 ```

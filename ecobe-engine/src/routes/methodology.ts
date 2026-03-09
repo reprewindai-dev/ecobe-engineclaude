@@ -22,12 +22,50 @@ const router = Router()
 
 // Static model card — describes the decision methodology
 const METHODOLOGY_DOC = {
-  version: '2c',
+  version: '2d',
   name: 'CO2 Router — Carbon-Aware Routing Engine',
   description:
     'CO2 Router routes compute workloads to cleaner energy grids automatically, ' +
     'minimizing carbon emissions using real-time and forecast carbon intensity signals, ' +
     'weighted multi-objective scoring, and transparent uncertainty quantification.',
+
+  design_philosophy: {
+    principle: 'Lowest trustworthy signal, not just lowest signal.',
+    detail:
+      'Most carbon schedulers pick the region or time with the lowest carbon intensity reading. ' +
+      'CO2 Router picks the lowest defensible reading — one that has been validated against a ' +
+      'secondary provider, checked for staleness, penalized for coarse resolution if needed, ' +
+      'and audited with full provenance. When signals conflict or degrade, the engine downgrades ' +
+      'decision quality explicitly rather than proceeding silently.',
+    separation_of_concerns: {
+      signal_acquisition: [
+        'Multi-provider fetch (Electricity Maps, Ember, WattTime)',
+        'Redis cache with configurable staleness gate',
+        'Freshness rejection and fallback promotion',
+        'Cross-provider disagreement detection (threshold-configurable)',
+      ],
+      decision_formation: [
+        'Query-time alignment to target window (two-time model)',
+        'Native-resolution storage — no upsampling distortion',
+        'Bounded multi-region / multi-slot search',
+        'Resolution penalty on carbon score when data is coarser than workload duration',
+        'Carbon budget enforcement per organization',
+      ],
+      decision_output: [
+        'carbon_delta_g_per_kwh — absolute CO₂ savings vs worst candidate',
+        'forecast_stability — robustness of winner ranking across adjacent slots',
+        'provider_disagreement — explicit cross-provider conflict flag',
+        'quality_tier — high / medium / low per-decision reliability rating',
+        'explanation — human-readable rationale for every decision',
+        'Full provenance: source_used, reference_time, fallback_used, resolution_minutes',
+      ],
+      audit_trail: [
+        'Append-only governance audit log with SHA-256 hash chain',
+        'Every routing decision stored with organization context',
+        'Carbon budget utilization history',
+      ],
+    },
+  },
 
   scoring: {
     formula: 'score = wC × (1 − ci/maxCI) + wL × (1 − lat/maxLat) + wCo × (1 − cost/maxCost)',
