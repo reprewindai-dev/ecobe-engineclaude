@@ -451,6 +451,10 @@ model IntegrationMetric {
   lastFailureAt  DateTime?
   lastError      String?
 
+  // Phase 2C: rolling latency tracking
+  totalLatencyMs Float    @default(0)   // sum of all recorded latencies
+  totalCalls     Int      @default(0)   // successCount + failureCount (maintained separately for accuracy)
+
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 }

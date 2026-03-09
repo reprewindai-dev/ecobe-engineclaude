@@ -65,6 +65,7 @@ import { routeGreen } from '../lib/green-routing'
 import { scheduleBatchQueries } from '../lib/dekes-integration'
 import { getForecastSignals } from '../lib/carbon/provider-router'
 import { consumeBudget, getBudgetStatus } from '../lib/carbon-budget'
+import { recordProviderCall, getAllProviderMetrics } from '../lib/provider-monitor'
 import {
   getRegionScorecard,
   recordForecastPrediction,
@@ -1368,5 +1369,210 @@ describe('9. Phase 2B — quality tiers, cost scoring, carbon budget', () => {
     const result = await getBudgetStatus('org-no-budget')
 
     expect(result).toBeNull()
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 10. Phase 2C — provider monitoring, methodology, resolution-aware scoring
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('10. Phase 2C — provider monitoring, methodology, resolution-aware scoring', () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    ;(prisma as any).carbonIntensity.findMany.mockResolvedValue(mockHistoryRows)
+    ;(prisma as any).carbonIntensity.create.mockResolvedValue({})
+    ;(redis as any).get.mockResolvedValue(null)
+    ;(redis as any).setex.mockResolvedValue('OK')
+    ;(getRegionScorecard as jest.Mock).mockResolvedValue(mockUnknownScorecard)
+    ;(recordForecastPrediction as jest.Mock).mockResolvedValue(undefined)
+    ;(reconcileForecastActuals as jest.Mock).mockResolvedValue(undefined)
+  })
+
+  // ── Provider monitoring ─────────────────────────────────────────────────────
+
+  it('recordProviderCall creates new IntegrationMetric on first call', async () => {
+    ;(prisma as any).integrationMetric.findUnique.mockResolvedValue(null)
+    ;(prisma as any).integrationMetric.create.mockResolvedValue({})
+
+    await recordProviderCall({
+      provider: 'electricity_maps',
+      region: 'SE',
+      mode: 'forecast',
+      latencyMs: 120,
+      success: true,
+    })
+
+    expect((prisma as any).integrationMetric.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          source: 'electricity_maps',
+          successCount: 1,
+          failureCount: 0,
+          totalLatencyMs: 120,
+          totalCalls: 1,
+        }),
+      })
+    )
+  })
+
+  it('recordProviderCall increments existing metrics on subsequent calls', async () => {
+    const existing = {
+      source: 'electricity_maps',
+      successCount: 10,
+      failureCount: 2,
+      totalLatencyMs: 1200,
+      totalCalls: 12,
+      lastSuccessAt: new Date(),
+      lastFailureAt: null,
+      lastError: null,
+    }
+    ;(prisma as any).integrationMetric.findUnique.mockResolvedValue(existing)
+    ;(prisma as any).integrationMetric.update.mockResolvedValue({})
+
+    await recordProviderCall({
+      provider: 'electricity_maps',
+      region: 'FR',
+      mode: 'realtime',
+      latencyMs: 80,
+      success: true,
+    })
+
+    expect((prisma as any).integrationMetric.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { source: 'electricity_maps' },
+        data: expect.objectContaining({
+          totalLatencyMs: 1280, // 1200 + 80
+          totalCalls: 13,       // 12 + 1
+        }),
+      })
+    )
+  })
+
+  it('recordProviderCall increments failureCount on failed call', async () => {
+    ;(prisma as any).integrationMetric.findUnique.mockResolvedValue(null)
+    ;(prisma as any).integrationMetric.create.mockResolvedValue({})
+
+    await recordProviderCall({
+      provider: 'ember',
+      region: 'DE',
+      mode: 'realtime',
+      latencyMs: 5000,
+      success: false,
+      error: 'timeout',
+    })
+
+    expect((prisma as any).integrationMetric.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          source: 'ember',
+          successCount: 0,
+          failureCount: 1,
+          lastError: 'timeout',
+        }),
+      })
+    )
+  })
+
+  it('getAllProviderMetrics computes successRate and avgLatencyMs correctly', async () => {
+    ;(prisma as any).integrationMetric.findMany.mockResolvedValue([
+      {
+        source: 'electricity_maps',
+        successCount: 9,
+        failureCount: 1,
+        totalLatencyMs: 1000,
+        totalCalls: 10,
+        lastSuccessAt: new Date(),
+        lastFailureAt: new Date(),
+        lastError: null,
+      },
+    ])
+
+    const metrics = await getAllProviderMetrics()
+
+    expect(metrics).toHaveLength(1)
+    expect(metrics[0].provider).toBe('electricity_maps')
+    expect(metrics[0].successRate).toBe(0.9)
+    expect(metrics[0].avgLatencyMs).toBe(100) // 1000ms / 10 calls
+    expect(metrics[0].totalCalls).toBe(10)
+  })
+
+  it('getAllProviderMetrics returns empty array when no providers tracked', async () => {
+    ;(prisma as any).integrationMetric.findMany.mockResolvedValue([])
+
+    const metrics = await getAllProviderMetrics()
+
+    expect(metrics).toEqual([])
+  })
+
+  // ── Resolution-aware scoring ────────────────────────────────────────────────
+
+  it('forecast result includes dataResolutionMinutes from assembler', async () => {
+    const signals: ProviderResult[] = [
+      { ok: true, signal: makeForecastSignal('SE', 28, 5) },
+    ]
+    ;(getProvider as jest.Mock).mockImplementation((name: string) =>
+      name === 'electricity_maps'
+        ? { supportsRegion: () => true, getForecast: jest.fn().mockResolvedValue(signals), getCurrentIntensity: jest.fn() }
+        : undefined
+    )
+    ;(prisma as any).carbonIntensity.findMany.mockResolvedValue([
+      { region: 'SE', carbonIntensity: 28, resolutionMinutes: 60, timestamp: new Date() },
+    ])
+
+    const result = await routeGreen({
+      preferredRegions: ['SE'],
+      targetTime: addHours(new Date(), 4),
+      durationMinutes: 60,
+    })
+
+    expect(result.dataResolutionMinutes).toBeDefined()
+    expect(typeof result.dataResolutionMinutes).toBe('number')
+  })
+
+  it('resolution penalty reduces score when resolution >> duration', async () => {
+    // resolution penalty formula: factor = 0.85 + 0.15 * (duration / resolution)
+    // FR: carbon=45, resolution=60min, duration=15min → factor = 0.85 + 0.15*0.25 = 0.888
+    // DE: carbon=46, resolution=15min, duration=15min → factor = 1.0 (no penalty)
+    // GB: carbon=400, resolution=60min → normalizer (always loses on carbon)
+    //
+    // With maxIntensity=400:
+    //   FR score = (1 - 45/400) * 0.888 = 0.888 * 0.888 = 0.788
+    //   DE score = (1 - 46/400) * 1.0   = 0.885 * 1.0   = 0.885
+    // → DE should win despite having slightly higher carbon than FR
+    const frSignals: ProviderResult[] = [{ ok: true, signal: makeForecastSignal('FR', 45, 5) }]
+    const deSignals: ProviderResult[] = [{ ok: true, signal: makeForecastSignal('DE', 46, 5) }]
+    const gbSignals: ProviderResult[] = [{ ok: true, signal: makeForecastSignal('GB', 400, 5) }]
+
+    ;(getProvider as jest.Mock).mockImplementation((name: string) => {
+      if (name !== 'electricity_maps') return undefined
+      return {
+        supportsRegion: () => true,
+        getForecast: jest.fn().mockImplementation((region: string) => {
+          if (region === 'FR') return Promise.resolve(frSignals)
+          if (region === 'DE') return Promise.resolve(deSignals)
+          return Promise.resolve(gbSignals)
+        }),
+        getCurrentIntensity: jest.fn(),
+      }
+    })
+    // FR has 60-min resolution, DE has 15-min (fine) resolution
+    ;(prisma as any).carbonIntensity.findMany.mockResolvedValue([
+      { region: 'FR', carbonIntensity: 45,  resolutionMinutes: 60, timestamp: new Date() },
+      { region: 'DE', carbonIntensity: 46,  resolutionMinutes: 15, timestamp: new Date() },
+      { region: 'GB', carbonIntensity: 400, resolutionMinutes: 60, timestamp: new Date() },
+    ])
+
+    const result = await routeGreen({
+      preferredRegions: ['FR', 'DE', 'GB'],
+      targetTime: addHours(new Date(), 4),
+      durationMinutes: 15, // short workload — 60-min data for FR is too coarse
+      carbonWeight: 1.0,
+      latencyWeight: 0.0,
+      costWeight: 0.0,
+    })
+
+    // DE wins: slightly higher carbon (46 vs 45) but fine resolution removes the penalty
+    // while FR's coarse resolution (60min vs 15min workload) reduces its score by ~11%
+    expect(result.selectedRegion).toBe('DE')
   })
 })

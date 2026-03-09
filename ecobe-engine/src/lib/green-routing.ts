@@ -61,6 +61,32 @@ export interface RoutingResult {
    *   low    → historical fallback, unstable ranking, or all-failed providers
    */
   qualityTier: 'high' | 'medium' | 'low'
+  /**
+   * Native resolution of the underlying carbon intensity data in minutes.
+   * Reflects source granularity (5, 15, 30, or 60 min) without upsampling.
+   * When dataResolutionMinutes > durationMinutes, the carbon score includes
+   * a resolution penalty (see GET /api/v1/methodology for details).
+   */
+  dataResolutionMinutes?: number
+}
+
+/**
+ * Resolution confidence factor — reduces the effective carbon score when the
+ * underlying forecast data is coarser than the workload duration.
+ *
+ * Rationale: A 60-minute forecast covering a 15-minute workload is less precise
+ * than a 15-minute forecast. The intensity the workload experiences may differ
+ * meaningfully from the hourly average.
+ *
+ * Factor range: 0.85–1.0
+ *   - resolutionMinutes ≤ durationMinutes → 1.0 (no penalty)
+ *   - resolutionMinutes = 4× durationMinutes → 0.888
+ *   - Maximum penalty of 15% when resolution >> duration
+ */
+function resolutionFactor(resolutionMinutes: number, durationMin: number): number {
+  if (resolutionMinutes <= durationMin || durationMin <= 0) return 1.0
+  const ratio = durationMin / resolutionMinutes           // 0 < ratio < 1
+  return 0.85 + 0.15 * ratio                             // 0.85 at worst, 1.0 at best
 }
 
 /**
@@ -135,7 +161,9 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     const wCo = costWeight / totalW
 
     function computeScore(r: (typeof candidates)[0]): number {
-      const cScore = 1 - r.windowAvgIntensity / maxIntensity
+      // Apply resolution penalty: coarse data covering a short workload is less precise
+      const resFactor = resolutionFactor(r.dataResolutionMinutes, durationMinutes ?? 60)
+      const cScore = (1 - r.windowAvgIntensity / maxIntensity) * resFactor
       const lScore = 1 - r.latencyMs / maxLatency
       const ownCost = costPerKwhByRegion?.[r.region]
       const costScore = ownCost != null && maxCostPerKwh > 0
@@ -191,6 +219,7 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
         best.confidenceBand.empirical,
         best.confidenceBand.rankingStability,
       ),
+      dataResolutionMinutes: best.dataResolutionMinutes,
       alternatives: others.slice(0, 2).map((r) => ({
         region: r.region,
         carbonIntensity: r.targetCarbonIntensity,

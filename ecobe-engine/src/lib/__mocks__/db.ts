@@ -30,7 +30,10 @@ export const prisma = {
   },
   integrationMetric: {
     findUnique: jest.fn().mockResolvedValue(null),
+    findMany: jest.fn().mockResolvedValue([]),
     upsert: jest.fn().mockResolvedValue({}),
+    create: jest.fn().mockResolvedValue({}),
+    update: jest.fn().mockResolvedValue({}),
   },
   forecastRefresh: {
     create: jest.fn().mockResolvedValue({}),

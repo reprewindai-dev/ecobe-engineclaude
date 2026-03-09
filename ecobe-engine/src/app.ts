@@ -13,6 +13,7 @@ import forecastingRoutes from './routes/forecasting'
 import dekesRoutes from './routes/dekes'
 import ciRoutes from './routes/ci'
 import governanceRoutes from './routes/governance'
+import methodologyRoutes from './routes/methodology'
 import { attachOrgContext } from './middleware/governance'
 
 function attachHealthRoutes(app: express.Express) {
@@ -297,6 +298,8 @@ export function createApp() {
   app.use(express.urlencoded({ extended: true, limit: '1mb' }))
 
   attachHealthRoutes(app)
+  // Methodology is intentionally PUBLIC — no requireApiKey — transparency builds trust
+  app.use('/api/v1/methodology', methodologyRoutes)
   attachUiRoute(app)
   attachApiRoutes(app)
   attachFallbackHandlers(app)

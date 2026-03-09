@@ -27,6 +27,7 @@ import { auditProviderDecision } from './provider-audit'
 import { CarbonSignal, ProviderResult, QueryMode } from './types'
 import { env } from '../../config/env'
 import { redis } from '../redis'
+import { recordProviderCall } from '../provider-monitor'
 
 // ─── Public result ─────────────────────────────────────────────────────────────
 
@@ -209,7 +210,14 @@ export async function getBestCarbonSignal(
   // ── 9. Cache final signal ─────────────────────────────────────────────────
   await setCached(primaryName, region, mode, finalSignal)
 
-  // ── 10. Audit ─────────────────────────────────────────────────────────────
+  // ── 10. Audit + monitor ───────────────────────────────────────────────────
+  void recordProviderCall({
+    provider: primaryName,
+    region,
+    mode,
+    latencyMs: 0, // latency not tracked on this path (no timer here)
+    success: true,
+  })
   auditProviderDecision({
     region,
     mode,
@@ -260,6 +268,7 @@ export async function getForecastSignals(
   // ── Live fetch ──────────────────────────────────────────────────────────────
   const provider = getProvider(cfg.primary)
   let freshSignals: CarbonSignal[] = []
+  const fetchStart = Date.now()
 
   function applyFreshnessGate(signals: CarbonSignal[]): CarbonSignal[] {
     return signals.filter((s) => {
@@ -297,6 +306,15 @@ export async function getForecastSignals(
       }
     }
   }
+
+  // ── Record provider call metrics ────────────────────────────────────────────
+  void recordProviderCall({
+    provider: cfg.primary,
+    region,
+    mode: 'forecast',
+    latencyMs: Date.now() - fetchStart,
+    success: freshSignals.length > 0,
+  })
 
   // ── Cache result ────────────────────────────────────────────────────────────
   if (freshSignals.length > 0) {
