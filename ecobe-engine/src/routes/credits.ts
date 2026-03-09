@@ -261,69 +261,61 @@ router.post('/auto-offset', async (req, res) => {
     })
     const { organizationId, targetOffsetPercentage } = bodySchema.parse(req.body)
 
-    // Calculate emissions needing offset (read phase — outside transaction)
-    const emissions = await prisma.emissionLog.findMany({
-      where: { organizationId },
-    })
-
-    const totalEmissions = emissions
-      .filter((e) => e.emissionCO2 > 0)
-      .reduce<number>((sum, e) => sum + e.emissionCO2, 0)
-
-    const totalOffset = emissions
-      .filter((e) => e.offsetCO2 > 0)
-      .reduce<number>((sum, e) => sum + e.offsetCO2, 0)
-
-    const targetOffset = (totalEmissions * targetOffsetPercentage) / 100
-    const neededOffset = targetOffset - totalOffset
-
-    if (neededOffset <= 0) {
-      return res.json({
-        success: true,
-        message: 'Already at or above target offset percentage',
-        currentOffsetPercentage: totalEmissions > 0 ? (totalOffset / totalEmissions) * 100 : 0,
-      })
-    }
-
-    // Get active credits
-    const activeCredits = await prisma.carbonCredit.findMany({
-      where: {
-        organizationId,
-        status: 'ACTIVE',
-      },
-      orderBy: { purchasedAt: 'asc' }, // FIFO
-    })
-
-    const availableCO2 = activeCredits.reduce<number>((sum, c) => sum + c.amountCO2, 0)
-
-    if (availableCO2 < neededOffset) {
-      return res.status(400).json({
-        error: 'Insufficient credits',
-        needed: neededOffset,
-        available: availableCO2,
-        shortfall: neededOffset - availableCO2,
-      })
-    }
-
-    // Select credits to retire
-    let offsetAccumulated = 0
-    const creditsToRetire: string[] = []
-
-    for (const credit of activeCredits) {
-      if (offsetAccumulated >= neededOffset) break
-      creditsToRetire.push(credit.id)
-      offsetAccumulated += credit.amountCO2
-    }
-
-    // Atomically retire selected credits and log the offset
+    // All reads, calculations, and writes inside a single transaction to prevent
+    // race conditions where concurrent requests could double-retire credits or
+    // record an offset amount that doesn't match the credits actually retired.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await prisma.$transaction(async (tx: any) => {
+    const result = await prisma.$transaction(async (tx: any) => {
+      // Read phase — inside transaction for a consistent snapshot
+      const emissions = await tx.emissionLog.findMany({
+        where: { organizationId },
+      })
+
+      const totalEmissions = (emissions as any[])
+        .filter((e) => e.emissionCO2 > 0)
+        .reduce((sum: number, e) => sum + e.emissionCO2, 0)
+
+      const totalOffset = (emissions as any[])
+        .filter((e) => e.offsetCO2 > 0)
+        .reduce((sum: number, e) => sum + e.offsetCO2, 0)
+
+      const targetOffset = (totalEmissions * targetOffsetPercentage) / 100
+      const neededOffset = targetOffset - totalOffset
+
+      if (neededOffset <= 0) {
+        return {
+          alreadyMet: true,
+          currentOffsetPercentage: totalEmissions > 0 ? (totalOffset / totalEmissions) * 100 : 0,
+          totalEmissions,
+          totalOffset,
+        }
+      }
+
+      const activeCredits = await tx.carbonCredit.findMany({
+        where: { organizationId, status: 'ACTIVE' },
+        orderBy: { purchasedAt: 'asc' }, // FIFO
+      })
+
+      const availableCO2 = (activeCredits as any[]).reduce((sum: number, c) => sum + c.amountCO2, 0)
+
+      if (availableCO2 < neededOffset) {
+        return { insufficient: true, needed: neededOffset, available: availableCO2 }
+      }
+
+      // Select credits to retire
+      let offsetAccumulated = 0
+      const creditsToRetire: string[] = []
+
+      for (const credit of activeCredits) {
+        if (offsetAccumulated >= neededOffset) break
+        creditsToRetire.push(credit.id)
+        offsetAccumulated += (credit as any).amountCO2
+      }
+
+      // Retire and log — reads and writes are from the same transaction snapshot
       await tx.carbonCredit.updateMany({
         where: { id: { in: creditsToRetire }, status: 'ACTIVE' },
-        data: {
-          status: 'RETIRED',
-          retiredAt: new Date(),
-        },
+        data: { status: 'RETIRED', retiredAt: new Date() },
       })
 
       await tx.emissionLog.create({
@@ -336,7 +328,28 @@ router.post('/auto-offset', async (req, res) => {
           timestamp: new Date(),
         },
       })
+
+      return { creditsToRetire, offsetAccumulated, totalEmissions, totalOffset }
     })
+
+    if (result.alreadyMet) {
+      return res.json({
+        success: true,
+        message: 'Already at or above target offset percentage',
+        currentOffsetPercentage: result.currentOffsetPercentage,
+      })
+    }
+
+    if (result.insufficient) {
+      return res.status(400).json({
+        error: 'Insufficient credits',
+        needed: result.needed,
+        available: result.available,
+        shortfall: result.needed - result.available,
+      })
+    }
+
+    const { creditsToRetire, offsetAccumulated, totalEmissions, totalOffset } = result as any
 
     void writeAuditLog({
       organizationId,

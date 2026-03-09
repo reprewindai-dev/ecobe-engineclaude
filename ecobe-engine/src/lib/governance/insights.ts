@@ -123,7 +123,7 @@ export async function getComplianceScore(organizationId: string): Promise<number
     (prisma as any).governanceAuditLog.count({ where: { organizationId } }),
     (prisma as any).governanceAuditLog.count({ where: { organizationId, action: 'ANOMALY_DETECTED' } }),
     (prisma as any).dashboardRoutingDecision.count({
-      where: { createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
+      where: { organizationId, createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
     }),
   ])
 
