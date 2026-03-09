@@ -18,10 +18,14 @@ export interface ValidationResult {
 
 /**
  * Check that a signal is fresh enough to use for routing decisions.
- * Uses the observed_time field; if absent (synthetic / fallback), passes.
+ *
+ * Uses fetched_at — the moment this process retrieved the data from the
+ * upstream provider.  observed_time reflects when the underlying grid
+ * measurement was recorded, which is intentionally coarse for monthly
+ * providers (e.g. Ember) and must not be used to gate live-path usage.
  */
 export function validateFreshness(signal: CarbonSignal): ValidationResult {
-  const referenceTime = signal.observed_time ?? signal.fetched_at
+  const referenceTime = signal.fetched_at
   const ageMs = Date.now() - new Date(referenceTime).getTime()
   const maxMs = carbonProviderConfig.maxStalenessMinutes * 60 * 1000
 
