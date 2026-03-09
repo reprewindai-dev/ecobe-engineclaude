@@ -66,6 +66,10 @@ export async function createLease(
     latencyWeight?: number
     costWeight?: number
   },
+  context?: {
+    source?: string
+    workloadType?: string
+  },
 ): Promise<LeaseFields> {
   const tier: QualityTier = (result.qualityTier in LEASE_DURATIONS)
     ? (result.qualityTier as QualityTier)
@@ -95,6 +99,8 @@ export async function createLease(
       revalidationRequiredAt,
       selectedRegion:  result.selectedRegion,
       carbonIntensity: result.carbonIntensity,
+      source:          context?.source ?? null,
+      workloadType:    context?.workloadType ?? null,
       status: 'VALID',
     },
   })

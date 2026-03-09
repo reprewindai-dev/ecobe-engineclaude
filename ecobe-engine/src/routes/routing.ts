@@ -10,7 +10,10 @@ import { logger } from '../lib/logger'
 const router = Router()
 
 const routingRequestSchema = z.object({
-  preferredRegions: z.array(z.string()).min(1),
+  // Core routing fields
+  preferredRegions: z.array(z.string()).min(1).optional(),
+  // DEKES alias for preferredRegions — identical semantics
+  candidateRegions: z.array(z.string()).min(1).optional(),
   maxCarbonGPerKwh: z.number().positive().optional(),
   latencyMsByRegion: z.record(z.number()).optional(),
   carbonWeight: z.number().min(0).max(1).optional(),
@@ -18,15 +21,30 @@ const routingRequestSchema = z.object({
   costWeight: z.number().min(0).max(1).optional(),
   targetTime: z.string().datetime().optional().transform((v) => v ? new Date(v) : undefined),
   durationMinutes: z.number().positive().optional(),
-})
+  // First-class workload source context
+  source: z.string().optional(),
+  workloadType: z.string().optional(),
+  policyMode: z.enum(['strict_carbon', 'balanced_ops', 'budget_recovery']).optional(),
+  delayToleranceMinutes: z.number().int().min(0).max(1440).optional(),
+  // organizationId from body supplements (but doesn't override) the header
+  organizationId: z.string().optional(),
+}).refine(
+  (d) => (d.preferredRegions ?? d.candidateRegions) !== undefined,
+  { message: 'preferredRegions or candidateRegions is required' },
+)
 
 router.post('/green', async (req, res) => {
   try {
     const data = routingRequestSchema.parse(req.body)
 
-    // Org context — set by auth middleware (org key) or governance middleware (X-Organization-Id)
+    // Resolve regions: preferredRegions (existing) or candidateRegions (DEKES alias)
+    const regions: string[] = (data.preferredRegions ?? data.candidateRegions)!
+
+    // Org context — header takes precedence; body organizationId is fallback for DEKES
     const organizationId: string | undefined =
-      (req as any).resolvedOrgId ?? (req.headers['x-organization-id'] as string | undefined)
+      (req as any).resolvedOrgId
+      ?? (req.headers['x-organization-id'] as string | undefined)
+      ?? data.organizationId
 
     // Policy enforcement — if org has a policy, apply it as an additional carbon ceiling
     let enforcedMaxCarbon = data.maxCarbonGPerKwh
@@ -51,7 +69,12 @@ router.post('/green', async (req, res) => {
       }
     }
 
-    const result = await routeGreen({ ...data, maxCarbonGPerKwh: enforcedMaxCarbon })
+    const result = await routeGreen({
+      ...data,
+      preferredRegions: regions,
+      maxCarbonGPerKwh: enforcedMaxCarbon,
+      policyMode: data.policyMode,
+    })
 
     // Policy gate: if org requires green routing and the best available region still
     // violates the ceiling, return a delay recommendation instead of a route.
@@ -74,7 +97,7 @@ router.post('/green', async (req, res) => {
 
     // Window prediction — non-blocking; attaches to response when data is available
     const windowPrediction = await predictCleanWindow(
-      data.preferredRegions,
+      regions,
       result.selectedRegion,
       result.carbonIntensity,
     ).catch(() => null)
@@ -84,7 +107,7 @@ router.post('/green', async (req, res) => {
 
     if (result.decisionFrameId) {
       const signalSnapshot = Object.fromEntries(
-        data.preferredRegions.map((region) => {
+        regions.map((region) => {
           const alt = result.alternatives.find((a) => a.region === region)
           const isSelected = region === result.selectedRegion
           return [region, {
@@ -98,9 +121,14 @@ router.post('/green', async (req, res) => {
       void saveDecisionSnapshot({
         decisionFrameId: result.decisionFrameId,
         organizationId,
-        request: data,
+        request: { ...data, preferredRegions: regions },
         result,
         signalSnapshot,
+        source:                data.source,
+        workloadType:          data.workloadType,
+        policyMode:            data.policyMode,
+        delayToleranceMinutes: data.delayToleranceMinutes,
+        predictedCleanWindow:  windowPrediction ?? null,
       })
 
       // Create execution lease (fire-and-forget — don't block the response)
@@ -108,11 +136,13 @@ router.post('/green', async (req, res) => {
         result.decisionFrameId,
         organizationId,
         result,
-        data,
+        { ...data, preferredRegions: regions },
+        { source: data.source, workloadType: data.workloadType },
       ).catch(() => null)
     }
 
     res.json({
+      action: 'execute',
       ...result,
       ...(windowPrediction ? { predicted_clean_window: windowPrediction } : {}),
       ...(leaseFields ?? {}),
@@ -192,6 +222,13 @@ router.get('/:id/replay', async (req, res) => {
       referenceTime: snapshot.referenceTime,
       fallbackUsed: snapshot.fallbackUsed,
       providerDisagreement: snapshot.providerDisagreement,
+
+      // Workload source context
+      source:               snapshot.source,
+      workloadType:         snapshot.workloadType,
+      policyMode:           snapshot.policyMode,
+      delayToleranceMinutes: snapshot.delayToleranceMinutes,
+      predictedCleanWindow: snapshot.predictedCleanWindow,
 
       createdAt: snapshot.createdAt,
     })

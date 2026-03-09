@@ -29,6 +29,12 @@ export async function saveDecisionSnapshot(opts: {
   request: RoutingRequest
   result: RoutingResult
   signalSnapshot: SignalSnapshot
+  // Workload source context
+  source?: string
+  workloadType?: string
+  policyMode?: string
+  delayToleranceMinutes?: number
+  predictedCleanWindow?: unknown | null
 }): Promise<void> {
   const { decisionFrameId, organizationId, request, result, signalSnapshot } = opts
 
@@ -74,6 +80,13 @@ export async function saveDecisionSnapshot(opts: {
         referenceTime: request.targetTime ?? new Date(),
         fallbackUsed: signalSnapshot[result.selectedRegion]?.fallbackUsed ?? false,
         providerDisagreement: result.provider_disagreement?.flag ?? false,
+
+        // Workload source context
+        source:                opts.source ?? null,
+        workloadType:          opts.workloadType ?? null,
+        policyMode:            opts.policyMode ?? null,
+        delayToleranceMinutes: opts.delayToleranceMinutes ?? null,
+        predictedCleanWindow:  (opts.predictedCleanWindow ?? null) as any,
       },
     })
   } catch (err: any) {

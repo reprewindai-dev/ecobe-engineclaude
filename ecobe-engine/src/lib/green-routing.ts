@@ -25,6 +25,18 @@ export interface RoutingRequest {
   targetTime?: Date
   /** Expected workload duration in minutes — used by forecast-based path */
   durationMinutes?: number
+  /**
+   * Named policy mode — maps to a predefined weight preset.
+   * Overrides default weights but is itself overridden by explicit
+   * carbonWeight / latencyWeight / costWeight when provided by caller.
+   *
+   *   strict_carbon   → carbon=0.90, latency=0.05, cost=0.05
+   *   balanced_ops    → carbon=0.50, latency=0.25, cost=0.25
+   *   budget_recovery → carbon=0.30, latency=0.35, cost=0.35
+   */
+  policyMode?: 'strict_carbon' | 'balanced_ops' | 'budget_recovery'
+  /** Minutes the caller can tolerate waiting — informational, stored in snapshot */
+  delayToleranceMinutes?: number
 }
 
 export interface RoutingResult {
@@ -96,6 +108,15 @@ export interface RoutingResult {
   provider_disagreement: { flag: boolean; pct: number | null } | null
 }
 
+// ─── Policy mode weight presets ───────────────────────────────────────────────
+// Maps named policy modes to carbon / latency / cost weight triples.
+// Explicit per-field weights always take precedence over the preset.
+const POLICY_MODE_WEIGHTS: Record<string, { carbonWeight: number; latencyWeight: number; costWeight: number }> = {
+  strict_carbon:   { carbonWeight: 0.90, latencyWeight: 0.05, costWeight: 0.05 },
+  balanced_ops:    { carbonWeight: 0.50, latencyWeight: 0.25, costWeight: 0.25 },
+  budget_recovery: { carbonWeight: 0.30, latencyWeight: 0.35, costWeight: 0.35 },
+}
+
 /**
  * Resolution confidence factor — reduces the effective carbon score when the
  * underlying forecast data is coarser than the workload duration.
@@ -142,17 +163,22 @@ function computeQualityTier(
 }
 
 export async function routeGreen(request: RoutingRequest): Promise<RoutingResult> {
+  // Resolve weights: explicit caller values override policy mode presets, which
+  // override the engine defaults.
+  const modePreset = request.policyMode ? POLICY_MODE_WEIGHTS[request.policyMode] : undefined
+
   const {
     preferredRegions,
     maxCarbonGPerKwh,
     latencyMsByRegion = {},
-    carbonWeight = 0.5,
-    latencyWeight = 0.2,
-    costWeight = 0.3,
     costPerKwhByRegion,
     targetTime,
     durationMinutes,
   } = request
+
+  const carbonWeight  = request.carbonWeight  ?? modePreset?.carbonWeight  ?? 0.5
+  const latencyWeight = request.latencyWeight ?? modePreset?.latencyWeight ?? 0.2
+  const costWeight    = request.costWeight    ?? modePreset?.costWeight    ?? 0.3
 
   // ── FORECAST PATH (future targetTime) ───────────────────────────────────────
   // When the caller supplies a targetTime in the future (scheduled workloads,
