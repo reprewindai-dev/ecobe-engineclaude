@@ -1,6 +1,6 @@
 import { prisma } from './db'
 
-export type IntegrationSource = 'ELECTRICITY_MAPS' | 'DEKES_API' | (string & Record<string, never>)
+export type IntegrationSource = 'ELECTRICITY_MAPS' | 'EMBER' | 'WATTTIME' | 'DEKES_API' | (string & Record<string, never>)
 
 export async function recordIntegrationSuccess(source: IntegrationSource) {
   await prisma.integrationMetric.upsert({

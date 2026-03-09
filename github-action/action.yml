@@ -1,0 +1,147 @@
+name: 'ECOBE Carbon-Aware Runner'
+description: >
+  Routes CI/CD jobs to the lowest-carbon available runner region using
+  ECOBE Engine's real-time grid carbon intensity data.
+  Reduces CI/CD carbon footprint without changing your workflow logic.
+
+author: 'ECOBE Engine'
+
+branding:
+  icon: 'zap'
+  color: 'green'
+
+inputs:
+  ecobe-url:
+    description: 'ECOBE Engine base URL (e.g. https://your-ecobe-engine.railway.app)'
+    required: true
+
+  runners:
+    description: >
+      JSON array of available runners with their region mappings.
+      Format: [{"name":"ubuntu-latest","region":"US-CAL-CISO"},{"name":"ubuntu-eu","region":"FR"}]
+    required: true
+
+  workload-type:
+    description: 'Type of CI workload: build | test | deploy | batch'
+    required: false
+    default: 'build'
+
+  max-delay-minutes:
+    description: >
+      Maximum minutes to delay execution for a greener window (0 = run now).
+      When > 0 ECOBE checks if a significantly greener window exists within this range.
+    required: false
+    default: '0'
+
+  carbon-weight:
+    description: 'Weight given to carbon intensity vs other factors (0.0–1.0, default 0.7)'
+    required: false
+    default: '0.7'
+
+  fail-on-error:
+    description: 'Fail the step if ECOBE Engine is unreachable (default: false — falls back to first runner)'
+    required: false
+    default: 'false'
+
+outputs:
+  selected-runner:
+    description: 'The GitHub Actions runner label chosen by ECOBE'
+    value: ${{ steps.ecobe-route.outputs.selected_runner }}
+
+  selected-region:
+    description: 'Grid region of the chosen runner'
+    value: ${{ steps.ecobe-route.outputs.selected_region }}
+
+  carbon-intensity:
+    description: 'Live carbon intensity at the selected region (gCO2/kWh)'
+    value: ${{ steps.ecobe-route.outputs.carbon_intensity }}
+
+  baseline-intensity:
+    description: 'Average carbon intensity across all candidate runners (gCO2/kWh)'
+    value: ${{ steps.ecobe-route.outputs.baseline_intensity }}
+
+  savings-pct:
+    description: 'Estimated CO2 savings % vs average baseline runner'
+    value: ${{ steps.ecobe-route.outputs.savings_pct }}
+
+  recommendation:
+    description: 'ECOBE recommendation: run_now or delay'
+    value: ${{ steps.ecobe-route.outputs.recommendation }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Query ECOBE Engine for optimal runner
+      id: ecobe-route
+      shell: bash
+      env:
+        ECOBE_URL: ${{ inputs.ecobe-url }}
+        RUNNERS_JSON: ${{ inputs.runners }}
+        WORKLOAD_TYPE: ${{ inputs.workload-type }}
+        MAX_DELAY_MINUTES: ${{ inputs.max-delay-minutes }}
+        CARBON_WEIGHT: ${{ inputs.carbon-weight }}
+        FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+      run: |
+        set -euo pipefail
+
+        # Default fallback: first runner in the list
+        FALLBACK_RUNNER=$(echo "$RUNNERS_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['name'])" 2>/dev/null || echo "ubuntu-latest")
+
+        PAYLOAD=$(python3 -c "
+        import json, os, sys
+        runners = json.loads(os.environ['RUNNERS_JSON'])
+        body = {
+          'runners': runners,
+          'workload_type': os.environ.get('WORKLOAD_TYPE', 'build'),
+          'max_delay_minutes': int(os.environ.get('MAX_DELAY_MINUTES', '0')),
+          'carbon_weight': float(os.environ.get('CARBON_WEIGHT', '0.7')),
+        }
+        print(json.dumps(body))
+        ")
+
+        RESPONSE=$(curl -sf \
+          --max-time 10 \
+          -X POST \
+          -H "Content-Type: application/json" \
+          -d "$PAYLOAD" \
+          "${ECOBE_URL%/}/api/v1/ci/carbon-route" 2>&1) || {
+          echo "::warning::ECOBE Engine unreachable — falling back to first runner: $FALLBACK_RUNNER"
+          if [ "$FAIL_ON_ERROR" = "true" ]; then
+            echo "::error::ECOBE Engine request failed and fail-on-error is true"
+            exit 1
+          fi
+          echo "selected_runner=$FALLBACK_RUNNER" >> "$GITHUB_OUTPUT"
+          echo "selected_region=unknown"          >> "$GITHUB_OUTPUT"
+          echo "carbon_intensity=unknown"         >> "$GITHUB_OUTPUT"
+          echo "baseline_intensity=unknown"       >> "$GITHUB_OUTPUT"
+          echo "savings_pct=0"                    >> "$GITHUB_OUTPUT"
+          echo "recommendation=run_now"           >> "$GITHUB_OUTPUT"
+          exit 0
+        }
+
+        SELECTED_RUNNER=$(echo "$RESPONSE"   | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['selected_runner'])")
+        SELECTED_REGION=$(echo "$RESPONSE"   | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['selected_region'])")
+        CARBON_INTENSITY=$(echo "$RESPONSE"  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['carbon_intensity'])")
+        BASELINE=$(echo "$RESPONSE"          | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['baseline_intensity'])")
+        SAVINGS=$(echo "$RESPONSE"           | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['savings_pct'])")
+        RECOMMENDATION=$(echo "$RESPONSE"   | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['recommendation'])")
+
+        echo "selected_runner=$SELECTED_RUNNER"   >> "$GITHUB_OUTPUT"
+        echo "selected_region=$SELECTED_REGION"   >> "$GITHUB_OUTPUT"
+        echo "carbon_intensity=$CARBON_INTENSITY" >> "$GITHUB_OUTPUT"
+        echo "baseline_intensity=$BASELINE"       >> "$GITHUB_OUTPUT"
+        echo "savings_pct=$SAVINGS"               >> "$GITHUB_OUTPUT"
+        echo "recommendation=$RECOMMENDATION"     >> "$GITHUB_OUTPUT"
+
+        echo "### ECOBE Carbon-Aware Runner" >> "$GITHUB_STEP_SUMMARY"
+        echo ""                              >> "$GITHUB_STEP_SUMMARY"
+        echo "| Metric | Value |"            >> "$GITHUB_STEP_SUMMARY"
+        echo "|--------|-------|"            >> "$GITHUB_STEP_SUMMARY"
+        echo "| Selected runner | \`$SELECTED_RUNNER\` |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Grid region | $SELECTED_REGION |"         >> "$GITHUB_STEP_SUMMARY"
+        echo "| Carbon intensity | ${CARBON_INTENSITY} gCO₂/kWh |" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Baseline intensity | ${BASELINE} gCO₂/kWh |"       >> "$GITHUB_STEP_SUMMARY"
+        echo "| CO₂ savings | **${SAVINGS}%** vs average |"         >> "$GITHUB_STEP_SUMMARY"
+        echo "| Recommendation | $RECOMMENDATION |"                 >> "$GITHUB_STEP_SUMMARY"
+
+        echo "::notice::ECOBE selected $SELECTED_RUNNER ($SELECTED_REGION) — ${CARBON_INTENSITY} gCO₂/kWh — ${SAVINGS}% savings vs baseline"

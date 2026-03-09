@@ -1,8 +1,9 @@
 import cron from 'node-cron'
-import { subHours } from 'date-fns'
+import { subHours, addHours } from 'date-fns'
 import { prisma } from '../lib/db'
 import { electricityMaps } from '../lib/electricity-maps'
 import { forecastCarbonIntensity } from '../lib/carbon-forecasting'
+import { getForecastSignals } from '../lib/carbon/provider-router'
 import { env } from '../config/env'
 import { redis } from '../lib/redis'
 import {
@@ -45,11 +46,58 @@ async function ingestRegionHistory(region: string) {
     ingested += 1
   }
 
-  const forecasts = await forecastCarbonIntensity(region, DEFAULT_FORECAST_HOURS)
+  // Internal statistical model forecasts (as before)
+  const internalForecasts = await forecastCarbonIntensity(region, DEFAULT_FORECAST_HOURS)
+
+  // Real provider forecasts from Electricity Maps — persist to CarbonForecast
+  const now = new Date()
+  const forecastTo = addHours(now, DEFAULT_FORECAST_HOURS)
+  let providerForecastCount = 0
+
+  try {
+    const signals = await getForecastSignals(region, now, forecastTo)
+    for (const signal of signals) {
+      if (!signal.forecast_time || signal.intensity_gco2_per_kwh <= 0) continue
+      const referenceTime = signal.observed_time ? new Date(signal.observed_time) : now
+      const forecastTime = new Date(signal.forecast_time)
+      const horizonHours = (forecastTime.getTime() - referenceTime.getTime()) / (1000 * 60 * 60)
+
+      await prisma.carbonForecast.upsert({
+        where: {
+          region_forecastTime_source: {
+            region: signal.region,
+            forecastTime,
+            source: signal.source,
+          },
+        },
+        update: {
+          predictedIntensity: Math.round(signal.intensity_gco2_per_kwh),
+          confidence: signal.confidence ?? 0.75,
+          referenceTime,
+          horizonHours: Math.max(0, horizonHours ?? 0),
+        },
+        create: {
+          region: signal.region,
+          source: signal.source,
+          forecastTime,
+          predictedIntensity: Math.round(signal.intensity_gco2_per_kwh),
+          confidence: signal.confidence ?? 0.75,
+          referenceTime,
+          horizonHours: Math.max(0, horizonHours ?? 0),
+          modelVersion: 'provider-live',
+          features: signal.metadata ?? {},
+        },
+      })
+      providerForecastCount++
+    }
+  } catch (err: any) {
+    console.warn(`[forecast-poller] Provider forecast ingestion failed for ${region}:`, err?.message)
+    // Non-fatal — internal model forecasts are still available
+  }
 
   return {
     recordsIngested: ingested,
-    forecastsGenerated: forecasts.length,
+    forecastsGenerated: internalForecasts.length + providerForecastCount,
   }
 }
 

@@ -4,8 +4,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
-  directUrl = env("DATABASE_URL")
 }
 
 // ============================================================================
@@ -24,6 +22,11 @@ model CarbonIntensity {
 
   // Source
   source    String   @default("ELECTRICITY_MAPS")
+
+  // Native resolution — store data exactly as received; do NOT normalize to a uniform interval.
+  // 5 = 5-minute readings, 15 = 15-minute readings, 60 = hourly (default).
+  // Alignment to a common resolution happens at query time inside DecisionDataAssembler.
+  resolutionMinutes Int @default(60)
 
   // Timestamp
   timestamp DateTime
@@ -124,7 +127,8 @@ model RoutingDecision {
 model DashboardRoutingDecision {
   id        String   @id @default(cuid())
 
-  createdAt DateTime @default(now())
+  createdAt      DateTime @default(now())
+  organizationId String?  // scopes decision to an org; null = legacy/anonymous
 
   workloadName String?
   opName       String?
@@ -154,6 +158,7 @@ model DashboardRoutingDecision {
   meta Json @default("{}")
 
   @@index([createdAt])
+  @@index([organizationId, createdAt])
   @@index([baselineRegion])
   @@index([chosenRegion])
 }
@@ -166,25 +171,77 @@ model CarbonForecast {
   id        String   @id @default(cuid())
 
   region    String
+  source    String   @default("electricity_maps")  // which provider generated this prediction
 
   // Forecast
   forecastTime      DateTime
   predictedIntensity Int     // gCO2eq/kWh
   confidence         Float   // 0.0 - 1.0
 
+  // Two-time model (critical for forecast accuracy):
+  //   referenceTime = when this forecast was generated / data was observed
+  //   forecastTime  = the future moment being predicted (targetTime in queries)
+  // Separating these lets DecisionDataAssembler pick the freshest forecast
+  // for any given targetTime rather than relying on insertion order.
+  referenceTime     DateTime @default(now())
+
+  // Horizon in hours at prediction time (derived from forecastTime - referenceTime)
+  horizonHours      Float    @default(0)
+
   // Model info
   modelVersion      String  @default("v1.0")
   features          Json    @default("{}")
 
-  // Actual (for training)
+  // Actual (for training / back-test) — filled in by reconcileForecastActuals
   actualIntensity   Int?
-  error             Float?
+  error             Float?  // signed error: predicted - actual
 
   createdAt DateTime @default(now())
 
   @@index([region, forecastTime])
+  @@index([region, referenceTime])
   @@index([forecastTime])
-  @@unique([region, forecastTime], name: "region_forecastTime")
+  @@index([region, source, forecastTime])
+  // Allow multiple sources per (region, forecastTime) — source is the differentiator
+  @@unique([region, forecastTime, source], name: "region_forecastTime_source")
+}
+
+/**
+ * Rolling accuracy scorecard per region, recomputed after each reconciliation run.
+ * Stored so the assembler can read it cheaply without a full aggregate query.
+ */
+model RegionForecastScorecard {
+  id     String @id @default(cuid())
+  region String @unique
+
+  // MAE = mean absolute error (gCO2/kWh)
+  mae24h   Float?  // 0–24 h horizon
+  mae48h   Float?  // 24–48 h horizon
+  mae72h   Float?  // 48–72 h horizon
+
+  // MAPE = mean absolute percentage error (0–1)
+  mape24h  Float?
+  mape48h  Float?
+  mape72h  Float?
+
+  // Operational health rates (0–1, fraction of attempts)
+  fallbackRate          Float  @default(0)   // predictions that used historical fallback
+  staleRejectionRate    Float  @default(0)   // predictions where fresh forecast was unavailable
+  providerDisagreementRate Float @default(0) // predictions with disagreement_flag set
+  forecastHitRate       Float  @default(0)  // fraction where predicted best slot was actually best
+
+  // Reliability tier derived from combined metrics
+  // 'high'    → mape24h < 10%, low fallback rate
+  // 'medium'  → mape24h 10–25%
+  // 'low'     → mape24h > 25% or high fallback rate
+  // 'unknown' → fewer than MIN_SAMPLE_COUNT observations
+  reliabilityTier  String  @default("unknown")
+  sampleCount      Int     @default(0)
+  lastComputedAt   DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  @@index([region])
 }
 
 model ForecastRefresh {
@@ -297,6 +354,35 @@ model DekesWorkload {
 }
 
 // ============================================================================
+// CARBON BUDGET / QUOTA TRACKING
+// ============================================================================
+
+/**
+ * Per-organization CO2 quota for a billing/reporting period.
+ * consumedCO2Grams is atomically incremented after each routing decision.
+ * Multiple non-overlapping periods may exist; only the one where
+ * periodStart <= now <= periodEnd is active.
+ */
+model CarbonBudget {
+  id             String   @id @default(cuid())
+  organizationId String
+
+  budgetPeriod   String   // 'monthly' | 'quarterly' | 'annual'
+  periodStart    DateTime
+  periodEnd      DateTime
+
+  budgetCO2Grams      Float              // total allowed gCO2 for the period
+  consumedCO2Grams    Float  @default(0) // incremented by consumeBudget()
+  warningThresholdPct Float  @default(0.8) // emit warning at this fraction (default 80%)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, periodEnd])
+  @@index([periodEnd])
+}
+
+// ============================================================================
 // REGION METADATA
 // ============================================================================
 
@@ -367,6 +453,272 @@ model IntegrationMetric {
   lastFailureAt  DateTime?
   lastError      String?
 
+  // Phase 2C: rolling latency tracking
+  totalLatencyMs Float    @default(0)   // sum of all recorded latencies
+  totalCalls     Int      @default(0)   // successCount + failureCount (maintained separately for accuracy)
+
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+// ============================================================================
+// GOVERNANCE LAYER
+// ============================================================================
+
+// Tamper-evident audit log — every write is chained via SHA256
+model GovernanceAuditLog {
+  id             String   @id @default(cuid())
+  sequence       Int      // monotonically increasing
+
+  organizationId String?
+  actorId        String?  // SHA256 of API key — raw key never stored
+  actorType      String   // "API_KEY" | "SYSTEM" | "CRON"
+
+  action         String   // "DECISION_CREATED" | "CREDIT_RETIRED" | "CREDIT_PURCHASED" | "CREDIT_AUTO_OFFSET" | "POLICY_UPDATED" | "ANOMALY_DETECTED" | "CHAIN_VERIFIED"
+  entityType     String   // "DashboardRoutingDecision" | "CarbonCredit" | "EmissionLog" | "OrganizationPolicy"
+  entityId       String
+
+  payload        Json     // snapshot of the entity at event time
+  result         String   // "SUCCESS" | "FAILURE" | "BLOCKED"
+
+  // Tamper-evident chain
+  chainHash      String   // SHA256(previousHash|sequence|entityId|action|JSON(payload)|createdAt.toISOString())
+  previousHash   String?  // null only for genesis record
+
+  // Governance context
+  carbonSavedG   Float?
+  riskTier       String?
+  policyVersion  String   @default("1.0")
+
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([entityType, entityId])
+  @@index([action, createdAt])
+  @@index([sequence])
+  @@index([chainHash])
+}
+
+// Per-organization governance policy — carbon ceilings, routing requirements, anomaly thresholds
+model OrganizationPolicy {
+  id             String   @id @default(cuid())
+  organizationId String   @unique
+
+  tier           String   @default("STANDARD") // "BASIC" | "STANDARD" | "PREMIUM" | "INVESTOR_GRADE"
+
+  // Carbon policy
+  maxCarbonGPerKwh      Int?
+  requireGreenRouting   Boolean @default(false)
+  autoOffsetEnabled     Boolean @default(false)
+  autoOffsetThresholdG  Float?
+
+  // Audit settings
+  auditRetentionDays    Int     @default(365)
+  requireChainVerify    Boolean @default(false)
+
+  // Anomaly detection
+  anomalyDetectionEnabled Boolean @default(true)
+  anomalyThresholdSigma   Float   @default(2.0)
+
+  policyVersion  String   @default("1.0")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+// Point-in-time investor summary snapshot
+model GovernanceSnapshot {
+  id             String   @id @default(cuid())
+  organizationId String?
+
+  snapshotType   String   // "DAILY_SUMMARY" | "COMPLIANCE_REPORT" | "INVESTOR_BRIEF"
+  windowStart    DateTime
+  windowEnd      DateTime
+
+  totalDecisions      Int   @default(0)
+  greenRoutedCount    Int   @default(0)
+  totalCO2SavedG      Float @default(0)
+  totalCO2EmittedG    Float @default(0)
+  totalCreditsActive  Float @default(0)
+  totalCreditsRetired Float @default(0)
+  offsetPercentage    Float @default(0)
+
+  chainIntact      Boolean  @default(true)
+  chainVerifiedAt  DateTime?
+  auditLogCount    Int      @default(0)
+
+  complianceScore  Float    @default(0)  // 0.0–1.0
+
+  payload          Json     @default("{}")
+  createdAt        DateTime @default(now())
+
+  @@index([organizationId, snapshotType, windowStart])
+  @@index([snapshotType, createdAt])
+}
+
+// ============================================================================
+// PER-ORG API KEY ISOLATION
+// ============================================================================
+
+// Hashed API key tied to a single organization.
+// One org may have multiple active keys (rotation support).
+// keyHash = SHA-256(plaintext key) — plaintext is never stored.
+// keyPrefix = first 8 chars of plaintext for display ("co2r_abc...").
+model OrgApiKey {
+  id             String   @id @default(cuid())
+  organizationId String
+
+  keyHash   String   @unique // SHA-256 of the raw key
+  keyPrefix String            // first 8 chars of raw key — display only
+
+  active    Boolean  @default(true)
+  label     String?           // optional human label
+
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+
+  @@index([organizationId, active])
+  @@index([keyHash])
+}
+
+// ============================================================================
+// DECISION REPLAY (deterministic routing reconstruction)
+// ============================================================================
+
+// Full decision snapshot stored at routing time.
+// Enables GET /api/v1/decisions/:id/replay to reconstruct any past decision.
+model DecisionSnapshot {
+  id             String   @id @default(cuid()) // = decisionFrameId from routing result
+
+  organizationId String?
+  createdAt      DateTime @default(now())
+
+  // Request inputs
+  regions          Json   // string[]
+  targetTime       DateTime?
+  durationMinutes  Int?
+  maxCarbonGPerKwh Int?
+  weights          Json   // { carbon, latency, cost }
+
+  // Signals at decision time — keyed by region
+  signalSnapshot   Json   // Record<region, { intensity, source, referenceTime, fallbackUsed, disagreementFlag }>
+
+  // Decision output
+  selectedRegion      String
+  carbonIntensity     Int
+  baselineIntensity   Int
+  carbonDeltaGPerKwh  Int
+  qualityTier         String
+  forecastStability   String?
+  score               Float
+  explanation         String
+
+  // Provenance
+  sourceUsed          String?
+  referenceTime       DateTime?
+  fallbackUsed        Boolean @default(false)
+  providerDisagreement Boolean @default(false)
+
+  // Workload source context — stored at decision time for audit and replay fidelity
+  source                String?  // "DEKES" | "API" | "CLI"
+  workloadType          String?  // "lead_generation_batch" | "inference" | etc.
+  policyMode            String?  // "balanced_ops" | "strict_carbon" | "budget_recovery"
+  delayToleranceMinutes Int?     // minutes caller can wait before execution
+
+  // Window prediction captured at decision time
+  predictedCleanWindow  Json?    // null when no prediction was available
+
+  @@index([organizationId, createdAt])
+  @@index([selectedRegion, createdAt])
+}
+
+// ============================================================================
+// TEMPORAL CARBON INTELLIGENCE
+// Learned per-region hourly intensity patterns — what Google's scheduler lacks.
+// Built from historical CarbonIntensity records; enables probability-weighted
+// routing decisions rather than purely reactive signal-following.
+// ============================================================================
+
+// 168 rows per region (7 days × 24 hours, Monday=0 through Sunday=167).
+// Populated/refreshed by computeTemporalPatterns() — typically nightly.
+model RegionTemporalPattern {
+  id         String @id @default(cuid())
+  region     String
+  hourOfWeek Int    // 0 = Mon 00:00 UTC … 167 = Sun 23:00 UTC
+
+  avgIntensity Float
+  p10Intensity Float  // optimistic / clean end of distribution
+  p50Intensity Float  // median
+  p90Intensity Float  // pessimistic / dirty end
+  stddev       Float
+
+  sampleCount Int
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([region, hourOfWeek])
+  @@index([region])
+}
+
+// ============================================================================
+// DECISION LEASE (execution drift prevention)
+// Prevents stale decisions from executing after grid/policy state has changed.
+// ============================================================================
+
+// Execution validity window attached to every routed decision.
+// Status lifecycle: VALID → REVALIDATED | EXECUTED | EXPIRED | DRIFT_BLOCKED
+model DecisionLease {
+  id             String  @id // = decisionFrameId from routing result
+  organizationId String?
+
+  createdAt DateTime @default(now())
+
+  // Original request inputs — used to re-route on revalidation
+  regions          Json   // string[]
+  maxCarbonGPerKwh Int?
+  weights          Json   // { carbon, latency, cost }
+  qualityTier      String // high | medium | low
+
+  // Lease window boundaries
+  leaseExpiresAt         DateTime
+  revalidationRequiredAt DateTime
+
+  // Decision at creation time
+  selectedRegion  String
+  carbonIntensity Int
+
+  // Workload source context — preserved for revalidation context
+  source       String?
+  workloadType String?
+
+  // Current status
+  status String @default("VALID") // VALID | REVALIDATED | EXECUTED | EXPIRED | DRIFT_BLOCKED
+
+  // Revalidation outcome (populated when POST /:id/revalidate is called)
+  revalidatedAt      DateTime?
+  revalidationAction String?   // execute | reroute | delay | deny
+  revalidationReason String?
+  driftDetected      Boolean   @default(false)
+  newRegion          String?   // populated when rerouted
+
+  @@index([organizationId, createdAt])
+  @@index([status, leaseExpiresAt])
+}
+
+// Emitted whenever revalidation finds a materially different routing outcome.
+// Powers the executionIntegrity panel in the dashboard.
+model ExecutionDriftEvent {
+  id             String  @id @default(cuid())
+  organizationId String?
+
+  decisionLeaseId String
+  createdAt       DateTime @default(now())
+
+  originalRegion    String
+  newRegion         String
+  originalIntensity Int
+  newIntensity      Int
+  reason            String
+
+  @@index([organizationId, createdAt])
+  @@index([decisionLeaseId])
 }

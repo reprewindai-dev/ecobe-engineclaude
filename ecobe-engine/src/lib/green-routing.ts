@@ -1,14 +1,42 @@
 import { prisma } from './db'
-import { redis } from './redis'
-import { electricityMaps } from './electricity-maps'
+import { getBestCarbonSignal } from './carbon/provider-router'
+import { assembleDecisionFrame } from './decision-data-assembler'
+import { reconcileForecastActuals, computeRankingStability } from './forecast-scorecard'
 
 export interface RoutingRequest {
   preferredRegions: string[]
   maxCarbonGPerKwh?: number
   latencyMsByRegion?: Record<string, number>
-  costWeight?: number  // 0-1, default 0.3
+  costWeight?: number    // 0-1, default 0.3
   carbonWeight?: number  // 0-1, default 0.5
-  latencyWeight?: number  // 0-1, default 0.2
+  latencyWeight?: number // 0-1, default 0.2
+  /**
+   * Per-region electricity cost in USD/kWh.
+   * When provided, the cost objective uses real prices rather than proxying carbon.
+   * When omitted, cost score falls back to the carbon score (cost ∝ carbon).
+   */
+  costPerKwhByRegion?: Record<string, number>
+  /**
+   * When the workload is scheduled to run (defaults to now).
+   * When set to a future time, routing uses DecisionDataAssembler's
+   * forecast-based path (query-time alignment, lazy query planning)
+   * instead of the live Redis/Electricity Maps path.
+   */
+  targetTime?: Date
+  /** Expected workload duration in minutes — used by forecast-based path */
+  durationMinutes?: number
+  /**
+   * Named policy mode — maps to a predefined weight preset.
+   * Overrides default weights but is itself overridden by explicit
+   * carbonWeight / latencyWeight / costWeight when provided by caller.
+   *
+   *   strict_carbon   → carbon=0.90, latency=0.05, cost=0.05
+   *   balanced_ops    → carbon=0.50, latency=0.25, cost=0.25
+   *   budget_recovery → carbon=0.30, latency=0.35, cost=0.35
+   */
+  policyMode?: 'strict_carbon' | 'balanced_ops' | 'budget_recovery'
+  /** Minutes the caller can tolerate waiting — informational, stored in snapshot */
+  delayToleranceMinutes?: number
 }
 
 export interface RoutingResult {
@@ -22,55 +50,293 @@ export interface RoutingResult {
     score: number
     reason?: string
   }>
+  /** Present when the forecast-based assembler path was used */
+  decisionFrameId?: string
+  forecastAvailable?: boolean
+  /**
+   * Uncertainty band for the winning region's window average intensity.
+   * Derived from actual signal distribution (empirical=true) or estimated
+   * from the forecast confidence score (empirical=false).
+   * Present on the forecast path; absent on the live path (single point).
+   */
+  confidenceBand?: { low: number; mid: number; high: number; empirical: boolean }
+  /**
+   * Human-readable explanation of why this region/time was chosen.
+   * Includes intensity vs alternatives, expected reduction %, and data quality.
+   * Suitable for dashboard display and API consumers building trust UIs.
+   */
+  explanation: string
+  /**
+   * Overall confidence in this routing decision:
+   *   high   → live data or empirical forecast band + stable ranking
+   *   medium → forecast with estimated band, or overlapping but non-swapping ranges
+   *   low    → historical fallback, unstable ranking, or all-failed providers
+   */
+  qualityTier: 'high' | 'medium' | 'low'
+  /**
+   * Native resolution of the underlying carbon intensity data in minutes.
+   * Reflects source granularity (5, 15, 30, or 60 min) without upsampling.
+   * When dataResolutionMinutes > durationMinutes, the carbon score includes
+   * a resolution penalty (see GET /api/v1/methodology for details).
+   */
+  dataResolutionMinutes?: number
+
+  // ── Decision confidence fields ─────────────────────────────────────────────
+
+  /**
+   * Absolute carbon intensity delta in gCO2eq/kWh: baseline_ci − selected_ci.
+   * Positive means the selected region is cleaner than the worst alternative.
+   * This is the raw CO₂ signal — pairs with expected_savings_pct for ESG reporting.
+   */
+  carbon_delta_g_per_kwh: number
+
+  /**
+   * Whether the winning region's ranking is stable across nearby forecast slots.
+   * 'stable'   → winner dominates; no alternative could realistically beat it
+   * 'medium'   → winner leads but intensity ranges overlap with at least one alt
+   * 'unstable' → an alternative could plausibly have lower intensity than winner
+   * null       → live path (no multi-slot forecast to compare)
+   */
+  forecast_stability: 'stable' | 'medium' | 'unstable' | null
+
+  /**
+   * Cross-provider signal disagreement for the selected region.
+   * null when only one provider was queried or validation is disabled.
+   * flag=true means providers disagreed by more than the configured threshold.
+   * This feeds into qualityTier but is also surfaced explicitly for transparency.
+   */
+  provider_disagreement: { flag: boolean; pct: number | null } | null
+}
+
+// ─── Policy mode weight presets ───────────────────────────────────────────────
+// Maps named policy modes to carbon / latency / cost weight triples.
+// Explicit per-field weights always take precedence over the preset.
+const POLICY_MODE_WEIGHTS: Record<string, { carbonWeight: number; latencyWeight: number; costWeight: number }> = {
+  strict_carbon:   { carbonWeight: 0.90, latencyWeight: 0.05, costWeight: 0.05 },
+  balanced_ops:    { carbonWeight: 0.50, latencyWeight: 0.25, costWeight: 0.25 },
+  budget_recovery: { carbonWeight: 0.30, latencyWeight: 0.35, costWeight: 0.35 },
+}
+
+/**
+ * Resolution confidence factor — reduces the effective carbon score when the
+ * underlying forecast data is coarser than the workload duration.
+ *
+ * Rationale: A 60-minute forecast covering a 15-minute workload is less precise
+ * than a 15-minute forecast. The intensity the workload experiences may differ
+ * meaningfully from the hourly average.
+ *
+ * Factor range: 0.85–1.0
+ *   - resolutionMinutes ≤ durationMinutes → 1.0 (no penalty)
+ *   - resolutionMinutes = 4× durationMinutes → 0.888
+ *   - Maximum penalty of 15% when resolution >> duration
+ */
+function resolutionFactor(resolutionMinutes: number, durationMin: number): number {
+  if (resolutionMinutes <= durationMin || durationMin <= 0) return 1.0
+  const ratio = durationMin / resolutionMinutes           // 0 < ratio < 1
+  return 0.85 + 0.15 * ratio                             // 0.85 at worst, 1.0 at best
+}
+
+/**
+ * Map data-quality signals to a routing decision quality tier.
+ *   high   → live real-time signal, OR forecast with empirical band + stable ranking
+ *   medium → forecast with estimated band, or overlapping (medium stability)
+ *   low    → historical fallback (no fresh forecast/live data), or unstable ranking
+ */
+function computeQualityTier(
+  forecastAvailable: boolean,
+  empirical: boolean | undefined,
+  rankingStability: 'stable' | 'medium' | 'unstable' | 'sole_candidate' | undefined,
+  liveSignalPresent?: boolean,
+  disagreeFlag?: boolean,
+): 'high' | 'medium' | 'low' {
+  // Live path: quality determined by whether provider returned a real signal
+  if (liveSignalPresent !== undefined) {
+    if (!liveSignalPresent) return 'low'
+    // Downgrade to medium when providers disagree — signal is real but uncertain
+    return disagreeFlag ? 'medium' : 'high'
+  }
+  // Forecast path
+  if (!forecastAvailable) return 'low'
+  if (rankingStability === 'unstable') return 'low'
+  if (empirical && (rankingStability === 'stable' || rankingStability === 'sole_candidate')) return 'high'
+  return 'medium'
 }
 
 export async function routeGreen(request: RoutingRequest): Promise<RoutingResult> {
+  // Resolve weights: explicit caller values override policy mode presets, which
+  // override the engine defaults.
+  const modePreset = request.policyMode ? POLICY_MODE_WEIGHTS[request.policyMode] : undefined
+
   const {
     preferredRegions,
     maxCarbonGPerKwh,
     latencyMsByRegion = {},
-    carbonWeight = 0.5,
-    latencyWeight = 0.2,
-    costWeight = 0.3,
+    costPerKwhByRegion,
+    targetTime,
+    durationMinutes,
   } = request
 
+  const carbonWeight  = request.carbonWeight  ?? modePreset?.carbonWeight  ?? 0.5
+  const latencyWeight = request.latencyWeight ?? modePreset?.latencyWeight ?? 0.2
+  const costWeight    = request.costWeight    ?? modePreset?.costWeight    ?? 0.3
+
+  // ── FORECAST PATH (future targetTime) ───────────────────────────────────────
+  // When the caller supplies a targetTime in the future (scheduled workloads,
+  // DEKES jobs, CI pipelines), use DecisionDataAssembler to align all inputs to
+  // that window with lazy query planning + query-time resolution alignment.
+  const now = new Date()
+  const isFuture = targetTime && targetTime.getTime() > now.getTime() + 60_000 // >1 min ahead
+
+  if (isFuture && targetTime) {
+    const frame = await assembleDecisionFrame({
+      regions: preferredRegions,
+      targetTime,
+      durationMinutes: durationMinutes ?? 60,
+      latencyMsByRegion,
+    })
+
+    // Apply carbon ceiling filter — keep all if none pass (least-bad fallback)
+    let candidates = frame.regions
+    if (maxCarbonGPerKwh) {
+      const filtered = candidates.filter((r) => r.windowAvgIntensity <= maxCarbonGPerKwh)
+      if (filtered.length > 0) candidates = filtered
+    }
+
+    // Compute a weighted score using the same formula as the live path so the
+    // `score` field has identical semantics regardless of which path ran.
+    // (Score = 0–1, higher is better; carbon penalty is primary driver.)
+    const maxIntensity = Math.max(...candidates.map((r) => r.windowAvgIntensity)) || 1
+    const maxLatency = Math.max(...candidates.map((r) => r.latencyMs)) || 1
+    const maxCostPerKwh = costPerKwhByRegion
+      ? Math.max(...candidates.map((r) => costPerKwhByRegion[r.region] ?? 0)) || 1
+      : 1
+    const totalW = carbonWeight + latencyWeight + costWeight
+    const wC = carbonWeight / totalW
+    const wL = latencyWeight / totalW
+    const wCo = costWeight / totalW
+
+    function computeScore(r: (typeof candidates)[0]): number {
+      // Apply resolution penalty: coarse data covering a short workload is less precise
+      const resFactor = resolutionFactor(r.dataResolutionMinutes, durationMinutes ?? 60)
+      const cScore = (1 - r.windowAvgIntensity / maxIntensity) * resFactor
+      const lScore = 1 - r.latencyMs / maxLatency
+      const ownCost = costPerKwhByRegion?.[r.region]
+      const costScore = ownCost != null && maxCostPerKwh > 0
+        ? 1 - ownCost / maxCostPerKwh
+        : cScore  // fall back: cost ∝ carbon when no prices provided
+      return wC * cScore + wL * lScore + wCo * costScore
+    }
+
+    // Pick winner by cost-aware score; stamp ranking stability on the winner's band
+    const scored = candidates.map((r) => ({ region: r, score: computeScore(r) }))
+    scored.sort((a, b) => b.score - a.score)
+    const best = scored[0].region
+    const altBands = scored.slice(1).map((s) => s.region.confidenceBand)
+    const stability = candidates.length === 1
+      ? 'sole_candidate' as const
+      : computeRankingStability(best.confidenceBand, altBands)
+    best.confidenceBand = { ...best.confidenceBand, rankingStability: stability }
+
+    const others = frame.regions.filter((r) => r.region !== best.region)
+
+    // ── Explanation ───────────────────────────────────────────────────────────
+    const worstAlt = [...frame.regions].sort((a, b) => b.windowAvgIntensity - a.windowAvgIntensity)[0]
+    const baselineIntensity = worstAlt.windowAvgIntensity
+    const reductionPct = baselineIntensity > 0
+      ? Math.round(((baselineIntensity - best.windowAvgIntensity) / baselineIntensity) * 100)
+      : 0
+    const startLabel = targetTime.toISOString().slice(11, 16) + ' UTC'
+    const endLabel = new Date(targetTime.getTime() + (durationMinutes ?? 60) * 60_000).toISOString().slice(11, 16) + ' UTC'
+    const bandNote = best.confidenceBand.empirical
+      ? `uncertainty band ${best.confidenceBand.low}–${best.confidenceBand.high} gCO2/kWh (empirical)`
+      : `estimated band ${best.confidenceBand.low}–${best.confidenceBand.high} gCO2/kWh (model confidence ${Math.round(best.forecastConfidence * 100)}%)`
+    const trendNote = best.forecastTrend === 'increasing' ? ', rising trend' :
+                      best.forecastTrend === 'decreasing' ? ', falling trend' : ''
+    const dataNote = best.forecastAvailable ? 'live forecast' : 'historical data (no fresh forecast available)'
+
+    const explanation = others.length > 0
+      ? `${best.region} selected for ${startLabel}–${endLabel}: forecast avg ${best.windowAvgIntensity} gCO2/kWh` +
+        ` vs ${baselineIntensity} gCO2/kWh in ${worstAlt.region} — ${reductionPct > 0 ? `${reductionPct}% expected reduction` : 'lowest available'}.` +
+        ` ${bandNote}${trendNote}. Source: ${dataNote}.`
+      : `${best.region} is the only candidate: ${best.windowAvgIntensity} gCO2/kWh at ${startLabel}. Source: ${dataNote}.`
+
+    const forecastStability = (() => {
+      const s = best.confidenceBand.rankingStability
+      if (!s || s === 'sole_candidate') return 'stable' as const
+      return s as 'stable' | 'medium' | 'unstable'
+    })()
+
+    return {
+      selectedRegion: best.region,
+      carbonIntensity: best.targetCarbonIntensity,
+      estimatedLatency: best.latencyMs,
+      score: computeScore(best),
+      decisionFrameId: frame.frameId,
+      forecastAvailable: best.forecastAvailable,
+      confidenceBand: best.confidenceBand,
+      explanation,
+      qualityTier: computeQualityTier(
+        best.forecastAvailable,
+        best.confidenceBand.empirical,
+        best.confidenceBand.rankingStability,
+      ),
+      dataResolutionMinutes: best.dataResolutionMinutes,
+      carbon_delta_g_per_kwh: Math.max(0, baselineIntensity - best.windowAvgIntensity),
+      forecast_stability: forecastStability,
+      provider_disagreement: null, // assembler path uses aggregated forecast; no per-signal disagreement
+      alternatives: others.slice(0, 2).map((r) => ({
+        region: r.region,
+        carbonIntensity: r.targetCarbonIntensity,
+        score: computeScore(r),
+        reason: best.forecastAvailable
+          ? `Forecast window avg: ${r.windowAvgIntensity} gCO2/kWh`
+          : 'Historical fallback used',
+      })),
+    }
+  }
+
+  // ── LIVE PATH (immediate execution) ─────────────────────────────────────────
   // Normalize weights
   const totalWeight = carbonWeight + latencyWeight + costWeight
   const normalizedCarbon = carbonWeight / totalWeight
   const normalizedLatency = latencyWeight / totalWeight
   const normalizedCost = costWeight / totalWeight
 
-  // Get carbon intensity for all regions
+  // Get current carbon intensity via multi-provider router (handles cache, fallback, validation)
   const regionData = await Promise.all(
     preferredRegions.map(async (region) => {
-      // Try cache first
-      const cached = await redis.get(`carbon:${region}`)
-      let carbonIntensity: number
+      const result = await getBestCarbonSignal(region, 'realtime')
+      const carbonIntensity = result.ok && result.signal
+        ? result.signal.intensity_gco2_per_kwh
+        : 400 // hard fallback if all providers fail
 
-      if (cached) {
-        carbonIntensity = parseInt(cached)
-      } else {
-        const data = await electricityMaps.getCarbonIntensity(region)
-        carbonIntensity = data?.carbonIntensity ?? 400
+      const readingTime = new Date()
 
-        // Cache for 15 minutes
-        await redis.setex(`carbon:${region}`, 900, carbonIntensity.toString())
+      // Persist to CarbonIntensity history table at native resolution
+      await prisma.carbonIntensity.create({
+        data: {
+          region,
+          carbonIntensity,
+          timestamp: readingTime,
+          source: result.signal?.source?.toUpperCase() ?? 'UNKNOWN',
+          resolutionMinutes: 60,
+        },
+      }).catch((err: any) => {
+        if (err?.code !== 'P2002') {
+          console.error('[green-routing] carbonIntensity DB write failed:', err?.message ?? err)
+        }
+      })
 
-        // Store in DB
-        await prisma.carbonIntensity.create({
-          data: {
-            region,
-            carbonIntensity,
-            timestamp: new Date(),
-            source: 'ELECTRICITY_MAPS',
-          },
-        }).catch(() => {}) // Ignore duplicates
-      }
+      // Non-blocking: reconcile past forecast predictions against this live reading.
+      // This populates actualIntensity + error on CarbonForecast rows that predicted
+      // this region + time slot, which feeds the rolling accuracy scorecard.
+      void reconcileForecastActuals(region, readingTime, carbonIntensity)
 
       return {
         region,
         carbonIntensity,
         latency: latencyMsByRegion[region] ?? 100,
+        providerSignal: result.signal,
       }
     })
   )
@@ -80,16 +346,44 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     ? regionData.filter((r) => r.carbonIntensity <= maxCarbonGPerKwh)
     : regionData
 
+  function buildLiveExplanation(
+    winner: { region: string; carbonIntensity: number },
+    all: Array<{ region: string; carbonIntensity: number }>,
+    ceilingNote?: string,
+  ): string {
+    const sorted = [...all].sort((a, b) => b.carbonIntensity - a.carbonIntensity)
+    const worst = sorted[0]
+    const reductionPct = worst.carbonIntensity > 0
+      ? Math.round(((worst.carbonIntensity - winner.carbonIntensity) / worst.carbonIntensity) * 100)
+      : 0
+    const altParts = all
+      .filter((r) => r.region !== winner.region)
+      .slice(0, 2)
+      .map((r) => `${r.region} ${r.carbonIntensity}`)
+      .join(', ')
+    const base = `${winner.region} selected for immediate execution: live intensity ${winner.carbonIntensity} gCO2/kWh` +
+      (altParts ? ` (vs ${altParts} gCO2/kWh)` : '') +
+      (reductionPct > 0 ? ` — ${reductionPct}% cleaner than worst candidate` : '') +
+      `. Source: electricity_maps (real-time).`
+    return ceilingNote ? `${base} Note: ${ceilingNote}` : base
+  }
+
   if (filtered.length === 0) {
-    // All regions exceed carbon budget - pick lowest carbon anyway
     const sorted = [...regionData].sort((a, b) => a.carbonIntensity - b.carbonIntensity)
     const best = sorted[0]
-
+    const worstCi = Math.max(...regionData.map((r) => r.carbonIntensity))
     return {
       selectedRegion: best.region,
       carbonIntensity: best.carbonIntensity,
       estimatedLatency: best.latency,
       score: 0,
+      qualityTier: 'low',
+      explanation: buildLiveExplanation(best, regionData, `all regions exceed budget of ${maxCarbonGPerKwh} gCO2/kWh — least-bad selected.`),
+      carbon_delta_g_per_kwh: Math.max(0, worstCi - best.carbonIntensity),
+      forecast_stability: null,
+      provider_disagreement: best.providerSignal
+        ? { flag: best.providerSignal.disagreement_flag, pct: best.providerSignal.disagreement_pct }
+        : null,
       alternatives: sorted.slice(1, 3).map((r) => ({
         region: r.region,
         carbonIntensity: r.carbonIntensity,
@@ -99,44 +393,48 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     }
   }
 
-  // Score each region
+  const maxCarbonLive = Math.max(...filtered.map((x) => x.carbonIntensity)) || 1
+  const maxLatencyLive = Math.max(...filtered.map((x) => x.latency)) || 1
+  const maxCostLive = costPerKwhByRegion
+    ? Math.max(...filtered.map((x) => costPerKwhByRegion[x.region] ?? 0)) || 1
+    : 1
+
   const scored = filtered.map((r) => {
-    // Carbon score (lower is better, normalize to 0-1)
-    const maxCarbon = Math.max(...filtered.map((x) => x.carbonIntensity))
-    const carbonScore = 1 - r.carbonIntensity / maxCarbon
+    const carbonScore = 1 - r.carbonIntensity / maxCarbonLive
+    const latencyScore = 1 - r.latency / maxLatencyLive
+    const ownCost = costPerKwhByRegion?.[r.region]
+    const costScore = ownCost != null && maxCostLive > 0
+      ? 1 - ownCost / maxCostLive
+      : carbonScore  // fall back: cost ∝ carbon
 
-    // Latency score (lower is better, normalize to 0-1)
-    const maxLatency = Math.max(...filtered.map((x) => x.latency))
-    const latencyScore = 1 - r.latency / maxLatency
-
-    // Cost score (assume cost proportional to carbon for now)
-    const costScore = carbonScore
-
-    // Overall score
     const score =
       normalizedCarbon * carbonScore +
       normalizedLatency * latencyScore +
       normalizedCost * costScore
 
-    return {
-      ...r,
-      score,
-      carbonScore,
-      latencyScore,
-      costScore,
-    }
+    return { ...r, score, carbonScore, latencyScore, costScore }
   })
 
-  // Sort by score (highest first)
   scored.sort((a, b) => b.score - a.score)
-
   const best = scored[0]
+  const worstLiveCi = Math.max(...regionData.map((r) => r.carbonIntensity))
 
   return {
     selectedRegion: best.region,
     carbonIntensity: best.carbonIntensity,
     estimatedLatency: best.latency,
     score: best.score,
+    qualityTier: computeQualityTier(
+      false, undefined, undefined,
+      best.providerSignal != null,
+      best.providerSignal?.disagreement_flag,
+    ),
+    explanation: buildLiveExplanation(best, regionData),
+    carbon_delta_g_per_kwh: Math.max(0, worstLiveCi - best.carbonIntensity),
+    forecast_stability: null,
+    provider_disagreement: best.providerSignal
+      ? { flag: best.providerSignal.disagreement_flag, pct: best.providerSignal.disagreement_pct }
+      : null,
     alternatives: scored.slice(1, 3).map((r) => ({
       region: r.region,
       carbonIntensity: r.carbonIntensity,

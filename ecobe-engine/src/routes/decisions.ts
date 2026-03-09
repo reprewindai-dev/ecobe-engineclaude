@@ -1,14 +1,15 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/db'
+import { writeAuditLog } from '../lib/governance/audit'
+import { checkOrgPolicy } from '../lib/governance/risk'
+import { detectAnomaly } from '../lib/governance/watchtower'
+import { consumeBudget } from '../lib/carbon-budget'
 
 const router = Router()
 
 const decisionSchema = z
   .object({
-    ts: z.string().datetime().optional(),
-    createdAt: z.string().datetime().optional(),
-
     workspace_id: z.string().optional(),
     operation: z.string().optional(),
 
@@ -59,6 +60,13 @@ const decisionSchema = z
     data_freshness_seconds: z.number().int().nonnegative().optional(),
     dataFreshnessSeconds: z.number().int().nonnegative().optional(),
 
+    // Provider provenance — populated by routing layer; required for full audit trail
+    source_used: z.string().optional(),           // e.g. 'electricity_maps', 'ember'
+    referenceTime: z.string().datetime().optional(), // ISO-8601: when forecast/signal was generated
+    resolutionMinutes: z.number().int().positive().optional(), // native data resolution
+    windowAvgIntensity: z.number().nonnegative().optional(),  // avg gCO2/kWh across decision window
+    decisionFrameId: z.string().optional(),        // assembler frame ID for cross-referencing
+
     meta: z.unknown().optional(),
   })
   .superRefine((value, ctx) => {
@@ -105,12 +113,32 @@ router.post('/', async (req, res) => {
     const fallbackUsed = value.fallbackUsed ?? value.fallback ?? false
     const dataFreshnessSeconds = value.dataFreshnessSeconds ?? value.data_freshness_seconds ?? null
 
-    const createdAtStr = value.ts ?? value.createdAt
-    const createdAt = createdAtStr ? new Date(createdAtStr) : undefined
+    const organizationId = req.headers['x-organization-id'] as string | undefined
 
-    const created = await prisma.dashboardRoutingDecision.create({
+    // Enforce org carbon policy before writing
+    const policyCheck = await checkOrgPolicy({
+      organizationId,
+      carbonIntensityChosenGPerKwh: carbonIntensityChosenGPerKwh ?? undefined,
+      carbonIntensityBaselineGPerKwh: carbonIntensityBaselineGPerKwh ?? undefined,
+    })
+
+    if (!policyCheck.allowed) {
+      void writeAuditLog({
+        organizationId,
+        actorType: 'API_KEY',
+        action: 'DECISION_CREATED',
+        entityType: 'DashboardRoutingDecision',
+        entityId: 'blocked',
+        payload: { baselineRegion, chosenRegion, carbonIntensityChosenGPerKwh, reason: policyCheck.reason },
+        result: 'BLOCKED',
+        riskTier: policyCheck.tier,
+      })
+      return res.status(403).json({ error: 'Policy violation', reason: policyCheck.reason })
+    }
+
+    const created = await (prisma as any).dashboardRoutingDecision.create({
       data: {
-        createdAt,
+        organizationId: organizationId ?? null,
         workloadName,
         opName,
         baselineRegion,
@@ -130,8 +158,75 @@ router.post('/', async (req, res) => {
         requestCount,
         meta: (value.meta ?? {}) as any,
       },
-      select: { id: true },
+      select: {
+        id: true,
+        baselineRegion: true,
+        chosenRegion: true,
+        carbonIntensityChosenGPerKwh: true,
+        co2BaselineG: true,
+        co2ChosenG: true,
+      },
     })
+
+    const carbonSavedG = (created.co2BaselineG ?? 0) - (created.co2ChosenG ?? 0)
+
+    // Non-blocking: write audit log and run anomaly detection
+    void writeAuditLog({
+      organizationId,
+      actorType: 'API_KEY',
+      action: 'DECISION_CREATED',
+      entityType: 'DashboardRoutingDecision',
+      entityId: created.id,
+      payload: {
+        // Core routing fields
+        baselineRegion: created.baselineRegion,
+        chosenRegion: created.chosenRegion,
+        co2BaselineG: created.co2BaselineG,
+        co2ChosenG: created.co2ChosenG,
+        // Provider provenance — every decision records where its data came from
+        source_used: value.source_used ?? null,
+        referenceTime: value.referenceTime ?? null,
+        fallback_used: fallbackUsed,
+        resolutionMinutes: value.resolutionMinutes ?? null,
+        windowAvgIntensity: value.windowAvgIntensity ?? null,
+        decisionFrameId: value.decisionFrameId ?? null,
+      },
+      result: 'SUCCESS',
+      carbonSavedG,
+      riskTier: policyCheck.tier,
+    })
+
+    void detectAnomaly({
+      organizationId,
+      carbonIntensityChosenGPerKwh: created.carbonIntensityChosenGPerKwh ?? 0,
+      entityId: created.id,
+      entityType: 'DashboardRoutingDecision',
+    })
+
+    // Non-blocking: consume from org carbon budget if one is configured.
+    // Budget tracking must never block routing — any failure is logged and swallowed.
+    if (organizationId && (co2ChosenG ?? 0) > 0) {
+      void consumeBudget(organizationId, co2ChosenG ?? 0).then((budgetState) => {
+        if (budgetState && budgetState.status !== 'within') {
+          void writeAuditLog({
+            organizationId,
+            actorType: 'SYSTEM',
+            action: 'ANOMALY_DETECTED',
+            entityType: 'CarbonBudget',
+            entityId: organizationId,
+            payload: {
+              status: budgetState.status,
+              utilizationPct: budgetState.utilizationPct,
+              consumedCO2Grams: budgetState.consumedCO2Grams,
+              budgetCO2Grams: budgetState.budgetCO2Grams,
+              remainingCO2Grams: budgetState.remainingCO2Grams,
+            },
+            result: 'SUCCESS',
+            riskTier: budgetState.status === 'exceeded' ? 'HIGH' : 'MEDIUM',
+          })
+        }
+      })
+    }
 
     return res.status(201).json({ ok: true, id: created.id })
   } catch (error: any) {

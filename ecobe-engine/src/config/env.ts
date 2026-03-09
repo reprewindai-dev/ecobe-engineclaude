@@ -11,10 +11,31 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   REDIS_URL: z.string().min(1, 'REDIS_URL is required'),
 
-  // Optional
+  // Prisma Accelerate — direct DB URL used for migrations when DATABASE_URL is a prisma:// proxy URL
+  DIRECT_URL: z.string().optional(),
+
+  // Governance
+  GOVERNANCE_AUDIT_ENABLED: z.string().default('true'),
+  GOVERNANCE_CHAIN_VERIFY: z.string().default('false'),
+
+  // Optional — carbon data layer
   ELECTRICITY_MAPS_API_KEY: z.string().optional(),
   ELECTRICITY_MAPS_BASE_URL: z.string().default('https://api.electricitymap.org'),
   DEFAULT_MAX_CARBON_G_PER_KWH: z.string().default('400'),
+
+  // Multi-provider carbon layer
+  EMBER_ENERGY_API_KEY: z.string().optional(),
+  EMBER_BASE_URL: z.string().optional(),
+  WATTTIME_API_KEY: z.string().optional(),
+  CARBON_PROVIDER_PRIMARY: z.string().default('electricity_maps'),
+  CARBON_PROVIDER_VALIDATION: z.string().optional(),
+  CARBON_PROVIDER_ALLOW_FALLBACK: z.string().default('true'),
+  CARBON_PROVIDER_MAX_STALENESS_MINUTES: z.string().default('10'),
+  CARBON_PROVIDER_DISAGREEMENT_THRESHOLD_PCT: z.string().default('15'),
+  CARBON_PROVIDER_DEV_DIAGNOSTICS: z.string().optional(),
+  CARBON_PROVIDER_EM_ROLE: z.string().optional(),
+  CARBON_PROVIDER_EMBER_ROLE: z.string().optional(),
+  CARBON_PROVIDER_WATTTIME_ROLE: z.string().optional(),
 
   FORECAST_REFRESH_ENABLED: z.string().optional(),
   FORECAST_REFRESH_CRON: z.string().default('*/30 * * * *'),
@@ -23,9 +44,13 @@ const envSchema = z.object({
   UI_ENABLED: z.string().optional(),
   UI_TOKEN: z.string().optional(),
 
-  // External integrations
-  ECOBE_ENGINE_URL: z.string().optional(),
-  ECOBE_ENGINE_API_KEY: z.string().optional(),
+  // External integrations / self-referential API key
+  CO2ROUTER_URL: z.string().optional(),
+  CO2ROUTER_API_KEY: z.string().optional(),
+
+  // Dev-only escape hatch: allow unauthenticated access when no API key is configured.
+  // NEVER set to true in production.
+  ALLOW_INSECURE_NO_API_KEY: z.string().optional(),
 })
 
 const parsed = envSchema.safeParse(process.env)
@@ -40,6 +65,9 @@ export const env = {
   ...parsed.data,
   DEFAULT_MAX_CARBON_G_PER_KWH: parseInt(parsed.data.DEFAULT_MAX_CARBON_G_PER_KWH),
   PORT: parseInt(parsed.data.PORT),
+  GOVERNANCE_AUDIT_ENABLED: parsed.data.GOVERNANCE_AUDIT_ENABLED !== 'false',
+  GOVERNANCE_CHAIN_VERIFY: parsed.data.GOVERNANCE_CHAIN_VERIFY === 'true',
+  ALLOW_INSECURE_NO_API_KEY: parsed.data.ALLOW_INSECURE_NO_API_KEY === 'true',
   UI_ENABLED:
     parsed.data.UI_ENABLED !== undefined
       ? parsed.data.UI_ENABLED === 'true'

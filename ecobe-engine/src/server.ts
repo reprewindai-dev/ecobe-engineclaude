@@ -2,49 +2,44 @@ import { env } from './config/env'
 import { prisma } from './lib/db'
 import { redis } from './lib/redis'
 import { createApp } from './app'
+import { logger } from './lib/logger'
 import { startForecastWorker } from './workers/forecast-poller'
 
 const app = createApp()
 
 async function start() {
   try {
-    // Test database connection
     await prisma.$connect()
-    console.log('✅ Database connected')
+    logger.info('Database connected')
 
-    // Test Redis connection
     try {
       await redis.ping()
-      console.log('✅ Redis connected')
+      logger.info('Redis connected')
     } catch (error) {
-      console.error('Redis error:', error)
-      console.warn('⚠️  Redis unavailable at startup; continuing without Redis')
+      logger.warn({ err: error }, 'Redis unavailable at startup; continuing without Redis')
     }
 
     app.listen(env.PORT, () => {
-      console.log(`🌱 ECOBE Engine running on port ${env.PORT}`)
-      console.log(`   Environment: ${env.NODE_ENV}`)
-      console.log(`   Health: http://localhost:${env.PORT}/health`)
-      console.log(`   API: http://localhost:${env.PORT}/api/v1`)
-
+      logger.info({ port: env.PORT, env: env.NODE_ENV }, 'CO2 Router running')
+      logger.info({ url: `http://localhost:${env.PORT}/health` }, 'Health endpoint')
+      logger.info({ url: `http://localhost:${env.PORT}/api/v1` }, 'API endpoint')
       startForecastWorker()
     })
   } catch (error) {
-    console.error('❌ Failed to start server:', error)
+    logger.error({ err: error }, 'Failed to start server')
     process.exit(1)
   }
 }
 
-// Handle shutdown gracefully
 process.on('SIGINT', async () => {
-  console.log('Shutting down...')
+  logger.info('Shutting down (SIGINT)')
   await prisma.$disconnect()
   await redis.quit().catch(() => undefined)
   process.exit(0)
 })
 
 process.on('SIGTERM', async () => {
-  console.log('Shutting down...')
+  logger.info('Shutting down (SIGTERM)')
   await prisma.$disconnect()
   await redis.quit().catch(() => undefined)
   process.exit(0)
