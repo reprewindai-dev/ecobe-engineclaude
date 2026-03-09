@@ -16,6 +16,7 @@ import { DecisionReplay } from '@/components/DecisionReplay'
 import { EnergyCalculator } from '@/components/EnergyCalculator'
 import { DecisionConfidencePanel } from '@/components/DecisionConfidencePanel'
 import { SystemHealth } from '@/components/SystemHealth'
+import { ExecutionIntegrityPanel } from '@/components/ExecutionIntegrityPanel'
 import { DekesStats } from '@/components/DekesStats'
 
 type Tab = 'console' | 'signals' | 'routing' | 'energy' | 'analytics' | 'dekes'
@@ -73,7 +74,10 @@ export default function DashboardPage() {
             <CarbonBudgetPanel />
           </div>
 
-          {/* Layer 5 — Governance */}
+          {/* Layer 5 — Execution integrity */}
+          <ExecutionIntegrityPanel />
+
+          {/* Layer 6 — Governance */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <ProviderHealthMonitor />
             <PolicyEnforcementPanel />

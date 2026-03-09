@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { ecobeApi, type GreenRoutingRequest } from '@/lib/api'
 import {
@@ -10,7 +10,7 @@ import {
   getQualityTierColor,
   getStabilityColor,
 } from '@/types'
-import type { GreenRoutingResult, PolicyDelayResponse } from '@/types'
+import type { GreenRoutingResult, PolicyDelayResponse, RevalidateResponse } from '@/types'
 import {
   CheckCircle,
   XCircle,
@@ -19,7 +19,11 @@ import {
   AlertTriangle,
   Info,
   Zap,
+  ShieldCheck,
+  RefreshCw,
+  ArrowRight,
 } from 'lucide-react'
+import { formatDistanceToNow, isPast, parseISO } from 'date-fns'
 
 const REGIONS = [
   'US-CAL-CISO',
@@ -40,6 +44,31 @@ function isPolicyDelay(r: GreenRoutingResult | PolicyDelayResponse): r is Policy
   return (r as PolicyDelayResponse).action === 'delay'
 }
 
+// Countdown hook — re-renders every second while the ISO timestamp is in the future
+function useCountdown(isoTimestamp: string | undefined) {
+  const [label, setLabel] = useState<string | null>(null)
+  const [expired, setExpired] = useState(false)
+
+  useEffect(() => {
+    if (!isoTimestamp) return
+    const update = () => {
+      const target = parseISO(isoTimestamp)
+      if (isPast(target)) {
+        setExpired(true)
+        setLabel('expired')
+      } else {
+        setExpired(false)
+        setLabel(formatDistanceToNow(target, { includeSeconds: true }))
+      }
+    }
+    update()
+    const timer = setInterval(update, 1000)
+    return () => clearInterval(timer)
+  }, [isoTimestamp])
+
+  return { label, expired }
+}
+
 export function GreenRoutingForm() {
   const [formData, setFormData] = useState<GreenRoutingRequest>({
     preferredRegions: ['US-CAL-CISO', 'FR', 'DE'],
@@ -49,8 +78,31 @@ export function GreenRoutingForm() {
     costWeight: 0.2,
   })
 
+  // Tracks any reroute outcome so the displayed region updates in-place
+  const [rerouteNotice, setRerouteNotice] = useState<{
+    previousRegion: string
+    newRegion: string
+    reason: string
+    newIntensity: number
+  } | null>(null)
+
   const mutation = useMutation({
     mutationFn: (data: GreenRoutingRequest) => ecobeApi.routeGreen(data),
+    onSuccess: () => setRerouteNotice(null),
+  })
+
+  const revalidateMutation = useMutation({
+    mutationFn: (leaseId: string) => ecobeApi.revalidateLease(leaseId),
+    onSuccess: (data: RevalidateResponse) => {
+      if (data.action === 'reroute') {
+        setRerouteNotice({
+          previousRegion: data.previousRegion,
+          newRegion: data.selectedRegion,
+          reason: data.reason,
+          newIntensity: data.carbonIntensity,
+        })
+      }
+    },
   })
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -227,6 +279,11 @@ export function GreenRoutingForm() {
           {/* Success result */}
           {mutation.isSuccess && result && !isPolicyDelay(result) && (() => {
             const r = result as GreenRoutingResult
+
+            // The displayed region may change on reroute
+            const displayRegion = rerouteNotice?.newRegion ?? r.selectedRegion
+            const displayIntensity = rerouteNotice?.newIntensity ?? r.carbonIntensity
+
             return (
               <div className="space-y-4">
                 {/* Selected region header */}
@@ -234,19 +291,46 @@ export function GreenRoutingForm() {
                   <CheckCircle className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
                   <div className="flex-1">
                     <p className="text-xs text-emerald-400 font-medium">Selected Region</p>
-                    <p className="text-2xl font-bold text-white mt-1">{r.selectedRegion}</p>
+                    <p className="text-2xl font-bold text-white mt-1">{displayRegion}</p>
+                    {rerouteNotice && (
+                      <p className="text-xs text-yellow-400 mt-1 flex items-center gap-1">
+                        <ArrowRight className="w-3 h-3" />
+                        Rerouted from {rerouteNotice.previousRegion}
+                      </p>
+                    )}
                   </div>
                   <span className={`text-xs px-2 py-1 rounded-full font-semibold ${getQualityTierBadge(r.qualityTier)}`}>
                     {r.qualityTier?.toUpperCase()}
                   </span>
                 </div>
 
+                {/* Reroute reason */}
+                {rerouteNotice && (
+                  <div className="flex items-start gap-2 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg text-xs">
+                    <ArrowRight className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-yellow-400 font-medium">Grid changed — workload rerouted</p>
+                      <p className="text-yellow-300/70 mt-0.5">{rerouteNotice.reason}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Lease badge ── */}
+                <LeaseBadge
+                  leaseId={r.lease_id}
+                  leaseExpiresAt={r.lease_expires_at}
+                  mustRevalidateAfter={r.must_revalidate_after}
+                  onRevalidate={(leaseId) => revalidateMutation.mutate(leaseId)}
+                  revalidating={revalidateMutation.isPending}
+                  revalidateResult={revalidateMutation.data}
+                />
+
                 {/* Key metrics */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-slate-800/50 rounded-lg p-3">
                     <p className="text-xs text-slate-400 mb-1">Carbon Intensity</p>
-                    <p className={`text-lg font-bold ${getCarbonColor(getCarbonLevel(r.carbonIntensity))}`}>
-                      {r.carbonIntensity}
+                    <p className={`text-lg font-bold ${getCarbonColor(getCarbonLevel(displayIntensity))}`}>
+                      {displayIntensity}
                     </p>
                     <p className="text-xs text-slate-500">gCO₂/kWh</p>
                   </div>
@@ -370,6 +454,117 @@ export function GreenRoutingForm() {
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── LeaseBadge ────────────────────────────────────────────────────────────────
+
+function LeaseBadge({
+  leaseId,
+  leaseExpiresAt,
+  mustRevalidateAfter,
+  onRevalidate,
+  revalidating,
+  revalidateResult,
+}: {
+  leaseId?: string
+  leaseExpiresAt?: string
+  mustRevalidateAfter?: string
+  onRevalidate: (id: string) => void
+  revalidating: boolean
+  revalidateResult?: RevalidateResponse
+}) {
+  const expiry = useCountdown(leaseExpiresAt)
+  const revalidateAt = useCountdown(mustRevalidateAfter)
+
+  // No lease data — engine didn't issue a time-bounded token
+  if (!leaseId && !leaseExpiresAt) return null
+
+  // Derive revalidate outcome display
+  const revalAction = revalidateResult?.action
+
+  return (
+    <div
+      className={`rounded-lg border p-3 space-y-2.5 ${
+        expiry.expired
+          ? 'bg-red-500/10 border-red-500/30'
+          : 'bg-slate-800/40 border-slate-700'
+      }`}
+    >
+      {/* Lease expiry */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <ShieldCheck
+            className={`w-4 h-4 ${expiry.expired ? 'text-red-400' : 'text-emerald-400'}`}
+          />
+          <span className="text-xs font-medium text-slate-300">
+            {expiry.expired ? 'Lease expired' : 'Lease valid'}
+          </span>
+        </div>
+        {expiry.label && !expiry.expired && (
+          <span className="text-xs text-emerald-400 font-mono">{expiry.label} remaining</span>
+        )}
+        {expiry.expired && (
+          <span className="text-xs text-red-400 font-mono">Signal stale — re-route required</span>
+        )}
+      </div>
+
+      {/* Must-revalidate checkpoint */}
+      {mustRevalidateAfter && !revalidateAt.expired && (
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-slate-500 flex items-center gap-1">
+            <Clock className="w-3.5 h-3.5" />
+            Revalidate checkpoint
+          </span>
+          <span className="text-yellow-400 font-mono">{revalidateAt.label}</span>
+        </div>
+      )}
+
+      {/* Revalidate button */}
+      {leaseId && !expiry.expired && (
+        <button
+          onClick={() => onRevalidate(leaseId)}
+          disabled={revalidating}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium hover:bg-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition"
+        >
+          {revalidating ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <RefreshCw className="w-3.5 h-3.5" />
+          )}
+          {revalidating ? 'Checking signal...' : 'Revalidate & Execute'}
+        </button>
+      )}
+
+      {/* Revalidation outcome */}
+      {revalAction === 'execute' && (
+        <div className="flex items-center gap-2 text-xs text-emerald-400">
+          <CheckCircle className="w-3.5 h-3.5" />
+          Carbon signal confirmed — execute now
+        </div>
+      )}
+
+      {revalAction === 'reroute' && revalidateResult && revalidateResult.action === 'reroute' && (
+        <div className="flex items-start gap-2 text-xs">
+          <ArrowRight className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0 mt-0.5" />
+          <span className="text-yellow-300">
+            Grid shifted — target updated to{' '}
+            <span className="font-semibold">{revalidateResult.selectedRegion}</span>
+            {' '}({revalidateResult.carbonIntensity} gCO₂/kWh)
+          </span>
+        </div>
+      )}
+
+      {revalAction === 'delay' && revalidateResult && revalidateResult.action === 'delay' && (
+        <div className="flex items-start gap-2 p-2 bg-yellow-500/10 border border-yellow-500/20 rounded text-xs">
+          <Clock className="w-3.5 h-3.5 text-yellow-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-yellow-400 font-medium">Policy: delay {revalidateResult.retryAfterMinutes} min</p>
+            <p className="text-yellow-300/70">{revalidateResult.message}</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

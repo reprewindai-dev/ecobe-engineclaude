@@ -3,6 +3,7 @@ import type {
   EnergyEquationResult,
   GreenRoutingResult,
   PolicyDelayResponse,
+  RevalidateResponse,
   DekesAnalytics,
   DashboardMetrics,
   DashboardSavings,
@@ -79,6 +80,15 @@ export const ecobeApi = {
   async replayDecision(decisionFrameId: string): Promise<DecisionReplayResult> {
     const { data } = await api.get(`/route/${decisionFrameId}/replay`)
     return data
+  },
+
+  // Revalidate a lease before executing a queued workload.
+  // Returns execute (go), reroute (target changed), or delay (policy block).
+  async revalidateLease(leaseId: string): Promise<RevalidateResponse> {
+    const response = await api.post(`/route/${leaseId}/revalidate`, {}, {
+      validateStatus: (s) => s === 200 || s === 202,
+    })
+    return response.data
   },
 
   // ── Dashboard ────────────────────────────────────────────────────────────────

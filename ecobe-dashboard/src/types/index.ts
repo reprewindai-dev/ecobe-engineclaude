@@ -62,7 +62,34 @@ export interface GreenRoutingResult {
   confidenceBand?: { low: number; mid: number; high: number; empirical: boolean }
   dataResolutionMinutes?: number
   predicted_clean_window?: PredictedCleanWindow | null
+  // Lease fields — present when the engine issues a time-bounded routing token
+  lease_id?: string
+  lease_expires_at?: string          // ISO-8601 — hard expiry of the routing decision
+  must_revalidate_after?: string     // ISO-8601 — soft checkpoint before execution
 }
+
+// Revalidation response from POST /api/v1/route/{lease_id}/revalidate
+export type RevalidateResponse =
+  | {
+      action: 'execute'
+      selectedRegion: string
+      carbonIntensity: number
+      lease_id: string
+    }
+  | {
+      action: 'reroute'
+      selectedRegion: string
+      carbonIntensity: number
+      lease_id: string
+      previousRegion: string
+      reason: string
+    }
+  | {
+      action: 'delay'
+      retryAfterMinutes: number
+      message: string
+      currentBest: { region: string; carbonIntensity: number }
+    }
 
 export interface PolicyDelayResponse {
   action: 'delay'
@@ -110,6 +137,14 @@ export interface DashboardDecision {
 
 // ─── Dashboard Metrics ────────────────────────────────────────────────────────
 
+export interface ExecutionIntegrity {
+  driftPreventedPct: number        // % of revalidations where routing held
+  revalidationsTriggered: number   // total revalidate calls
+  reroutedCount: number            // action: 'reroute' outcomes
+  delayedCount: number             // action: 'delay' outcomes
+  stalenessViolations: number      // executions attempted after lease_expires_at
+}
+
 export interface DashboardMetrics {
   window: '24h' | '7d'
   windowHours: number
@@ -141,6 +176,7 @@ export interface DashboardMetrics {
       message: string | null
     } | null
   } | null
+  executionIntegrity?: ExecutionIntegrity | null
 }
 
 // ─── Dashboard Savings ────────────────────────────────────────────────────────
