@@ -11,6 +11,8 @@ export type AuditAction =
   | 'ANOMALY_DETECTED'
   | 'CHAIN_VERIFIED'
   | 'CARBON_SIGNAL_SELECTED'
+  | 'ORG_KEY_ISSUED'
+  | 'ORG_KEY_REVOKED'
 
 interface AuditParams {
   organizationId?: string

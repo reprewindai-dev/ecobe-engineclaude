@@ -138,6 +138,7 @@ router.post('/', async (req, res) => {
 
     const created = await (prisma as any).dashboardRoutingDecision.create({
       data: {
+        organizationId: organizationId ?? null,
         workloadName,
         opName,
         baselineRegion,

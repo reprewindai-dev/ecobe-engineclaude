@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/db'
+import { logger } from '../lib/logger'
 import {
   getOrgCarbonSummary,
   getAuditChain,
@@ -8,6 +9,8 @@ import {
   getComplianceScore,
 } from '../lib/governance/insights'
 import { writeAuditLog } from '../lib/governance/audit'
+import { generateOrgApiKey, hashApiKey } from '../middleware/auth'
+import { sensitiveRateLimit } from '../app'
 
 const router = Router()
 
@@ -174,7 +177,120 @@ router.post('/snapshot/generate', async (req, res) => {
 
     res.json(snapshot)
   } catch (error) {
-    console.error('Snapshot generate error:', error)
+    logger.error({ err: error }, 'Snapshot generate error')
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// ── Org API key management ────────────────────────────────────────────────────
+
+// POST /api/v1/governance/keys — issue a new per-org API key
+// Rate-limited to 10/min to prevent bulk issuance.
+// Returns the plaintext key ONCE — it is never retrievable again.
+router.post('/keys', sensitiveRateLimit, async (req, res) => {
+  try {
+    const body = z.object({
+      organizationId: orgIdSchema,
+      label: z.string().max(80).optional(),
+    }).parse(req.body)
+
+    const { plaintext, hash, prefix } = generateOrgApiKey()
+
+    await (prisma as any).orgApiKey.create({
+      data: {
+        organizationId: body.organizationId,
+        keyHash: hash,
+        keyPrefix: prefix,
+        label: body.label ?? null,
+        active: true,
+      },
+    })
+
+    void writeAuditLog({
+      organizationId: body.organizationId,
+      actorType: 'API_KEY',
+      action: 'ORG_KEY_ISSUED',
+      entityType: 'OrgApiKey',
+      entityId: prefix,
+      payload: { label: body.label ?? null },
+      result: 'SUCCESS',
+    })
+
+    // Plaintext returned exactly once — store it immediately.
+    res.status(201).json({
+      organizationId: body.organizationId,
+      keyPrefix: prefix,
+      apiKey: plaintext,
+      message: 'Store this key securely — it will not be shown again.',
+    })
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Invalid request', details: error.errors })
+    }
+    logger.error({ err: error }, 'Key issuance error')
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/governance/keys — list active keys for an org (prefixes only, no hashes)
+router.get('/keys', async (req, res) => {
+  try {
+    const { organizationId } = req.query as Record<string, string>
+    if (!organizationId) return res.status(400).json({ error: 'organizationId required' })
+
+    const parsed = orgIdSchema.safeParse(organizationId)
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid organizationId' })
+
+    const keys = await (prisma as any).orgApiKey.findMany({
+      where: { organizationId, active: true },
+      select: { id: true, keyPrefix: true, label: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+    })
+    res.json({ organizationId, keys })
+  } catch (error) {
+    logger.error({ err: error }, 'Key list error')
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// DELETE /api/v1/governance/keys/:id — revoke a key by ID
+router.delete('/keys/:id', sensitiveRateLimit, async (req, res) => {
+  try {
+    const { organizationId } = req.query as Record<string, string>
+    if (!organizationId) return res.status(400).json({ error: 'organizationId required' })
+
+    const parsed = orgIdSchema.safeParse(organizationId)
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid organizationId' })
+
+    const key = await (prisma as any).orgApiKey.findFirst({
+      where: { id: req.params.id, organizationId, active: true },
+    })
+    if (!key) return res.status(404).json({ error: 'Key not found' })
+
+    await (prisma as any).orgApiKey.update({
+      where: { id: req.params.id },
+      data: { active: false, revokedAt: new Date() },
+    })
+
+    // Invalidate the Redis cache entry for this key
+    try {
+      const { redis } = await import('../lib/redis')
+      await redis.del(`orgkey:${key.keyHash}`)
+    } catch { /* Redis may be unavailable */ }
+
+    void writeAuditLog({
+      organizationId,
+      actorType: 'API_KEY',
+      action: 'ORG_KEY_REVOKED',
+      entityType: 'OrgApiKey',
+      entityId: key.keyPrefix,
+      payload: { revokedKeyId: req.params.id },
+      result: 'SUCCESS',
+    })
+
+    res.json({ success: true, revokedKeyId: req.params.id })
+  } catch (error) {
+    logger.error({ err: error }, 'Key revocation error')
     res.status(500).json({ error: 'Internal server error' })
   }
 })

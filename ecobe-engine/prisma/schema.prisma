@@ -127,7 +127,8 @@ model RoutingDecision {
 model DashboardRoutingDecision {
   id        String   @id @default(cuid())
 
-  createdAt DateTime @default(now())
+  createdAt      DateTime @default(now())
+  organizationId String?  // scopes decision to an org; null = legacy/anonymous
 
   workloadName String?
   opName       String?
@@ -157,6 +158,7 @@ model DashboardRoutingDecision {
   meta Json @default("{}")
 
   @@index([createdAt])
+  @@index([organizationId, createdAt])
   @@index([baselineRegion])
   @@index([chosenRegion])
 }
@@ -551,4 +553,71 @@ model GovernanceSnapshot {
 
   @@index([organizationId, snapshotType, windowStart])
   @@index([snapshotType, createdAt])
+}
+
+// ============================================================================
+// PER-ORG API KEY ISOLATION
+// ============================================================================
+
+// Hashed API key tied to a single organization.
+// One org may have multiple active keys (rotation support).
+// keyHash = SHA-256(plaintext key) — plaintext is never stored.
+// keyPrefix = first 8 chars of plaintext for display ("co2r_abc...").
+model OrgApiKey {
+  id             String   @id @default(cuid())
+  organizationId String
+
+  keyHash   String   @unique // SHA-256 of the raw key
+  keyPrefix String            // first 8 chars of raw key — display only
+
+  active    Boolean  @default(true)
+  label     String?           // optional human label
+
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+
+  @@index([organizationId, active])
+  @@index([keyHash])
+}
+
+// ============================================================================
+// DECISION REPLAY (deterministic routing reconstruction)
+// ============================================================================
+
+// Full decision snapshot stored at routing time.
+// Enables GET /api/v1/decisions/:id/replay to reconstruct any past decision.
+model DecisionSnapshot {
+  id             String   @id @default(cuid()) // = decisionFrameId from routing result
+
+  organizationId String?
+  createdAt      DateTime @default(now())
+
+  // Request inputs
+  regions          Json   // string[]
+  targetTime       DateTime?
+  durationMinutes  Int?
+  maxCarbonGPerKwh Int?
+  weights          Json   // { carbon, latency, cost }
+
+  // Signals at decision time — keyed by region
+  signalSnapshot   Json   // Record<region, { intensity, source, referenceTime, fallbackUsed, disagreementFlag }>
+
+  // Decision output
+  selectedRegion      String
+  carbonIntensity     Int
+  baselineIntensity   Int
+  carbonDeltaGPerKwh  Int
+  qualityTier         String
+  forecastStability   String?
+  score               Float
+  explanation         String
+
+  // Provenance
+  sourceUsed          String?
+  referenceTime       DateTime?
+  fallbackUsed        Boolean @default(false)
+  providerDisagreement Boolean @default(false)
+
+  @@index([organizationId, createdAt])
+  @@index([selectedRegion, createdAt])
 }

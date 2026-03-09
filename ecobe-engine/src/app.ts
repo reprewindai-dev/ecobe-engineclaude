@@ -1,6 +1,9 @@
 import express from 'express'
+import { rateLimit } from 'express-rate-limit'
+import pinoHttp from 'pino-http'
 
 import { env } from './config/env'
+import { logger } from './lib/logger'
 import { requireApiKey } from './middleware/auth'
 import { prisma } from './lib/db'
 import { redis } from './lib/redis'
@@ -266,6 +269,7 @@ function attachUiRoute(app: express.Express) {
 }
 
 function attachApiRoutes(app: express.Express) {
+  app.use('/api/v1', apiRateLimit)
   app.use('/api/v1', requireApiKey)
   app.use('/api/v1', attachOrgContext)
   app.use('/api/v1/energy', energyRoutes)
@@ -287,15 +291,42 @@ function attachFallbackHandlers(app: express.Express) {
 
   app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
     void _next
-    console.error('Server error:', err)
+    logger.error({ err, path: req.path, method: req.method }, 'Unhandled server error')
     res.status(500).json({ error: 'Internal server error' })
   })
 }
+
+// 200 req/min per IP for authenticated API routes (burst-friendly, abuse-resistant)
+const apiRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 200,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Too many requests — retry after 60 seconds' },
+})
+
+// Tighter limit on key management and governance writes (10 req/min)
+const sensitiveRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Too many requests on sensitive endpoint — retry after 60 seconds' },
+})
+
+export { sensitiveRateLimit }
 
 export function createApp() {
   const app = express()
 
   app.set('trust proxy', 1)
+
+  // Structured request logging (skips health checks to reduce noise)
+  app.use(pinoHttp({
+    logger,
+    autoLogging: { ignore: (req) => req.url === '/health' || req.url === '/api/v1/health' },
+  }))
+
   app.use(express.json({ limit: '1mb' }))
   app.use(express.urlencoded({ extended: true, limit: '1mb' }))
 
