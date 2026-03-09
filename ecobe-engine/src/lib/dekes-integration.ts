@@ -47,6 +47,8 @@ export interface DekesScheduleEntry {
   estimatedKwh: number
   savings: number               // % vs immediate execution
   workloadId: string
+  /** Human-readable explanation of why this slot/region was chosen */
+  explanation: string
 }
 
 export interface DekesAnalytics {
@@ -230,6 +232,13 @@ export async function scheduleBatchQueries(
       },
     })
 
+    const startLabel = bestSlotTime.toISOString().slice(11, 16) + ' UTC'
+    const reductionLabel = savings > 0 ? ` — ${Math.round(savings)}% vs immediate execution` : ''
+    const explanation =
+      `${bestRegion} scheduled at ${startLabel}: predicted ${Math.round(bestSlotIntensity)} gCO2/kWh` +
+      reductionLabel +
+      `. Estimated ${(estimatedKwh * 1000).toFixed(3)} Wh / ${(estimatedCO2 * 1000).toFixed(1)} mgCO2 for "${query.query}".`
+
     schedule.push({
       queryId: query.id,
       queryString: query.query,
@@ -240,6 +249,7 @@ export async function scheduleBatchQueries(
       estimatedKwh,
       savings: Math.max(0, savings),
       workloadId: workload.id,
+      explanation,
     })
   }
 

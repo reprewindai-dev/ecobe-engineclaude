@@ -726,6 +726,159 @@ describe('7. Decision audit trail completeness', () => {
     expect(forecastResult.score).toBeLessThanOrEqual(1)
   })
 
+  it('assembleDecisionFrame carries confidenceBand on every region', async () => {
+    const noOpProvider = {
+      supportsRegion: () => false,
+      getForecast: jest.fn().mockResolvedValue([]),
+      getCurrentIntensity: jest.fn().mockResolvedValue({ ok: false, signal: null }),
+    }
+    ;(getProvider as jest.Mock).mockReturnValue(noOpProvider)
+    ;(prisma as any).carbonIntensity.findMany.mockResolvedValue([
+      { region: 'FR', carbonIntensity: 80, resolutionMinutes: 60, timestamp: new Date() },
+    ])
+
+    const frame = await assembleDecisionFrame({
+      regions: ['FR'],
+      targetTime: addHours(new Date(), 3),
+      durationMinutes: 60,
+    })
+
+    const region = frame.regions[0]
+    expect(region).toHaveProperty('confidenceBand')
+    expect(region.confidenceBand.low).toBeLessThanOrEqual(region.confidenceBand.mid)
+    expect(region.confidenceBand.mid).toBeLessThanOrEqual(region.confidenceBand.high)
+    // Fallback path uses estimated band (not empirical)
+    expect(region.confidenceBand.empirical).toBe(false)
+    // All values are positive integers
+    expect(region.confidenceBand.mid).toBeGreaterThan(0)
+    expect(Number.isInteger(region.confidenceBand.low)).toBe(true)
+  })
+
+  it('forecast path exposes confidenceBand in RoutingResult', async () => {
+    const freshSignals: ProviderResult[] = [
+      { ok: true, signal: makeForecastSignal('SE', 28, 4) },
+      { ok: true, signal: makeForecastSignal('SE', 32, 5) },
+    ]
+    ;(getProvider as jest.Mock).mockImplementation((name: string) => {
+      if (name !== 'electricity_maps') return undefined
+      return {
+        supportsRegion: () => true,
+        getForecast: jest.fn().mockResolvedValue(freshSignals),
+        getCurrentIntensity: jest.fn(),
+      }
+    })
+
+    const result = await routeGreen({
+      preferredRegions: ['SE', 'FR'],
+      targetTime: addHours(new Date(), 4),
+      durationMinutes: 60,
+    })
+
+    expect(result).toHaveProperty('confidenceBand')
+    expect(result.confidenceBand!.low).toBeLessThanOrEqual(result.confidenceBand!.mid)
+    expect(result.confidenceBand!.mid).toBeLessThanOrEqual(result.confidenceBand!.high)
+  })
+
+  it('every RoutingResult carries a non-empty explanation string', async () => {
+    // Live path
+    ;(getProvider as jest.Mock).mockImplementation((name: string) => {
+      if (name !== 'electricity_maps') return undefined
+      return {
+        supportsRegion: (r: string) => ['FR', 'DE'].includes(r),
+        getCurrentIntensity: (r: string) => Promise.resolve({
+          ok: true,
+          signal: makeSignal(r, r === 'FR' ? 58 : 320, { is_forecast: false, forecast_time: null }),
+        }),
+        getForecast: jest.fn().mockResolvedValue([]),
+      }
+    })
+    ;(prisma as any).carbonIntensity.create.mockResolvedValue({})
+
+    const live = await routeGreen({ preferredRegions: ['FR', 'DE'] })
+    expect(typeof live.explanation).toBe('string')
+    expect(live.explanation.length).toBeGreaterThan(20)
+    expect(live.explanation).toContain('FR')
+
+    // Forecast path (uses historical fallback — no provider)
+    const noOpProvider = {
+      supportsRegion: () => false,
+      getForecast: jest.fn().mockResolvedValue([]),
+      getCurrentIntensity: jest.fn().mockResolvedValue({ ok: false, signal: null }),
+    }
+    ;(getProvider as jest.Mock).mockReturnValue(noOpProvider)
+
+    const forecast = await routeGreen({
+      preferredRegions: ['SE', 'FR'],
+      targetTime: addHours(new Date(), 4),
+      durationMinutes: 60,
+    })
+    expect(typeof forecast.explanation).toBe('string')
+    expect(forecast.explanation.length).toBeGreaterThan(20)
+  })
+
+  it('DEKES schedule entries carry a non-empty explanation', async () => {
+    const noOpProvider = {
+      supportsRegion: () => false,
+      getForecast: jest.fn().mockResolvedValue([]),
+      getCurrentIntensity: jest.fn().mockResolvedValue({ ok: false, signal: null }),
+    }
+    ;(getProvider as jest.Mock).mockReturnValue(noOpProvider)
+    ;(prisma as any).dekesWorkload.create.mockImplementation((args: any) =>
+      Promise.resolve({ id: `wl-${args.data.dekesQueryId}`, ...args.data })
+    )
+
+    const [entry] = await scheduleBatchQueries(
+      [{ id: 'q-expl', query: 'SELECT *', estimatedResults: 5000 }],
+      ['FR', 'SE'],
+      6
+    )
+
+    expect(typeof entry.explanation).toBe('string')
+    expect(entry.explanation.length).toBeGreaterThan(20)
+    // Explanation should reference the selected region and predicted intensity
+    expect(entry.explanation).toContain(entry.selectedRegion)
+    expect(entry.explanation).toContain(String(entry.predictedCarbonIntensity))
+  })
+
+  it('ScheduleRecommendation fromRoutingResult produces the full canonical shape', async () => {
+    const { fromRoutingResult } = await import('../lib/schedule-recommendation')
+    const mockResult = {
+      selectedRegion: 'SE',
+      carbonIntensity: 28,
+      score: 0.92,
+      explanation: 'SE selected for 14:00–15:00 UTC: 28 gCO2/kWh vs 300 gCO2/kWh.',
+      forecastAvailable: true,
+      decisionFrameId: 'dda-test-abc',
+      alternatives: [{ region: 'DE', carbonIntensity: 300, score: 0.1 }],
+    }
+
+    const rec = fromRoutingResult(mockResult, {
+      targetTime: new Date('2026-03-09T14:00:00Z'),
+      durationMinutes: 60,
+      estimatedKwh: 0.5,
+      sourceUsed: 'electricity_maps',
+      resolutionMinutes: 60,
+    })
+
+    // All canonical fields must be present
+    expect(rec).toHaveProperty('selected_region', 'SE')
+    expect(rec).toHaveProperty('start_time', '2026-03-09T14:00:00.000Z')
+    expect(rec).toHaveProperty('end_time', '2026-03-09T15:00:00.000Z')
+    expect(rec).toHaveProperty('expected_ci', 28)
+    expect(rec).toHaveProperty('baseline_ci', 300)
+    expect(rec.expected_savings_pct).toBeGreaterThan(0)
+    expect(rec).toHaveProperty('confidence_band')
+    expect(rec).toHaveProperty('source_used', 'electricity_maps')
+    expect(rec).toHaveProperty('resolution_minutes', 60)
+    expect(rec).toHaveProperty('fallback_used', false)
+    expect(rec).toHaveProperty('forecast_available', true)
+    expect(rec).toHaveProperty('score', 0.92)
+    expect(rec).toHaveProperty('explanation')
+    expect(rec).toHaveProperty('decision_frame_id', 'dda-test-abc')
+    expect(rec.estimated_kwh).toBe(0.5)
+    expect(rec.estimated_co2_g).toBeGreaterThan(0)
+  })
+
   it('DEKES workload DB record includes selectedRegion and scheduledTime', async () => {
     const noOpProvider = {
       supportsRegion: () => false,

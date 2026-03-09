@@ -34,6 +34,19 @@ export interface RoutingResult {
   /** Present when the forecast-based assembler path was used */
   decisionFrameId?: string
   forecastAvailable?: boolean
+  /**
+   * Uncertainty band for the winning region's window average intensity.
+   * Derived from actual signal distribution (empirical=true) or estimated
+   * from the forecast confidence score (empirical=false).
+   * Present on the forecast path; absent on the live path (single point).
+   */
+  confidenceBand?: { low: number; mid: number; high: number; empirical: boolean }
+  /**
+   * Human-readable explanation of why this region/time was chosen.
+   * Includes intensity vs alternatives, expected reduction %, and data quality.
+   * Suitable for dashboard display and API consumers building trust UIs.
+   */
+  explanation: string
 }
 
 export async function routeGreen(request: RoutingRequest): Promise<RoutingResult> {
@@ -87,6 +100,28 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     }
 
     const others = frame.regions.filter((r) => r.region !== best.region)
+
+    // ── Explanation ───────────────────────────────────────────────────────────
+    const worstAlt = [...frame.regions].sort((a, b) => b.windowAvgIntensity - a.windowAvgIntensity)[0]
+    const baselineIntensity = worstAlt.windowAvgIntensity
+    const reductionPct = baselineIntensity > 0
+      ? Math.round(((baselineIntensity - best.windowAvgIntensity) / baselineIntensity) * 100)
+      : 0
+    const startLabel = targetTime.toISOString().slice(11, 16) + ' UTC'
+    const endLabel = new Date(targetTime.getTime() + (durationMinutes ?? 60) * 60_000).toISOString().slice(11, 16) + ' UTC'
+    const bandNote = best.confidenceBand.empirical
+      ? `uncertainty band ${best.confidenceBand.low}–${best.confidenceBand.high} gCO2/kWh (empirical)`
+      : `estimated band ${best.confidenceBand.low}–${best.confidenceBand.high} gCO2/kWh (model confidence ${Math.round(best.forecastConfidence * 100)}%)`
+    const trendNote = best.forecastTrend === 'increasing' ? ', rising trend' :
+                      best.forecastTrend === 'decreasing' ? ', falling trend' : ''
+    const dataNote = best.forecastAvailable ? 'live forecast' : 'historical data (no fresh forecast available)'
+
+    const explanation = others.length > 0
+      ? `${best.region} selected for ${startLabel}–${endLabel}: forecast avg ${best.windowAvgIntensity} gCO2/kWh` +
+        ` vs ${baselineIntensity} gCO2/kWh in ${worstAlt.region} — ${reductionPct > 0 ? `${reductionPct}% expected reduction` : 'lowest available'}.` +
+        ` ${bandNote}${trendNote}. Source: ${dataNote}.`
+      : `${best.region} is the only candidate: ${best.windowAvgIntensity} gCO2/kWh at ${startLabel}. Source: ${dataNote}.`
+
     return {
       selectedRegion: best.region,
       carbonIntensity: best.targetCarbonIntensity,
@@ -94,6 +129,8 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
       score: computeScore(best),
       decisionFrameId: frame.frameId,
       forecastAvailable: best.forecastAvailable,
+      confidenceBand: best.confidenceBand,
+      explanation,
       alternatives: others.slice(0, 2).map((r) => ({
         region: r.region,
         carbonIntensity: r.targetCarbonIntensity,
@@ -149,6 +186,28 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     ? regionData.filter((r) => r.carbonIntensity <= maxCarbonGPerKwh)
     : regionData
 
+  function buildLiveExplanation(
+    winner: { region: string; carbonIntensity: number },
+    all: Array<{ region: string; carbonIntensity: number }>,
+    ceilingNote?: string,
+  ): string {
+    const sorted = [...all].sort((a, b) => b.carbonIntensity - a.carbonIntensity)
+    const worst = sorted[0]
+    const reductionPct = worst.carbonIntensity > 0
+      ? Math.round(((worst.carbonIntensity - winner.carbonIntensity) / worst.carbonIntensity) * 100)
+      : 0
+    const altParts = all
+      .filter((r) => r.region !== winner.region)
+      .slice(0, 2)
+      .map((r) => `${r.region} ${r.carbonIntensity}`)
+      .join(', ')
+    const base = `${winner.region} selected for immediate execution: live intensity ${winner.carbonIntensity} gCO2/kWh` +
+      (altParts ? ` (vs ${altParts} gCO2/kWh)` : '') +
+      (reductionPct > 0 ? ` — ${reductionPct}% cleaner than worst candidate` : '') +
+      `. Source: electricity_maps (real-time).`
+    return ceilingNote ? `${base} Note: ${ceilingNote}` : base
+  }
+
   if (filtered.length === 0) {
     const sorted = [...regionData].sort((a, b) => a.carbonIntensity - b.carbonIntensity)
     const best = sorted[0]
@@ -157,6 +216,7 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
       carbonIntensity: best.carbonIntensity,
       estimatedLatency: best.latency,
       score: 0,
+      explanation: buildLiveExplanation(best, regionData, `all regions exceed budget of ${maxCarbonGPerKwh} gCO2/kWh — least-bad selected.`),
       alternatives: sorted.slice(1, 3).map((r) => ({
         region: r.region,
         carbonIntensity: r.carbonIntensity,
@@ -191,6 +251,7 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     carbonIntensity: best.carbonIntensity,
     estimatedLatency: best.latency,
     score: best.score,
+    explanation: buildLiveExplanation(best, regionData),
     alternatives: scored.slice(1, 3).map((r) => ({
       region: r.region,
       carbonIntensity: r.carbonIntensity,

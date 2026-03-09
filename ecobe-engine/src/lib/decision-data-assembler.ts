@@ -43,6 +43,21 @@ export interface DecisionRequest {
   latencyMsByRegion?: Record<string, number>
 }
 
+export interface ConfidenceBand {
+  /** Pessimistic estimate — actual intensity may be this high (p90 or equivalent) */
+  high: number
+  /** Central estimate — the model's best point forecast (p50) */
+  mid: number
+  /** Optimistic estimate — actual intensity may be this low (p10 or equivalent) */
+  low: number
+  /**
+   * Whether the band was derived from an actual signal distribution (true)
+   * or estimated from the confidence score of a single point (false).
+   * Use this to tell users how to weight the band.
+   */
+  empirical: boolean
+}
+
 export interface RegionDecisionData {
   region: string
   /** Predicted carbon intensity at targetTime (gCO2eq/kWh) */
@@ -63,6 +78,13 @@ export interface RegionDecisionData {
   latencyMs: number
   /** Whether a live forecast was available (vs. historical fallback) */
   forecastAvailable: boolean
+  /**
+   * Uncertainty band for the window average intensity.
+   * When empirical=true, derived from the actual distribution of signals
+   * across the window (real p10/p50/p90).  When false, estimated from
+   * the confidence score — treat as indicative, not statistical.
+   */
+  confidenceBand: ConfidenceBand
 }
 
 export interface DecisionFrame {
@@ -97,6 +119,37 @@ function buildQueryPlan(req: DecisionRequest, _now: Date): DecisionQueryPlan {
     regions: req.regions,
     forecastWindowStart: req.targetTime,
     forecastWindowEnd: addMinutes(req.targetTime, Math.max(req.durationMinutes, lookAheadMinutes)),
+  }
+}
+
+// ─── Confidence band helpers ──────────────────────────────────────────────────
+
+/**
+ * Derive an empirical confidence band from the actual distribution of
+ * intensity values across the window.  Uses real percentile positions.
+ */
+function empiricalBand(values: number[]): ConfidenceBand {
+  const sorted = [...values].sort((a, b) => a - b)
+  const n = sorted.length
+  const p10 = sorted[Math.max(0, Math.floor(n * 0.1))]
+  const p50 = sorted[Math.floor((n - 1) * 0.5)]
+  const p90 = sorted[Math.min(n - 1, Math.floor(n * 0.9))]
+  return { low: Math.round(p10), mid: Math.round(p50), high: Math.round(p90), empirical: true }
+}
+
+/**
+ * Estimate a confidence band from a single point + confidence score.
+ * The spread is proportional to (1 - confidence): a perfect forecast
+ * has zero spread; a 40% confidence forecast spreads ±25%.
+ * Result is indicative, not statistical — callers should check empirical=false.
+ */
+function estimatedBand(intensity: number, confidence: number): ConfidenceBand {
+  const spreadPct = (1 - confidence) * 0.25  // 0 at conf=1.0, 0.15 at conf=0.4
+  return {
+    low:  Math.round(intensity * (1 - spreadPct)),
+    mid:  Math.round(intensity),
+    high: Math.round(intensity * (1 + spreadPct)),
+    empirical: false,
   }
 }
 
@@ -180,6 +233,8 @@ export async function assembleDecisionFrame(req: DecisionRequest): Promise<Decis
         targetTime: req.targetTime,
         latencyMs,
         forecastAvailable: false,
+        // Wide band — single historical reading, low confidence
+        confidenceBand: estimatedBand(fallbackIntensity, 0.4),
       }
     }
 
@@ -221,6 +276,12 @@ export async function assembleDecisionFrame(req: DecisionRequest): Promise<Decis
       relevant[0].observed_time ?? relevant[0].fetched_at
     )
 
+    // Confidence band — empirical when we have multiple signals, estimated otherwise
+    const windowValues = relevant.map((s) => s.intensity_gco2_per_kwh)
+    const confidenceBand = windowValues.length >= 3
+      ? empiricalBand(windowValues)
+      : estimatedBand(windowAvgIntensity, avgConfidence)
+
     return {
       region,
       targetCarbonIntensity,
@@ -232,6 +293,7 @@ export async function assembleDecisionFrame(req: DecisionRequest): Promise<Decis
       targetTime: req.targetTime,
       latencyMs,
       forecastAvailable: true,
+      confidenceBand,
     }
   })
 
