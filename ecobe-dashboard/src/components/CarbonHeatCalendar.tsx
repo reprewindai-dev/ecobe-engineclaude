@@ -15,19 +15,6 @@ function getSlot(slots: HourlySlot[], day: number, hour: number): HourlySlot | u
   return slots.find((s) => s.hour === day * 24 + hour)
 }
 
-function intensityToColor(intensity: number, min: number, max: number): string {
-  if (max === min) return 'bg-slate-700'
-  const ratio = (intensity - min) / (max - min)
-  // green (low) → yellow (mid) → red (high)
-  if (ratio < 0.5) {
-    const g = Math.round(ratio * 2 * 255)
-    return `bg-[rgb(0,${g},0)]`
-  } else {
-    const r = Math.round((ratio - 0.5) * 2 * 255)
-    return `bg-[rgb(${r},0,0)]`
-  }
-}
-
 function intensityToStyle(
   intensity: number | undefined,
   min: number,

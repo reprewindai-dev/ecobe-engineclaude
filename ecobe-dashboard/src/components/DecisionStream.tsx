@@ -7,24 +7,7 @@ import { getQualityTierBadge, getCarbonLevel } from '@/types'
 import type { DashboardDecision, QualityTier } from '@/types'
 import { Loader2, Radio, Filter, X } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
-
-function getSource(d: DashboardDecision): string {
-  const metaSource = d.meta?.source as string | undefined
-  if (metaSource) return metaSource
-  if (d.opName?.toLowerCase().includes('dekes')) return 'DEKES'
-  if (d.workloadName?.toLowerCase().includes('ci') || d.opName?.toLowerCase().includes('ci'))
-    return 'CI/CD'
-  if (d.organizationId) return 'API'
-  return 'Manual'
-}
-
-function deriveQualityTier(d: DashboardDecision): QualityTier {
-  return d.fallbackUsed
-    ? 'low'
-    : d.dataFreshnessSeconds != null && d.dataFreshnessSeconds > 600
-      ? 'medium'
-      : 'high'
-}
+import { getDecisionSource, deriveQualityTier } from '@/lib/decisions'
 
 // Collect unique filter values from the decisions list
 function getFilterOptions(decisions: DashboardDecision[]) {
@@ -33,7 +16,7 @@ function getFilterOptions(decisions: DashboardDecision[]) {
   const workloadTypes = new Set<string>()
 
   for (const d of decisions) {
-    sources.add(getSource(d))
+    sources.add(getDecisionSource(d))
     if (d.organizationId) orgs.add(d.organizationId)
     const wt = d.meta?.workloadType as string | undefined
     if (wt) workloadTypes.add(wt)
@@ -66,7 +49,7 @@ export function DecisionStream() {
 
   const filtered = useMemo(() => {
     return decisions.filter((d) => {
-      if (filters.source && getSource(d) !== filters.source) return false
+      if (filters.source && getDecisionSource(d) !== filters.source) return false
       if (filters.org && d.organizationId !== filters.org) return false
       if (filters.workloadType) {
         const wt = (d.meta?.workloadType as string) ?? d.opName ?? ''
@@ -226,7 +209,7 @@ export function DecisionStream() {
 
           const tier = deriveQualityTier(d)
           const level = chosenIntensity != null ? getCarbonLevel(chosenIntensity) : null
-          const source = getSource(d)
+          const source = getDecisionSource(d)
           const isDEKES = source === 'DEKES'
 
           return (

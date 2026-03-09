@@ -251,6 +251,11 @@ export interface OptimalWindow {
 export interface DecisionReplayResult {
   decisionFrameId: string
   replayedAt: string
+  createdAt: string
+  // Workload context — present when the original decision was attributed to a named source
+  organizationId?: string | null
+  workloadType?: string | null
+  source?: string | null
   request: {
     regions: string[]
     targetTime: string | null
@@ -279,7 +284,6 @@ export interface DecisionReplayResult {
   referenceTime: string | null
   fallbackUsed: boolean
   providerDisagreement: boolean
-  createdAt: string
 }
 
 // ─── Provider Health ──────────────────────────────────────────────────────────

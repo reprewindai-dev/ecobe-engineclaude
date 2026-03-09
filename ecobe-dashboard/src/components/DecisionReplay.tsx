@@ -83,8 +83,8 @@ export function DecisionReplay() {
             </div>
           </div>
 
-          {/* Workload context — source, org, workloadType from meta/sourceUsed */}
-          {(data.sourceUsed || (data as unknown as Record<string, unknown>).organizationId || (data as unknown as Record<string, unknown>).workloadType) && (
+          {/* Workload context — source, org, workloadType */}
+          {(data.sourceUsed || data.organizationId || data.workloadType || data.source) && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               {data.sourceUsed && (
                 <div className="bg-slate-800/40 rounded-lg p-2.5 flex items-center gap-2">
@@ -95,30 +95,42 @@ export function DecisionReplay() {
                   </div>
                 </div>
               )}
-              {(data as unknown as Record<string, unknown>).organizationId && (
+              {data.organizationId && (
                 <div className="bg-slate-800/40 rounded-lg p-2.5 flex items-center gap-2">
                   <Building2 className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                   <div>
                     <p className="text-[10px] text-slate-500">Organization</p>
-                    <p className="text-xs font-medium text-white truncate">{String((data as unknown as Record<string, unknown>).organizationId)}</p>
+                    <p className="text-xs font-medium text-white truncate">{data.organizationId}</p>
                   </div>
                 </div>
               )}
-              {(data as unknown as Record<string, unknown>).workloadType && (
+              {data.workloadType && (
                 <div className="bg-slate-800/40 rounded-lg p-2.5 flex items-center gap-2">
                   <Cpu className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                   <div>
                     <p className="text-[10px] text-slate-500">Workload Type</p>
-                    <p className="text-xs font-medium text-white capitalize">{String((data as unknown as Record<string, unknown>).workloadType)}</p>
+                    <p className="text-xs font-medium text-white capitalize">{data.workloadType}</p>
                   </div>
                 </div>
               )}
-              {(data as unknown as Record<string, unknown>).source && (
-                <div className={`rounded-lg p-2.5 flex items-center gap-2 ${String((data as unknown as Record<string, unknown>).source) === 'DEKES' ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-slate-800/40'}`}>
-                  <Tag className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+              {data.source && (
+                <div
+                  className={`rounded-lg p-2.5 flex items-center gap-2 ${
+                    data.source === 'DEKES'
+                      ? 'bg-emerald-500/10 border border-emerald-500/20'
+                      : 'bg-slate-800/40'
+                  }`}
+                >
+                  <Tag
+                    className={`w-3.5 h-3.5 flex-shrink-0 ${data.source === 'DEKES' ? 'text-emerald-400' : 'text-slate-400'}`}
+                  />
                   <div>
                     <p className="text-[10px] text-slate-500">Source</p>
-                    <p className="text-xs font-bold text-emerald-400">{String((data as unknown as Record<string, unknown>).source)}</p>
+                    <p
+                      className={`text-xs font-bold ${data.source === 'DEKES' ? 'text-emerald-400' : 'text-slate-300'}`}
+                    >
+                      {data.source}
+                    </p>
                   </div>
                 </div>
               )}

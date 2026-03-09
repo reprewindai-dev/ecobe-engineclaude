@@ -5,13 +5,7 @@ import { ecobeApi } from '@/lib/api'
 import { Loader2, Zap } from 'lucide-react'
 import type { DashboardDecision } from '@/types'
 import { getQualityTierBadge } from '@/types'
-
-function getSource(d: DashboardDecision): string {
-  const metaSource = d.meta?.source as string | undefined
-  if (metaSource) return metaSource
-  if (d.opName?.toLowerCase().includes('dekes')) return 'DEKES'
-  return 'Other'
-}
+import { getDecisionSource, isDecisionDelayed, deriveQualityTier } from '@/lib/decisions'
 
 function isToday(iso: string): boolean {
   const d = new Date(iso)
@@ -27,7 +21,7 @@ export function DekesImpactCard() {
   })
 
   const allDecisions = data?.decisions ?? []
-  const dekesDecisions = allDecisions.filter((d) => getSource(d) === 'DEKES')
+  const dekesDecisions = allDecisions.filter((d) => getDecisionSource(d) === 'DEKES')
 
   if (!isLoading && !isError && dekesDecisions.length === 0) return null
 
@@ -42,9 +36,7 @@ export function DekesImpactCard() {
 
   const avgDelta = deltas.length > 0 ? deltas.reduce((a, b) => a + b, 0) / deltas.length : null
 
-  const delayed = dekesDecisions.filter(
-    (d) => d.fallbackUsed || (d.dataFreshnessSeconds != null && d.dataFreshnessSeconds > 900)
-  ).length
+  const delayed = dekesDecisions.filter(isDecisionDelayed).length
 
   const avgDelayApplied =
     dekesDecisions.length > 0 ? (delayed / dekesDecisions.length) * 100 : 0
@@ -54,12 +46,7 @@ export function DekesImpactCard() {
   // Quality tier distribution
   const tiers = { high: 0, medium: 0, low: 0 }
   for (const d of dekesDecisions) {
-    const tier: 'high' | 'medium' | 'low' = d.fallbackUsed
-      ? 'low'
-      : d.dataFreshnessSeconds != null && d.dataFreshnessSeconds > 600
-        ? 'medium'
-        : 'high'
-    tiers[tier]++
+    tiers[deriveQualityTier(d)]++
   }
   const total = dekesDecisions.length || 1
 

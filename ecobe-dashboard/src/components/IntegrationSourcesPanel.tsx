@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ecobeApi } from '@/lib/api'
 import { Plug, Loader2 } from 'lucide-react'
 import type { DashboardDecision } from '@/types'
+import { getDecisionSource, isDecisionDelayed } from '@/lib/decisions'
 
 interface SourceStats {
   source: string
@@ -13,21 +14,11 @@ interface SourceStats {
   delayedCount: number
 }
 
-// Derive source from decision meta or workloadName/opName
-function getSource(d: DashboardDecision): string {
-  const metaSource = d.meta?.source as string | undefined
-  if (metaSource) return metaSource
-  if (d.opName?.toLowerCase().includes('dekes')) return 'DEKES'
-  if (d.workloadName?.toLowerCase().includes('ci') || d.opName?.toLowerCase().includes('ci')) return 'CI/CD'
-  if (d.organizationId) return 'API'
-  return 'Manual'
-}
-
 function computeSourceStats(decisions: DashboardDecision[]): SourceStats[] {
   const map = new Map<string, { deltas: number[]; delayed: number; total: number }>()
 
   for (const d of decisions) {
-    const source = getSource(d)
+    const source = getDecisionSource(d)
     if (!map.has(source)) map.set(source, { deltas: [], delayed: 0, total: 0 })
     const entry = map.get(source)!
     entry.total++
@@ -36,9 +27,7 @@ function computeSourceStats(decisions: DashboardDecision[]): SourceStats[] {
         ? d.carbonIntensityBaselineGPerKwh - d.carbonIntensityChosenGPerKwh
         : null
     if (delta != null) entry.deltas.push(delta)
-    // "delayed" = fallback used or stale data (proxy for policy action)
-    if (d.fallbackUsed || (d.dataFreshnessSeconds != null && d.dataFreshnessSeconds > 900))
-      entry.delayed++
+    if (isDecisionDelayed(d)) entry.delayed++
   }
 
   return Array.from(map.entries())

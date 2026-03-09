@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ecobeApi } from '@/lib/api'
 import { Loader2, BarChart3 } from 'lucide-react'
 import type { DashboardDecision } from '@/types'
+import { getDecisionSource } from '@/lib/decisions'
 import {
   BarChart,
   Bar,
@@ -23,15 +24,6 @@ const SOURCE_COLORS: Record<string, string> = {
   Other: '#64748b',
 }
 
-function getSource(d: DashboardDecision): string {
-  const metaSource = d.meta?.source as string | undefined
-  if (metaSource) return metaSource
-  if (d.opName?.toLowerCase().includes('dekes')) return 'DEKES'
-  if (d.workloadName?.toLowerCase().includes('ci') || d.opName?.toLowerCase().includes('ci')) return 'CI/CD'
-  if (d.organizationId) return 'API'
-  return 'Other'
-}
-
 interface SourceCO2 {
   source: string
   co2AvoidedKg: number
@@ -43,7 +35,7 @@ function computeSourceCO2(decisions: DashboardDecision[]): SourceCO2[] {
   const map = new Map<string, { co2G: number; decisions: number }>()
 
   for (const d of decisions) {
-    const source = getSource(d)
+    const source = getDecisionSource(d)
     if (!map.has(source)) map.set(source, { co2G: 0, decisions: 0 })
     const entry = map.get(source)!
     entry.decisions++
@@ -66,7 +58,6 @@ function computeSourceCO2(decisions: DashboardDecision[]): SourceCO2[] {
 interface CustomTooltipProps {
   active?: boolean
   payload?: Array<{ value: number; payload: SourceCO2 }>
-  label?: string
 }
 
 function CustomTooltip({ active, payload }: CustomTooltipProps) {

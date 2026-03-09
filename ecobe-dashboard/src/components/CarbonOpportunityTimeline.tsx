@@ -18,17 +18,7 @@ import {
 } from 'recharts'
 import { format, parseISO } from 'date-fns'
 import type { DashboardDecision } from '@/types'
-
-function getSource(d: DashboardDecision): string {
-  const metaSource = d.meta?.source as string | undefined
-  if (metaSource) return metaSource
-  if (d.opName?.toLowerCase().includes('dekes')) return 'DEKES'
-  return 'Other'
-}
-
-function isDelayed(d: DashboardDecision): boolean {
-  return d.fallbackUsed || (d.dataFreshnessSeconds != null && d.dataFreshnessSeconds > 900)
-}
+import { getDecisionSource, isDecisionDelayed } from '@/lib/decisions'
 
 const REGION_COLORS: Record<string, string> = {
   FR: '#10b981',
@@ -119,13 +109,13 @@ export function CarbonOpportunityTimeline() {
   const dekesMarkers = (() => {
     const decisions = dekesDecisions.data?.decisions ?? []
     return decisions
-      .filter((d) => getSource(d) === 'DEKES')
+      .filter((d) => getDecisionSource(d) === 'DEKES')
       .slice(0, 20)  // limit markers to avoid clutter
       .map((d) => ({
         time: format(parseISO(d.createdAt), 'MMM d HH:mm'),
-        delayed: isDelayed(d),
+        delayed: isDecisionDelayed(d),
         region: d.chosenRegion,
-        label: isDelayed(d) ? 'DEKES delayed' : 'DEKES executed',
+        label: isDecisionDelayed(d) ? 'DEKES delayed' : 'DEKES executed',
       }))
   })()
 

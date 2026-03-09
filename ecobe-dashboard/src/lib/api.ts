@@ -24,7 +24,53 @@ const API_BASE = process.env.NEXT_PUBLIC_ECOBE_API_URL || '/api/ecobe'
 const api = axios.create({
   baseURL: API_BASE,
   headers: { 'Content-Type': 'application/json' },
+  timeout: 30_000, // 30 s — prevents hung requests from blocking the UI
 })
+
+// Normalize API errors into human-readable messages.
+// Extracts error.message / error.detail from ECOBE response body when available.
+api.interceptors.response.use(
+  (res) => res,
+  (err: unknown) => {
+    if (axios.isAxiosError(err)) {
+      const body = err.response?.data as Record<string, unknown> | undefined
+      const serverMsg =
+        typeof body?.message === 'string'
+          ? body.message
+          : typeof body?.error === 'string'
+            ? body.error
+            : typeof body?.detail === 'string'
+              ? body.detail
+              : null
+
+      if (serverMsg) {
+        const normalized = new Error(serverMsg)
+        normalized.name = 'EcobeAPIError'
+        return Promise.reject(normalized)
+      }
+
+      if (err.code === 'ECONNABORTED') {
+        return Promise.reject(
+          new Error('Request timed out — ECOBE Engine did not respond in time')
+        )
+      }
+
+      if (!err.response) {
+        return Promise.reject(
+          new Error('Cannot reach ECOBE Engine — check NEXT_PUBLIC_ECOBE_API_URL')
+        )
+      }
+
+      const status = err.response.status
+      if (status === 404) return Promise.reject(new Error('Resource not found'))
+      if (status === 401 || status === 403)
+        return Promise.reject(new Error('Unauthorized — check API credentials'))
+      if (status >= 500)
+        return Promise.reject(new Error(`ECOBE Engine error (${status}) — check server logs`))
+    }
+    return Promise.reject(err)
+  }
+)
 
 // ─── Request Types ────────────────────────────────────────────────────────────
 
