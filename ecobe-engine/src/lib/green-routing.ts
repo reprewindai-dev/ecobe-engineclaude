@@ -68,6 +68,32 @@ export interface RoutingResult {
    * a resolution penalty (see GET /api/v1/methodology for details).
    */
   dataResolutionMinutes?: number
+
+  // ── Decision confidence fields ─────────────────────────────────────────────
+
+  /**
+   * Absolute carbon intensity delta in gCO2eq/kWh: baseline_ci − selected_ci.
+   * Positive means the selected region is cleaner than the worst alternative.
+   * This is the raw CO₂ signal — pairs with expected_savings_pct for ESG reporting.
+   */
+  carbon_delta_g_per_kwh: number
+
+  /**
+   * Whether the winning region's ranking is stable across nearby forecast slots.
+   * 'stable'   → winner dominates; no alternative could realistically beat it
+   * 'medium'   → winner leads but intensity ranges overlap with at least one alt
+   * 'unstable' → an alternative could plausibly have lower intensity than winner
+   * null       → live path (no multi-slot forecast to compare)
+   */
+  forecast_stability: 'stable' | 'medium' | 'unstable' | null
+
+  /**
+   * Cross-provider signal disagreement for the selected region.
+   * null when only one provider was queried or validation is disabled.
+   * flag=true means providers disagreed by more than the configured threshold.
+   * This feeds into qualityTier but is also surfaced explicitly for transparency.
+   */
+  provider_disagreement: { flag: boolean; pct: number | null } | null
 }
 
 /**
@@ -99,11 +125,14 @@ function computeQualityTier(
   forecastAvailable: boolean,
   empirical: boolean | undefined,
   rankingStability: 'stable' | 'medium' | 'unstable' | 'sole_candidate' | undefined,
-  liveSignalPresent?: boolean
+  liveSignalPresent?: boolean,
+  disagreeFlag?: boolean,
 ): 'high' | 'medium' | 'low' {
   // Live path: quality determined by whether provider returned a real signal
   if (liveSignalPresent !== undefined) {
-    return liveSignalPresent ? 'high' : 'low'
+    if (!liveSignalPresent) return 'low'
+    // Downgrade to medium when providers disagree — signal is real but uncertain
+    return disagreeFlag ? 'medium' : 'high'
   }
   // Forecast path
   if (!forecastAvailable) return 'low'
@@ -205,6 +234,12 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
         ` ${bandNote}${trendNote}. Source: ${dataNote}.`
       : `${best.region} is the only candidate: ${best.windowAvgIntensity} gCO2/kWh at ${startLabel}. Source: ${dataNote}.`
 
+    const forecastStability = (() => {
+      const s = best.confidenceBand.rankingStability
+      if (!s || s === 'sole_candidate') return 'stable' as const
+      return s as 'stable' | 'medium' | 'unstable'
+    })()
+
     return {
       selectedRegion: best.region,
       carbonIntensity: best.targetCarbonIntensity,
@@ -220,6 +255,9 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
         best.confidenceBand.rankingStability,
       ),
       dataResolutionMinutes: best.dataResolutionMinutes,
+      carbon_delta_g_per_kwh: Math.max(0, baselineIntensity - best.windowAvgIntensity),
+      forecast_stability: forecastStability,
+      provider_disagreement: null, // assembler path uses aggregated forecast; no per-signal disagreement
       alternatives: others.slice(0, 2).map((r) => ({
         region: r.region,
         carbonIntensity: r.targetCarbonIntensity,
@@ -307,6 +345,7 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
   if (filtered.length === 0) {
     const sorted = [...regionData].sort((a, b) => a.carbonIntensity - b.carbonIntensity)
     const best = sorted[0]
+    const worstCi = Math.max(...regionData.map((r) => r.carbonIntensity))
     return {
       selectedRegion: best.region,
       carbonIntensity: best.carbonIntensity,
@@ -314,6 +353,11 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
       score: 0,
       qualityTier: 'low',
       explanation: buildLiveExplanation(best, regionData, `all regions exceed budget of ${maxCarbonGPerKwh} gCO2/kWh — least-bad selected.`),
+      carbon_delta_g_per_kwh: Math.max(0, worstCi - best.carbonIntensity),
+      forecast_stability: null,
+      provider_disagreement: best.providerSignal
+        ? { flag: best.providerSignal.disagreement_flag, pct: best.providerSignal.disagreement_pct }
+        : null,
       alternatives: sorted.slice(1, 3).map((r) => ({
         region: r.region,
         carbonIntensity: r.carbonIntensity,
@@ -347,14 +391,24 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
 
   scored.sort((a, b) => b.score - a.score)
   const best = scored[0]
+  const worstLiveCi = Math.max(...regionData.map((r) => r.carbonIntensity))
 
   return {
     selectedRegion: best.region,
     carbonIntensity: best.carbonIntensity,
     estimatedLatency: best.latency,
     score: best.score,
-    qualityTier: computeQualityTier(false, undefined, undefined, best.providerSignal != null),
+    qualityTier: computeQualityTier(
+      false, undefined, undefined,
+      best.providerSignal != null,
+      best.providerSignal?.disagreement_flag,
+    ),
     explanation: buildLiveExplanation(best, regionData),
+    carbon_delta_g_per_kwh: Math.max(0, worstLiveCi - best.carbonIntensity),
+    forecast_stability: null,
+    provider_disagreement: best.providerSignal
+      ? { flag: best.providerSignal.disagreement_flag, pct: best.providerSignal.disagreement_pct }
+      : null,
     alternatives: scored.slice(1, 3).map((r) => ({
       region: r.region,
       carbonIntensity: r.carbonIntensity,

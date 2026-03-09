@@ -79,6 +79,22 @@ export interface ScheduleRecommendation {
    */
   quality_tier: 'high' | 'medium' | 'low'
 
+  // ── Decision confidence ───────────────────────────────────────────────────
+  /**
+   * Absolute carbon intensity savings in gCO2eq/kWh: baseline_ci − selected_ci.
+   * The raw number behind expected_savings_pct — useful for ESG reporting.
+   */
+  carbon_delta_g_per_kwh: number
+  /**
+   * Whether the winning region's ranking is stable across nearby forecast slots.
+   * null on the live path (no multi-slot comparison available).
+   */
+  forecast_stability: 'stable' | 'medium' | 'unstable' | null
+  /**
+   * Cross-provider signal disagreement. null when validation was not performed.
+   */
+  provider_disagreement: { flag: boolean; pct: number | null } | null
+
   // ── Energy estimate ───────────────────────────────────────────────────────
   estimated_kwh: number | null
   estimated_co2_g: number | null
@@ -97,6 +113,9 @@ export function fromRoutingResult(
     forecastAvailable?: boolean
     qualityTier?: 'high' | 'medium' | 'low'
     alternatives: Array<{ region: string; carbonIntensity: number }>
+    carbon_delta_g_per_kwh?: number
+    forecast_stability?: 'stable' | 'medium' | 'unstable' | null
+    provider_disagreement?: { flag: boolean; pct: number | null } | null
   },
   opts: {
     targetTime?: Date
@@ -148,6 +167,9 @@ export function fromRoutingResult(
     explanation: result.explanation,
     decision_frame_id: result.decisionFrameId ?? null,
     quality_tier: result.qualityTier ?? 'medium',
+    carbon_delta_g_per_kwh: result.carbon_delta_g_per_kwh ?? Math.max(0, baselineCi - result.carbonIntensity),
+    forecast_stability: result.forecast_stability ?? null,
+    provider_disagreement: result.provider_disagreement ?? null,
     estimated_kwh: estimatedKwh ?? null,
     estimated_co2_g: estimatedKwh != null ? Math.round(estimatedKwh * result.carbonIntensity * 1000) / 1000 : null,
   }
@@ -189,6 +211,9 @@ export function fromDekesEntry(
     explanation: entry.explanation ?? `${entry.selectedRegion} scheduled at ${entry.scheduledTime.toISOString().slice(11, 16)} UTC: predicted ${entry.predictedCarbonIntensity} gCO2/kWh, ${Math.round(entry.savings)}% vs immediate.`,
     decision_frame_id: null,
     quality_tier: 'medium',  // DEKES uses forecast data — empirical band not yet computed
+    carbon_delta_g_per_kwh: Math.max(0, baselineCi - entry.predictedCarbonIntensity),
+    forecast_stability: null,    // DEKES path doesn't compute ranking stability
+    provider_disagreement: null, // DEKES path uses aggregated forecast signals
     estimated_kwh: entry.estimatedKwh,
     estimated_co2_g: Math.round(entry.estimatedCO2 * 1000) / 1000,
   }

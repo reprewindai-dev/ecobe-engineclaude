@@ -101,9 +101,41 @@ const METHODOLOGY_DOC = {
   quality_tiers: {
     description: 'Summarizes the overall reliability of a routing decision for API consumers.',
     levels: {
-      high:   'Live real-time signal present, OR forecast with empirical band + stable/sole_candidate ranking.',
-      medium: 'Forecast with estimated band, OR overlapping (medium) stability.',
+      high:   'Live real-time signal present + providers agree, OR forecast with empirical band + stable/sole_candidate ranking.',
+      medium: 'Forecast with estimated band, OR overlapping (medium) stability, OR provider disagreement detected on live path.',
       low:    'Historical fallback used, OR unstable ranking, OR all providers failed.',
+    },
+  },
+
+  decision_confidence: {
+    description:
+      'Every routing decision now includes three explicit confidence signals ' +
+      'beyond the scalar score, so API consumers can build trust UIs without ' +
+      'parsing the explanation string.',
+    fields: {
+      carbon_delta_g_per_kwh: {
+        description: 'Absolute CO₂ intensity savings: baseline_ci − selected_ci in gCO2eq/kWh.',
+        note: 'Pairs with expected_savings_pct to provide both relative and absolute impact. ' +
+              'Useful for ESG reporting where absolute numbers (not percentages) are required.',
+        example: '{ "carbon_delta_g_per_kwh": 165 } → running in FR saves 165 gCO2/kWh vs baseline',
+      },
+      forecast_stability: {
+        description: 'Whether the winning region\'s ranking is stable across adjacent forecast slots.',
+        values: {
+          stable:   'Winner dominates even under worst-case intensity estimates.',
+          medium:   'Winner leads but intensity bands overlap with at least one alternative.',
+          unstable: 'An alternative could plausibly have lower intensity; treat with caution.',
+          null:     'Live path — no multi-slot forecast to compare against.',
+        },
+      },
+      provider_disagreement: {
+        description: 'Cross-provider signal disagreement for the selected region on the live path.',
+        fields: {
+          flag: 'true when providers disagree by more than CARBON_PROVIDER_DISAGREEMENT_THRESHOLD_PCT (default 15%).',
+          pct:  'Absolute percentage difference between primary and validation provider.',
+        },
+        note: 'Disagreement downgrades quality_tier from high → medium. null when validation is disabled.',
+      },
     },
   },
 
