@@ -4,12 +4,31 @@
  * Wraps the existing ElectricityMapsClient and normalises its output into
  * the shared CarbonSignal shape.  No route or business-logic code should
  * call ElectricityMapsClient directly — go through this adapter.
+ *
+ * Two-time model alignment:
+ *   observed_time  → updatedAt from the API (= referenceTime: when EM generated the forecast)
+ *   forecast_time  → datetime from the forecast item (= targetTime: the predicted slot)
+ *
+ * Resolution mapping (temporalGranularity → minutes):
+ *   'hourly'         → 60
+ *   'half_hourly'    → 30
+ *   'quarter_hourly' → 15
+ *   anything else    → 60 (conservative default)
  */
 
 import { env } from '../../../config/env'
 import { CarbonProvider } from '../provider-interface'
 import { CarbonSignal, ProviderResult } from '../types'
 import { electricityMaps } from '../../electricity-maps'
+
+function granularityToMinutes(granularity: string | undefined): number {
+  switch (granularity) {
+    case 'quarter_hourly': return 15
+    case 'half_hourly':    return 30
+    case 'hourly':         return 60
+    default:               return 60
+  }
+}
 
 export class ElectricityMapsProvider implements CarbonProvider {
   readonly name = 'electricity_maps' as const
@@ -62,6 +81,7 @@ export class ElectricityMapsProvider implements CarbonProvider {
     try {
       const raw = await electricityMaps.getForecast(region)
       const latencyMs = Date.now() - start
+      const fetchedAt = new Date().toISOString()
 
       return raw
         .filter((f) => {
@@ -71,11 +91,16 @@ export class ElectricityMapsProvider implements CarbonProvider {
         .map((f): ProviderResult => ({
           ok: true,
           signal: {
-            region: f.zone,
+            // region is the routing parameter — f.zone is the same but use the param
+            // to guarantee it's never undefined (f.zone could be missing in edge cases)
+            region,
             intensity_gco2_per_kwh: f.carbonIntensity,
-            observed_time: null,
+            // observed_time = updatedAt = when EM generated this forecast run
+            // This is ECOBE's referenceTime in the two-time model.
+            // Assembler uses it to select the most recent forecast covering targetTime.
+            observed_time: f.updatedAt ?? null,
             forecast_time: f.datetime,
-            fetched_at: new Date().toISOString(),
+            fetched_at: fetchedAt,
             source: 'electricity_maps',
             source_latency_ms: latencyMs,
             is_forecast: true,
@@ -85,7 +110,13 @@ export class ElectricityMapsProvider implements CarbonProvider {
             validation_used: false,
             disagreement_flag: false,
             disagreement_pct: null,
-            metadata: {},
+            metadata: {
+              zone: f.zone,
+              temporalGranularity: f.temporalGranularity,
+              // resolution_minutes lets assembler skip the historical-table lookup
+              // for dataResolutionMinutes when forecast signals carry this info
+              resolution_minutes: granularityToMinutes(f.temporalGranularity),
+            },
           },
         }))
     } catch {
@@ -101,7 +132,7 @@ export class ElectricityMapsProvider implements CarbonProvider {
       return raw.map((f): ProviderResult => ({
         ok: true,
         signal: {
-          region: f.zone,
+          region: f.zone ?? region,  // zone may be per-item on history endpoint
           intensity_gco2_per_kwh: f.carbonIntensity,
           observed_time: f.datetime,
           forecast_time: null,

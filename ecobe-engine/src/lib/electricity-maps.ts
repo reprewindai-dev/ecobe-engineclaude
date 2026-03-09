@@ -8,6 +8,17 @@ export interface CarbonIntensityData {
   datetime: string
   fossilFuelPercentage?: number
   renewablePercentage?: number
+  /**
+   * ISO-8601 timestamp — when Electricity Maps generated this forecast.
+   * Maps to ECOBE's referenceTime (two-time model).
+   * Present on forecast responses (updatedAt); null on live readings.
+   */
+  updatedAt?: string
+  /**
+   * Native data granularity from the API ('hourly', 'half_hourly', 'quarter_hourly').
+   * Used by the provider adapter to populate resolution_minutes on CarbonSignal.
+   */
+  temporalGranularity?: string
 }
 
 export class ElectricityMapsClient {
@@ -117,10 +128,20 @@ export class ElectricityMapsClient {
         headers: { 'auth-token': this.apiKey },
       })
 
-      const forecast = (response.data as any).forecast.map((item: any) => ({
-        zone: item.zone,
-        carbonIntensity: item.carbonIntensity,
-        datetime: item.datetime,
+      const data = response.data as any
+      // zone is a top-level field on the response, NOT on each forecast item.
+      // updatedAt is the referenceTime — when EM generated this forecast run.
+      // temporalGranularity tells us native resolution ('hourly', 'half_hourly', etc.)
+      const topZone: string           = data.zone
+      const updatedAt: string         = data.updatedAt
+      const temporalGranularity: string = data.temporalGranularity ?? 'hourly'
+
+      const forecast = (data.forecast as any[]).map((item) => ({
+        zone:               topZone,
+        carbonIntensity:    item.carbonIntensity,
+        datetime:           item.datetime,
+        updatedAt,
+        temporalGranularity,
       }))
       await this.logSuccess()
       return forecast

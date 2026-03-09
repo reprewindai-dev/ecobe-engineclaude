@@ -335,13 +335,19 @@ export async function assembleDecisionFrame(req: DecisionRequest): Promise<Decis
       fallbackUsed: false,
     })
 
+    // Prefer resolution from the signal's metadata (populated from API's
+    // temporalGranularity field). Fall back to the historical DB row's resolution,
+    // then to 60 min as a safe default.
+    const signalResolution = (relevant[0].metadata as any)?.resolution_minutes as number | undefined
+    const dataResolutionMinutes = signalResolution ?? historical?.resolutionMinutes ?? 60
+
     return {
       region,
       targetCarbonIntensity,
       windowAvgIntensity,
       forecastConfidence: adjustedConfidence,
       forecastTrend,
-      dataResolutionMinutes: historical?.resolutionMinutes ?? 60,
+      dataResolutionMinutes,
       referenceTime: new Date(latestRefIso),
       targetTime: req.targetTime,
       latencyMs,
