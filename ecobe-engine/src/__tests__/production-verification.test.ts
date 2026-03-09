@@ -46,6 +46,7 @@ jest.mock('../config/carbon-providers', () => ({
     maxStalenessMinutes: 10,
     disagreementThresholdPct: 15,
     devDiagnostics: false,
+    providers: [], // no additional fallback providers in tests
     providerRoles: {
       electricity_maps: { role: 'primary_realtime' },
       ember: { role: 'secondary_validation' },
@@ -63,6 +64,7 @@ import { assembleDecisionFrame } from '../lib/decision-data-assembler'
 import { routeGreen } from '../lib/green-routing'
 import { scheduleBatchQueries } from '../lib/dekes-integration'
 import { getForecastSignals } from '../lib/carbon/provider-router'
+import { consumeBudget, getBudgetStatus } from '../lib/carbon-budget'
 import {
   getRegionScorecard,
   recordForecastPrediction,
@@ -1114,5 +1116,257 @@ describe('8. Phase 2A — forecast scorecard & uncertainty', () => {
 
     await new Promise((r) => setTimeout(r, 10))
     expect(reconcileForecastActuals).toHaveBeenCalledWith('FR', expect.any(Date), 60)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 9. Phase 2B — quality tiers, cost scoring, carbon budget
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('9. Phase 2B — quality tiers, cost scoring, carbon budget', () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    ;(prisma as any).carbonIntensity.findMany.mockResolvedValue(mockHistoryRows)
+    ;(prisma as any).carbonIntensity.create.mockResolvedValue({})
+    ;(redis as any).get.mockResolvedValue(null)
+    ;(redis as any).setex.mockResolvedValue('OK')
+    ;(getRegionScorecard as jest.Mock).mockResolvedValue(mockUnknownScorecard)
+    ;(recordForecastPrediction as jest.Mock).mockResolvedValue(undefined)
+    ;(reconcileForecastActuals as jest.Mock).mockResolvedValue(undefined)
+  })
+
+  // ── Quality tier: forecast path ─────────────────────────────────────────────
+
+  it('forecast path: high qualityTier when empirical band and sole_candidate', async () => {
+    // ≥3 signals → empirical band; single region → sole_candidate stability
+    // getForecast must return ProviderResult[] (not CarbonSignal[])
+    // All 3 signals have forecast_time 5h ahead — targetTime is 4h ahead, so all
+    // fall within [targetTime, targetTime+60min] → 3 signals in window → empirical=true
+    const target = addHours(new Date(), 4)
+    const signals: ProviderResult[] = [
+      { ok: true, signal: makeForecastSignal('SE', 25, 5) },
+      { ok: true, signal: makeForecastSignal('SE', 28, 5) },
+      { ok: true, signal: makeForecastSignal('SE', 30, 5) },
+    ]
+    ;(getProvider as jest.Mock).mockImplementation((name: string) =>
+      name === 'electricity_maps'
+        ? { supportsRegion: () => true, getForecast: jest.fn().mockResolvedValue(signals), getCurrentIntensity: jest.fn() }
+        : undefined
+    )
+    ;(prisma as any).carbonIntensity.findMany.mockResolvedValue([
+      { region: 'SE', carbonIntensity: 28, resolutionMinutes: 60, timestamp: new Date() },
+    ])
+
+    const result = await routeGreen({
+      preferredRegions: ['SE'],
+      targetTime: target,
+      durationMinutes: 120, // window covers 4h–6h ahead, all 3 signals at 5h fall inside
+    })
+
+    expect(result.forecastAvailable).toBe(true)
+    expect(result.confidenceBand?.empirical).toBe(true)
+    expect(result.qualityTier).toBe('high')
+  })
+
+  it('forecast path: low qualityTier when forecastAvailable=false (historical fallback)', async () => {
+    // No signals → assembler falls back to historical; forecastAvailable=false
+    ;(getProvider as jest.Mock).mockImplementation((name: string) =>
+      name === 'electricity_maps'
+        ? { supportsRegion: () => true, getForecast: jest.fn().mockResolvedValue([]), getCurrentIntensity: jest.fn() }
+        : undefined
+    )
+    ;(prisma as any).carbonIntensity.findMany.mockResolvedValue([
+      { region: 'DE', carbonIntensity: 300, resolutionMinutes: 60, timestamp: new Date() },
+    ])
+
+    const result = await routeGreen({
+      preferredRegions: ['DE'],
+      targetTime: addHours(new Date(), 4),
+      durationMinutes: 60,
+    })
+
+    expect(result.forecastAvailable).toBe(false)
+    expect(result.qualityTier).toBe('low')
+  })
+
+  it('live path: high qualityTier when provider returns a real signal', async () => {
+    const liveProvider = {
+      supportsRegion: () => true,
+      getForecast: jest.fn().mockResolvedValue([]),
+      getCurrentIntensity: jest.fn().mockResolvedValue({
+        ok: true,
+        signal: makeSignal('FR', 60, { is_forecast: false, forecast_time: null }),
+      }),
+    }
+    ;(getProvider as jest.Mock).mockImplementation((name: string) =>
+      name === 'electricity_maps' ? liveProvider : undefined
+    )
+
+    const result = await routeGreen({ preferredRegions: ['FR'] })
+
+    expect(result.qualityTier).toBe('high')
+  })
+
+  it('live path: low qualityTier when all providers fail (hardcoded 400 fallback)', async () => {
+    const failProvider = {
+      supportsRegion: () => true,
+      getForecast: jest.fn().mockResolvedValue([]),
+      getCurrentIntensity: jest.fn().mockResolvedValue({ ok: false, signal: null }),
+    }
+    ;(getProvider as jest.Mock).mockReturnValue(failProvider)
+
+    const result = await routeGreen({ preferredRegions: ['FR'] })
+
+    expect(result.qualityTier).toBe('low')
+  })
+
+  // ── Cost scoring ───────────────────────────────────────────────────────────
+
+  it('cost scoring: low-cost region wins over low-carbon when costWeight dominates', async () => {
+    // SE: carbon=25, cost=0.12 USD/kWh
+    // FR: carbon=58, cost=0.04 USD/kWh  (much cheaper but more carbon)
+    // With carbonWeight=0.1, latencyWeight=0.1, costWeight=0.8, FR should win on cost
+    const seSignals = [makeForecastSignal('SE', 25, 4)]
+    const frSignals = [makeForecastSignal('FR', 58, 4)]
+    ;(getProvider as jest.Mock).mockImplementation((name: string) => {
+      if (name !== 'electricity_maps') return undefined
+      return {
+        supportsRegion: () => true,
+        getForecast: jest.fn().mockImplementation((region: string) =>
+          Promise.resolve(region === 'SE' ? seSignals : frSignals)
+        ),
+        getCurrentIntensity: jest.fn(),
+      }
+    })
+    ;(prisma as any).carbonIntensity.findMany.mockResolvedValue([
+      { region: 'SE', carbonIntensity: 25, resolutionMinutes: 60, timestamp: new Date() },
+      { region: 'FR', carbonIntensity: 58, resolutionMinutes: 60, timestamp: new Date() },
+    ])
+
+    const result = await routeGreen({
+      preferredRegions: ['SE', 'FR'],
+      targetTime: addHours(new Date(), 4),
+      durationMinutes: 60,
+      carbonWeight: 0.1,
+      latencyWeight: 0.1,
+      costWeight: 0.8,
+      costPerKwhByRegion: { SE: 0.12, FR: 0.04 },
+    })
+
+    expect(result.selectedRegion).toBe('FR')
+  })
+
+  it('cost scoring: falls back to carbon proxy when costPerKwhByRegion not provided', async () => {
+    // Without prices, cost ∝ carbon — lower carbon wins
+    const seSignals = [makeForecastSignal('SE', 25, 4)]
+    const frSignals = [makeForecastSignal('FR', 58, 4)]
+    ;(getProvider as jest.Mock).mockImplementation((name: string) => {
+      if (name !== 'electricity_maps') return undefined
+      return {
+        supportsRegion: () => true,
+        getForecast: jest.fn().mockImplementation((region: string) =>
+          Promise.resolve(region === 'SE' ? seSignals : frSignals)
+        ),
+        getCurrentIntensity: jest.fn(),
+      }
+    })
+    ;(prisma as any).carbonIntensity.findMany.mockResolvedValue([
+      { region: 'SE', carbonIntensity: 25, resolutionMinutes: 60, timestamp: new Date() },
+      { region: 'FR', carbonIntensity: 58, resolutionMinutes: 60, timestamp: new Date() },
+    ])
+
+    const result = await routeGreen({
+      preferredRegions: ['SE', 'FR'],
+      targetTime: addHours(new Date(), 4),
+      durationMinutes: 60,
+    })
+
+    // Without costPerKwhByRegion, cost ∝ carbon — SE (lowest carbon) should win
+    expect(result.selectedRegion).toBe('SE')
+  })
+
+  // ── Carbon budget ──────────────────────────────────────────────────────────
+
+  it('consumeBudget returns null when no active budget exists for the org', async () => {
+    ;(prisma as any).carbonBudget.findFirst.mockResolvedValue(null)
+
+    const result = await consumeBudget('org-123', 500)
+
+    expect(result).toBeNull()
+  })
+
+  it('consumeBudget increments consumed and returns within status below warning threshold', async () => {
+    const mockBudget = {
+      id: 'budget-1',
+      organizationId: 'org-123',
+      budgetCO2Grams: 100_000,
+      consumedCO2Grams: 50_000,
+      warningThresholdPct: 0.8,
+      periodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    }
+    ;(prisma as any).carbonBudget.findFirst.mockResolvedValue(mockBudget)
+    ;(prisma as any).carbonBudget.update.mockResolvedValue({
+      ...mockBudget,
+      consumedCO2Grams: 50_500, // after +500g
+    })
+
+    const result = await consumeBudget('org-123', 500)
+
+    expect(result).not.toBeNull()
+    expect(result!.consumedCO2Grams).toBe(50_500)
+    expect(result!.status).toBe('within')
+    expect(result!.utilizationPct).toBe(51) // 50500/100000 = 50.5 → rounded 51
+    expect((prisma as any).carbonBudget.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { consumedCO2Grams: { increment: 500 } } })
+    )
+  })
+
+  it('consumeBudget returns warning when consumption crosses warningThresholdPct', async () => {
+    const mockBudget = {
+      id: 'budget-1',
+      organizationId: 'org-456',
+      budgetCO2Grams: 10_000,
+      consumedCO2Grams: 7_999,
+      warningThresholdPct: 0.8,
+      periodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    }
+    ;(prisma as any).carbonBudget.findFirst.mockResolvedValue(mockBudget)
+    ;(prisma as any).carbonBudget.update.mockResolvedValue({
+      ...mockBudget,
+      consumedCO2Grams: 8_200, // crosses 8000 = 80% threshold
+    })
+
+    const result = await consumeBudget('org-456', 201)
+
+    expect(result!.status).toBe('warning')
+  })
+
+  it('consumeBudget returns exceeded when total consumption >= budget', async () => {
+    const mockBudget = {
+      id: 'budget-1',
+      organizationId: 'org-789',
+      budgetCO2Grams: 10_000,
+      consumedCO2Grams: 9_999,
+      warningThresholdPct: 0.8,
+      periodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    }
+    ;(prisma as any).carbonBudget.findFirst.mockResolvedValue(mockBudget)
+    ;(prisma as any).carbonBudget.update.mockResolvedValue({
+      ...mockBudget,
+      consumedCO2Grams: 10_050, // exceeds 10000 budget
+    })
+
+    const result = await consumeBudget('org-789', 51)
+
+    expect(result!.status).toBe('exceeded')
+    expect(result!.remainingCO2Grams).toBe(0)
+  })
+
+  it('getBudgetStatus returns null when no active budget configured', async () => {
+    ;(prisma as any).carbonBudget.findFirst.mockResolvedValue(null)
+
+    const result = await getBudgetStatus('org-no-budget')
+
+    expect(result).toBeNull()
   })
 })

@@ -65,7 +65,7 @@ export async function forecastCarbonIntensity(
         // forecastTime  = the future slot being predicted (two-time model)
         const referenceTime = now
         await prisma.carbonForecast.upsert({
-          where: { region_forecastTime: { region: f.zone, forecastTime } },
+          where: { region_forecastTime_source: { region: f.zone, forecastTime, source: 'electricity_maps' } },
           update: {
             predictedIntensity,
             confidence: result.confidence,
@@ -152,9 +152,10 @@ export async function forecastCarbonIntensity(
     // forecastTime = the future slot being predicted (two-time model)
     await prisma.carbonForecast.upsert({
       where: {
-        region_forecastTime: {
+        region_forecastTime_source: {
           region,
           forecastTime,
+          source: 'internal_model',
         },
       },
       update: {

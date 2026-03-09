@@ -36,6 +36,11 @@ export const prisma = {
     create: jest.fn().mockResolvedValue({}),
     findMany: jest.fn().mockResolvedValue([]),
   },
+  carbonBudget: {
+    findFirst: jest.fn().mockResolvedValue(null),
+    update: jest.fn().mockResolvedValue(null),
+    create: jest.fn().mockResolvedValue({}),
+  },
   $connect: jest.fn().mockResolvedValue(undefined),
   $disconnect: jest.fn().mockResolvedValue(undefined),
   $queryRaw: jest.fn().mockResolvedValue([{ '?column?': 1 }]),

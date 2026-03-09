@@ -4,6 +4,7 @@ import { prisma } from '../lib/db'
 import { writeAuditLog } from '../lib/governance/audit'
 import { checkOrgPolicy } from '../lib/governance/risk'
 import { detectAnomaly } from '../lib/governance/watchtower'
+import { consumeBudget } from '../lib/carbon-budget'
 
 const router = Router()
 
@@ -200,6 +201,31 @@ router.post('/', async (req, res) => {
       entityId: created.id,
       entityType: 'DashboardRoutingDecision',
     })
+
+    // Non-blocking: consume from org carbon budget if one is configured.
+    // Budget tracking must never block routing — any failure is logged and swallowed.
+    if (organizationId && (co2ChosenG ?? 0) > 0) {
+      void consumeBudget(organizationId, co2ChosenG ?? 0).then((budgetState) => {
+        if (budgetState && budgetState.status !== 'within') {
+          void writeAuditLog({
+            organizationId,
+            actorType: 'SYSTEM',
+            action: 'ANOMALY_DETECTED',
+            entityType: 'CarbonBudget',
+            entityId: organizationId,
+            payload: {
+              status: budgetState.status,
+              utilizationPct: budgetState.utilizationPct,
+              consumedCO2Grams: budgetState.consumedCO2Grams,
+              budgetCO2Grams: budgetState.budgetCO2Grams,
+              remainingCO2Grams: budgetState.remainingCO2Grams,
+            },
+            result: 'SUCCESS',
+            riskTier: budgetState.status === 'exceeded' ? 'HIGH' : 'MEDIUM',
+          })
+        }
+      })
+    }
 
     return res.status(201).json({ ok: true, id: created.id })
   } catch (error: any) {

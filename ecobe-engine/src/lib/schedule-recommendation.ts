@@ -71,6 +71,13 @@ export interface ScheduleRecommendation {
   explanation: string
   /** Assembler trace ID — present on forecast path, null on live path */
   decision_frame_id: string | null
+  /**
+   * Overall confidence in this routing decision:
+   *   high   → live data or empirical forecast band + stable ranking
+   *   medium → forecast with estimated band, or medium stability
+   *   low    → historical fallback, unstable ranking, or budget-ceiling fallback
+   */
+  quality_tier: 'high' | 'medium' | 'low'
 
   // ── Energy estimate ───────────────────────────────────────────────────────
   estimated_kwh: number | null
@@ -88,6 +95,7 @@ export function fromRoutingResult(
     explanation: string
     decisionFrameId?: string
     forecastAvailable?: boolean
+    qualityTier?: 'high' | 'medium' | 'low'
     alternatives: Array<{ region: string; carbonIntensity: number }>
   },
   opts: {
@@ -139,6 +147,7 @@ export function fromRoutingResult(
     score: result.score,
     explanation: result.explanation,
     decision_frame_id: result.decisionFrameId ?? null,
+    quality_tier: result.qualityTier ?? 'medium',
     estimated_kwh: estimatedKwh ?? null,
     estimated_co2_g: estimatedKwh != null ? Math.round(estimatedKwh * result.carbonIntensity * 1000) / 1000 : null,
   }
@@ -179,6 +188,7 @@ export function fromDekesEntry(
     score: 0,
     explanation: entry.explanation ?? `${entry.selectedRegion} scheduled at ${entry.scheduledTime.toISOString().slice(11, 16)} UTC: predicted ${entry.predictedCarbonIntensity} gCO2/kWh, ${Math.round(entry.savings)}% vs immediate.`,
     decision_frame_id: null,
+    quality_tier: 'medium',  // DEKES uses forecast data — empirical band not yet computed
     estimated_kwh: entry.estimatedKwh,
     estimated_co2_g: Math.round(entry.estimatedCO2 * 1000) / 1000,
   }

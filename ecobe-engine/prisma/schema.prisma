@@ -352,6 +352,35 @@ model DekesWorkload {
 }
 
 // ============================================================================
+// CARBON BUDGET / QUOTA TRACKING
+// ============================================================================
+
+/**
+ * Per-organization CO2 quota for a billing/reporting period.
+ * consumedCO2Grams is atomically incremented after each routing decision.
+ * Multiple non-overlapping periods may exist; only the one where
+ * periodStart <= now <= periodEnd is active.
+ */
+model CarbonBudget {
+  id             String   @id @default(cuid())
+  organizationId String
+
+  budgetPeriod   String   // 'monthly' | 'quarterly' | 'annual'
+  periodStart    DateTime
+  periodEnd      DateTime
+
+  budgetCO2Grams      Float              // total allowed gCO2 for the period
+  consumedCO2Grams    Float  @default(0) // incremented by consumeBudget()
+  warningThresholdPct Float  @default(0.8) // emit warning at this fraction (default 80%)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId, periodEnd])
+  @@index([periodEnd])
+}
+
+// ============================================================================
 // REGION METADATA
 // ============================================================================
 
