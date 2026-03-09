@@ -618,6 +618,15 @@ model DecisionSnapshot {
   fallbackUsed        Boolean @default(false)
   providerDisagreement Boolean @default(false)
 
+  // Workload source context — stored at decision time for audit and replay fidelity
+  source                String?  // "DEKES" | "API" | "CLI"
+  workloadType          String?  // "lead_generation_batch" | "inference" | etc.
+  policyMode            String?  // "balanced_ops" | "strict_carbon" | "budget_recovery"
+  delayToleranceMinutes Int?     // minutes caller can wait before execution
+
+  // Window prediction captured at decision time
+  predictedCleanWindow  Json?    // null when no prediction was available
+
   @@index([organizationId, createdAt])
   @@index([selectedRegion, createdAt])
 }
@@ -676,6 +685,10 @@ model DecisionLease {
   // Decision at creation time
   selectedRegion  String
   carbonIntensity Int
+
+  // Workload source context — preserved for revalidation context
+  source       String?
+  workloadType String?
 
   // Current status
   status String @default("VALID") // VALID | REVALIDATED | EXECUTED | EXPIRED | DRIFT_BLOCKED
