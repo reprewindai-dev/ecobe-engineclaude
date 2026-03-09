@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { ecobeApi } from '@/lib/api'
 import { getQualityTierBadge, getQualityTierColor, getStabilityColor } from '@/types'
-import { Loader2, Search, AlertCircle, CheckCircle, XCircle } from 'lucide-react'
+import { Loader2, Search, AlertCircle, CheckCircle, XCircle, Tag, Building2, Cpu, ShieldCheck } from 'lucide-react'
 
 export function DecisionReplay() {
   const [frameId, setFrameId] = useState('')
@@ -83,6 +83,79 @@ export function DecisionReplay() {
             </div>
           </div>
 
+          {/* Workload context — source, org, workloadType from meta/sourceUsed */}
+          {(data.sourceUsed || (data as unknown as Record<string, unknown>).organizationId || (data as unknown as Record<string, unknown>).workloadType) && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {data.sourceUsed && (
+                <div className="bg-slate-800/40 rounded-lg p-2.5 flex items-center gap-2">
+                  <Tag className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                  <div>
+                    <p className="text-[10px] text-slate-500">Signal Source</p>
+                    <p className="text-xs font-medium text-white font-mono">{data.sourceUsed}</p>
+                  </div>
+                </div>
+              )}
+              {(data as unknown as Record<string, unknown>).organizationId && (
+                <div className="bg-slate-800/40 rounded-lg p-2.5 flex items-center gap-2">
+                  <Building2 className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                  <div>
+                    <p className="text-[10px] text-slate-500">Organization</p>
+                    <p className="text-xs font-medium text-white truncate">{String((data as unknown as Record<string, unknown>).organizationId)}</p>
+                  </div>
+                </div>
+              )}
+              {(data as unknown as Record<string, unknown>).workloadType && (
+                <div className="bg-slate-800/40 rounded-lg p-2.5 flex items-center gap-2">
+                  <Cpu className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                  <div>
+                    <p className="text-[10px] text-slate-500">Workload Type</p>
+                    <p className="text-xs font-medium text-white capitalize">{String((data as unknown as Record<string, unknown>).workloadType)}</p>
+                  </div>
+                </div>
+              )}
+              {(data as unknown as Record<string, unknown>).source && (
+                <div className={`rounded-lg p-2.5 flex items-center gap-2 ${String((data as unknown as Record<string, unknown>).source) === 'DEKES' ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-slate-800/40'}`}>
+                  <Tag className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                  <div>
+                    <p className="text-[10px] text-slate-500">Source</p>
+                    <p className="text-xs font-bold text-emerald-400">{String((data as unknown as Record<string, unknown>).source)}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Policy checks summary */}
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+            <div className="bg-slate-800/40 rounded-lg p-2.5 flex items-center gap-2">
+              <ShieldCheck className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+              <div>
+                <p className="text-[10px] text-slate-500">Fallback used</p>
+                <p className={`text-xs font-medium ${data.fallbackUsed ? 'text-orange-400' : 'text-emerald-400'}`}>
+                  {data.fallbackUsed ? 'Yes' : 'No'}
+                </p>
+              </div>
+            </div>
+            <div className="bg-slate-800/40 rounded-lg p-2.5 flex items-center gap-2">
+              <AlertCircle className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+              <div>
+                <p className="text-[10px] text-slate-500">Provider disagreement</p>
+                <p className={`text-xs font-medium ${data.providerDisagreement ? 'text-red-400' : 'text-emerald-400'}`}>
+                  {data.providerDisagreement ? 'Detected' : 'None'}
+                </p>
+              </div>
+            </div>
+            <div className="bg-slate-800/40 rounded-lg p-2.5 flex items-center gap-2">
+              <Tag className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+              <div>
+                <p className="text-[10px] text-slate-500">Forecast stability</p>
+                <p className={`text-xs font-medium capitalize ${getStabilityColor(data.forecast_stability)}`}>
+                  {data.forecast_stability ?? '—'}
+                </p>
+              </div>
+            </div>
+          </div>
+
           {/* Decision outcome */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3">
@@ -105,26 +178,11 @@ export function DecisionReplay() {
             </div>
           </div>
 
-          {/* Quality badges */}
+          {/* Quality badge */}
           <div className="flex flex-wrap gap-2">
             <span className={`text-xs px-2 py-1 rounded-full font-medium ${getQualityTierBadge(data.qualityTier)}`}>
               Quality: {data.qualityTier.toUpperCase()}
             </span>
-            {data.forecast_stability && (
-              <span className={`text-xs px-2 py-1 rounded-full font-medium bg-slate-800 ${getStabilityColor(data.forecast_stability)}`}>
-                Forecast: {data.forecast_stability}
-              </span>
-            )}
-            {data.fallbackUsed && (
-              <span className="text-xs px-2 py-1 rounded-full font-medium bg-orange-500/10 text-orange-400 border border-orange-500/30">
-                FALLBACK USED
-              </span>
-            )}
-            {data.providerDisagreement && (
-              <span className="text-xs px-2 py-1 rounded-full font-medium bg-red-500/10 text-red-400 border border-red-500/30">
-                PROVIDER DISAGREEMENT
-              </span>
-            )}
           </div>
 
           {/* Explanation */}

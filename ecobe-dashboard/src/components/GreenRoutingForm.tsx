@@ -24,6 +24,7 @@ import {
   ArrowRight,
 } from 'lucide-react'
 import { formatDistanceToNow, isPast, parseISO } from 'date-fns'
+import { OpportunityInsight } from '@/components/OpportunityInsight'
 
 const REGIONS = [
   'US-CAL-CISO',
@@ -406,6 +407,9 @@ export function GreenRoutingForm() {
                       </p>
                     </div>
                   )}
+
+                {/* Historical opportunity insight */}
+                <OpportunityInsight region={displayRegion} />
 
                 {/* Alternatives */}
                 {r.alternatives && r.alternatives.length > 0 && (

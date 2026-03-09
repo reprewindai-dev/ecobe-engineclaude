@@ -7,7 +7,6 @@ import { Loader2 } from 'lucide-react'
 import {
   ComposedChart,
   Line,
-  Area,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -18,6 +17,18 @@ import {
   ReferenceArea,
 } from 'recharts'
 import { format, parseISO } from 'date-fns'
+import type { DashboardDecision } from '@/types'
+
+function getSource(d: DashboardDecision): string {
+  const metaSource = d.meta?.source as string | undefined
+  if (metaSource) return metaSource
+  if (d.opName?.toLowerCase().includes('dekes')) return 'DEKES'
+  return 'Other'
+}
+
+function isDelayed(d: DashboardDecision): boolean {
+  return d.fallbackUsed || (d.dataFreshnessSeconds != null && d.dataFreshnessSeconds > 900)
+}
 
 const REGION_COLORS: Record<string, string> = {
   FR: '#10b981',
@@ -34,6 +45,7 @@ const CLEAN_THRESHOLD = 100 // gCO₂/kWh — considered "clean window"
 export function CarbonOpportunityTimeline() {
   const [selectedRegions, setSelectedRegions] = useState(['FR', 'SE'])
   const [durationHours, setDurationHours] = useState(4)
+  const [showDekesMarkers, setShowDekesMarkers] = useState(true)
 
   const forecasts = useQuery({
     queryKey: ['forecasts', selectedRegions, 72],
@@ -45,6 +57,12 @@ export function CarbonOpportunityTimeline() {
     },
     refetchInterval: 10 * 60_000,
     enabled: selectedRegions.length > 0,
+  })
+
+  const dekesDecisions = useQuery({
+    queryKey: ['decisions-timeline', 100],
+    queryFn: () => ecobeApi.getDecisions(100),
+    refetchInterval: 30_000,
   })
 
   const optimalWindows = useQuery({
@@ -97,6 +115,20 @@ export function CarbonOpportunityTimeline() {
       }))
   })()
 
+  // DEKES execution markers — decisions from DEKES source, plotted on the timeline
+  const dekesMarkers = (() => {
+    const decisions = dekesDecisions.data?.decisions ?? []
+    return decisions
+      .filter((d) => getSource(d) === 'DEKES')
+      .slice(0, 20)  // limit markers to avoid clutter
+      .map((d) => ({
+        time: format(parseISO(d.createdAt), 'MMM d HH:mm'),
+        delayed: isDelayed(d),
+        region: d.chosenRegion,
+        label: isDelayed(d) ? 'DEKES delayed' : 'DEKES executed',
+      }))
+  })()
+
   const now = format(new Date(), 'MMM d HH:mm')
 
   return (
@@ -122,8 +154,20 @@ export function CarbonOpportunityTimeline() {
         </div>
       </div>
 
-      {/* Region toggles */}
-      <div className="flex flex-wrap gap-2">
+      {/* Region toggles + DEKES overlay toggle */}
+      <div className="flex flex-wrap gap-2 items-center">
+        <button
+          onClick={() => setShowDekesMarkers((v) => !v)}
+          className={`px-2.5 py-1 rounded-full text-xs font-medium border transition flex items-center gap-1.5 ${
+            showDekesMarkers
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+              : 'border-slate-700 text-slate-500'
+          }`}
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-current" />
+          DEKES jobs
+        </button>
+        <div className="w-px h-4 bg-slate-700" />
         {AVAILABLE_REGIONS.map((r) => {
           const active = selectedRegions.includes(r)
           const color = REGION_COLORS[r] ?? '#64748b'
@@ -206,6 +250,24 @@ export function CarbonOpportunityTimeline() {
                 label={{ value: 'now', fill: '#64748b', fontSize: 9, position: 'top' }}
               />
 
+              {/* DEKES execution markers */}
+              {showDekesMarkers &&
+                dekesMarkers.map((m, i) => (
+                  <ReferenceLine
+                    key={i}
+                    x={m.time}
+                    stroke={m.delayed ? '#f59e0b' : '#10b981'}
+                    strokeDasharray="2 3"
+                    strokeOpacity={0.7}
+                    label={{
+                      value: m.delayed ? '⏸' : '▶',
+                      fill: m.delayed ? '#f59e0b' : '#10b981',
+                      fontSize: 10,
+                      position: 'top',
+                    }}
+                  />
+                ))}
+
               <XAxis
                 dataKey="time"
                 tick={{ fill: '#475569', fontSize: 9 }}
@@ -252,6 +314,21 @@ export function CarbonOpportunityTimeline() {
               ))}
             </ComposedChart>
           </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* DEKES marker legend */}
+      {showDekesMarkers && dekesMarkers.length > 0 && (
+        <div className="flex items-center gap-4 text-xs text-slate-500">
+          <div className="flex items-center gap-1.5">
+            <span className="text-emerald-400 font-bold">▶</span>
+            DEKES job executed
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-yellow-400 font-bold">⏸</span>
+            DEKES job delayed to clean window
+          </div>
+          <span className="ml-auto text-slate-600">{dekesMarkers.length} DEKES events shown</span>
         </div>
       )}
 

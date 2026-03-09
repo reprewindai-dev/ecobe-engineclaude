@@ -18,16 +18,22 @@ import { DecisionConfidencePanel } from '@/components/DecisionConfidencePanel'
 import { SystemHealth } from '@/components/SystemHealth'
 import { ExecutionIntegrityPanel } from '@/components/ExecutionIntegrityPanel'
 import { DekesStats } from '@/components/DekesStats'
+import { CarbonHeatCalendar } from '@/components/CarbonHeatCalendar'
+import { BestWindowPanel } from '@/components/BestWindowPanel'
+import { IntegrationSourcesPanel } from '@/components/IntegrationSourcesPanel'
+import { DekesImpactCard } from '@/components/DekesImpactCard'
+import { WorkloadImpactGraph } from '@/components/WorkloadImpactGraph'
 
-type Tab = 'console' | 'signals' | 'routing' | 'energy' | 'analytics' | 'dekes'
+type Tab = 'console' | 'signals' | 'routing' | 'energy' | 'analytics' | 'dekes' | 'patterns'
 
 const TABS: { id: Tab; label: string; sub: string }[] = [
   { id: 'console', label: 'Console', sub: 'State · Events · Impact' },
   { id: 'signals', label: 'Signals', sub: 'Regions · Forecast accuracy' },
-  { id: 'routing', label: 'Routing', sub: 'Route · Replay' },
+  { id: 'routing', label: 'Routing', sub: 'Route · Schedule · Replay' },
   { id: 'energy', label: 'Energy', sub: 'Carbon equation' },
-  { id: 'analytics', label: 'Analytics', sub: 'Confidence · System' },
+  { id: 'analytics', label: 'Analytics', sub: 'Confidence · System · Sources' },
   { id: 'dekes', label: 'DEKES', sub: 'Workload optimization' },
+  { id: 'patterns', label: 'Patterns', sub: 'Weekly heat calendar' },
 ]
 
 export default function DashboardPage() {
@@ -93,10 +99,13 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ── ROUTING ── Route workloads + debug replay */}
+      {/* ── ROUTING ── Route workloads + scheduling + debug replay */}
       {tab === 'routing' && (
         <div className="space-y-10">
           <GreenRoutingForm />
+          <div className="border-t border-slate-800 pt-8">
+            <BestWindowPanel />
+          </div>
           <div className="border-t border-slate-800 pt-8">
             <DecisionReplay />
           </div>
@@ -106,16 +115,28 @@ export default function DashboardPage() {
       {/* ── ENERGY ── Carbon equation calculator */}
       {tab === 'energy' && <EnergyCalculator />}
 
-      {/* ── ANALYTICS ── Confidence breakdown + system metrics */}
+      {/* ── ANALYTICS ── Confidence breakdown + system metrics + integration sources */}
       {tab === 'analytics' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <DecisionConfidencePanel />
-          <SystemHealth />
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <DecisionConfidencePanel />
+            <SystemHealth />
+          </div>
+          <IntegrationSourcesPanel />
+          <WorkloadImpactGraph />
         </div>
       )}
 
-      {/* ── DEKES ── Workload optimization */}
-      {tab === 'dekes' && <DekesStats />}
+      {/* ── DEKES ── DEKES workload impact + analytics */}
+      {tab === 'dekes' && (
+        <div className="space-y-5">
+          <DekesImpactCard />
+          <DekesStats />
+        </div>
+      )}
+
+      {/* ── PATTERNS ── Weekly heat calendar */}
+      {tab === 'patterns' && <CarbonHeatCalendar />}
     </div>
   )
 }

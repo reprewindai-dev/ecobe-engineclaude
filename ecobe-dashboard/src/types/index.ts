@@ -325,6 +325,50 @@ export interface CarbonForecast {
   trend: 'increasing' | 'decreasing' | 'stable'
 }
 
+// ─── Intelligence ─────────────────────────────────────────────────────────────
+
+export interface HourlySlot {
+  hour: number       // 0–23
+  avgIntensity: number
+  sampleCount: number
+}
+
+export interface RegionPatternData {
+  region: string
+  slots: HourlySlot[]  // 168 entries: day 0–6, hour 0–23
+  overallAvg: number
+}
+
+export interface PatternsResponse {
+  regions: RegionPatternData[]
+  generatedAt: string
+}
+
+export interface OpportunityResult {
+  region: string
+  currentHour: number
+  historicalAvg: number
+  overallAvg: number
+  cleanerThanAvgPct: number   // positive = cleaner, negative = dirtier
+  sampleCount: number
+}
+
+export interface BestWindowRequest {
+  regions: string[]
+  durationHours: number
+  lookAheadHours?: number
+}
+
+export interface BestWindowResult {
+  region: string
+  startTime: string          // ISO-8601
+  endTime: string            // ISO-8601
+  avgHistoricalIntensity: number
+  overallAvg: number
+  cleanerThanAvgPct: number  // % below average
+  confidence: 'high' | 'medium' | 'low'
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 export type CarbonLevel = 'low' | 'medium' | 'high'

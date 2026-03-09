@@ -13,6 +13,10 @@ import type {
   OptimalWindow,
   DecisionReplayResult,
   MethodologyProviders,
+  PatternsResponse,
+  OpportunityResult,
+  BestWindowRequest,
+  BestWindowResult,
 } from '@/types'
 
 const API_BASE = process.env.NEXT_PUBLIC_ECOBE_API_URL || '/api/ecobe'
@@ -161,6 +165,24 @@ export const ecobeApi = {
     endDate?: string
   }): Promise<DekesAnalytics> {
     const { data } = await api.get('/dekes/analytics', { params })
+    return data
+  },
+
+  // ── Intelligence ──────────────────────────────────────────────────────────────
+  async getIntelligencePatterns(regions: string[]): Promise<PatternsResponse> {
+    const { data } = await api.get('/intelligence/patterns', {
+      params: { region: regions.join(',') },
+    })
+    return data
+  },
+
+  async predictOpportunity(region: string): Promise<OpportunityResult> {
+    const { data } = await api.post('/intelligence/predict-opportunity', { region })
+    return data
+  },
+
+  async getBestWindow(request: BestWindowRequest): Promise<BestWindowResult> {
+    const { data } = await api.post('/intelligence/best-window', request)
     return data
   },
 
