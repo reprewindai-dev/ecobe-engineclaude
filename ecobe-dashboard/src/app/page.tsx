@@ -1,137 +1,116 @@
 'use client'
 
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { ecobeApi } from '@/lib/api'
-import { CarbonIntensityCard } from '@/components/CarbonIntensityCard'
+import { DecisionEngineStatus } from '@/components/DecisionEngineStatus'
+import { CarbonOpportunityMap } from '@/components/CarbonOpportunityMap'
+import { DecisionStream } from '@/components/DecisionStream'
 import { GreenRoutingForm } from '@/components/GreenRoutingForm'
+import { DecisionReplay } from '@/components/DecisionReplay'
 import { EnergyCalculator } from '@/components/EnergyCalculator'
+import { CarbonOpportunityTimeline } from '@/components/CarbonOpportunityTimeline'
+import { ForecastAccuracyTracker } from '@/components/ForecastAccuracyTracker'
+import { CarbonSavingsDashboard } from '@/components/CarbonSavingsDashboard'
+import { DecisionConfidencePanel } from '@/components/DecisionConfidencePanel'
+import { CarbonBudgetPanel } from '@/components/CarbonBudgetPanel'
+import { ProviderHealthMonitor } from '@/components/ProviderHealthMonitor'
+import { PolicyEnforcementPanel } from '@/components/PolicyEnforcementPanel'
+import { SystemHealth } from '@/components/SystemHealth'
 import { DekesStats } from '@/components/DekesStats'
 
-const POPULAR_REGIONS = [
-  { code: 'US-CAL-CISO', name: 'California' },
-  { code: 'FR', name: 'France' },
-  { code: 'DE', name: 'Germany' },
-  { code: 'GB', name: 'United Kingdom' },
-  { code: 'SE', name: 'Sweden' },
-  { code: 'NO', name: 'Norway' },
+type Tab = 'operations' | 'routing' | 'energy' | 'forecast' | 'analytics' | 'dekes'
+
+const TABS: { id: Tab; label: string; description: string }[] = [
+  { id: 'operations', label: 'Operations', description: 'Signals · Decisions · Live feed' },
+  { id: 'routing', label: 'Routing', description: 'Route workloads · Replay decisions' },
+  { id: 'energy', label: 'Energy', description: 'Carbon equation calculator' },
+  { id: 'forecast', label: 'Forecast', description: '72h carbon opportunity timeline' },
+  { id: 'analytics', label: 'Analytics', description: 'Impact · Budget · Health' },
+  { id: 'dekes', label: 'DEKES', description: 'Workload optimization' },
 ]
 
 export default function DashboardPage() {
-  const [selectedTab, setSelectedTab] = useState<'overview' | 'routing' | 'calculator' | 'dekes'>(
-    'overview'
-  )
-
-  // Health check query
-  const { data: health, isError: healthError } = useQuery({
-    queryKey: ['health'],
-    queryFn: () => ecobeApi.health(),
-    refetchInterval: 30000, // Check every 30 seconds
-  })
+  const [tab, setTab] = useState<Tab>('operations')
 
   return (
-    <div className="space-y-8">
-      {/* Status Banner */}
-      <div
-        className={`rounded-lg px-4 py-3 flex items-center justify-between ${
-          healthError
-            ? 'bg-red-500/10 border border-red-500/20'
-            : 'bg-emerald-500/10 border border-emerald-500/20'
-        }`}
-      >
-        <div className="flex items-center space-x-3">
-          <div
-            className={`h-3 w-3 rounded-full ${healthError ? 'bg-red-500' : 'bg-emerald-500 animate-pulse'}`}
-          />
-          <p className={`text-sm font-medium ${healthError ? 'text-red-400' : 'text-emerald-400'}`}>
-            {healthError ? 'ECOBE Engine Offline' : 'ECOBE Engine Online'}
+    <div className="space-y-6">
+      {/* Always-visible Decision Engine Status strip */}
+      <DecisionEngineStatus />
+
+      {/* Page header */}
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2">
+        <div>
+          <h2 className="text-2xl font-bold text-white">
+            CO₂ Router
+          </h2>
+          <p className="text-slate-500 text-sm mt-0.5">
+            Carbon-aware compute operations console
           </p>
         </div>
-        {health && (
-          <p className="text-xs text-slate-400">
-            Last updated: {new Date(health.timestamp).toLocaleTimeString()}
-          </p>
-        )}
       </div>
 
-      {/* Page Header */}
-      <div>
-        <h2 className="text-3xl font-bold text-white mb-2">Carbon Monitoring Dashboard</h2>
-        <p className="text-slate-400">
-          Real-time carbon intensity monitoring and workload optimization
-        </p>
-      </div>
-
-      {/* Tab Navigation */}
+      {/* Tab navigation */}
       <div className="border-b border-slate-800">
-        <nav className="flex space-x-8">
-          {[
-            { id: 'overview', label: 'Overview' },
-            { id: 'routing', label: 'Green Routing' },
-            { id: 'calculator', label: 'Energy Calculator' },
-            { id: 'dekes', label: 'DEKES Analytics' },
-          ].map((tab) => (
+        <nav className="flex space-x-1 overflow-x-auto">
+          {TABS.map((t) => (
             <button
-              key={tab.id}
-              onClick={() => setSelectedTab(tab.id as any)}
-              className={`py-3 px-1 border-b-2 transition ${
-                selectedTab === tab.id
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`flex-shrink-0 py-3 px-4 border-b-2 transition text-left ${
+                tab === t.id
                   ? 'border-emerald-500 text-emerald-400'
-                  : 'border-transparent text-slate-400 hover:text-white'
+                  : 'border-transparent text-slate-500 hover:text-slate-300'
               }`}
             >
-              {tab.label}
+              <span className="text-sm font-medium block">{t.label}</span>
+              <span className="text-xs block mt-0.5 opacity-60">{t.description}</span>
             </button>
           ))}
         </nav>
       </div>
 
-      {/* Tab Content */}
+      {/* Tab content */}
       <div>
-        {selectedTab === 'overview' && (
+        {tab === 'operations' && (
           <div className="space-y-6">
-            <div>
-              <h3 className="text-xl font-semibold text-white mb-4">
-                Popular Regions - Current Carbon Intensity
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {POPULAR_REGIONS.map((region) => (
-                  <CarbonIntensityCard key={region.code} region={region} />
-                ))}
-              </div>
-            </div>
+            <CarbonOpportunityMap />
+            <DecisionStream />
+          </div>
+        )}
 
-            <div className="bg-slate-900/50 rounded-lg border border-slate-800 p-6">
-              <h3 className="text-lg font-semibold text-white mb-4">About ECOBE Engine</h3>
-              <div className="space-y-3 text-slate-300">
-                <p>
-                  ECOBE Engine provides real-time carbon emissions monitoring and intelligent workload
-                  routing to minimize your infrastructure's environmental impact.
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-                  <div className="bg-slate-800/50 rounded-lg p-4">
-                    <p className="text-emerald-400 font-semibold text-2xl">🌍</p>
-                    <p className="text-sm text-slate-400 mt-2">Real-time carbon data</p>
-                  </div>
-                  <div className="bg-slate-800/50 rounded-lg p-4">
-                    <p className="text-emerald-400 font-semibold text-2xl">⚡</p>
-                    <p className="text-sm text-slate-400 mt-2">Smart green routing</p>
-                  </div>
-                  <div className="bg-slate-800/50 rounded-lg p-4">
-                    <p className="text-emerald-400 font-semibold text-2xl">📊</p>
-                    <p className="text-sm text-slate-400 mt-2">ML-powered forecasting</p>
-                  </div>
-                </div>
-              </div>
+        {tab === 'routing' && (
+          <div className="space-y-10">
+            <GreenRoutingForm />
+            <div className="border-t border-slate-800 pt-8">
+              <DecisionReplay />
             </div>
           </div>
         )}
 
-        {selectedTab === 'routing' && <GreenRoutingForm />}
+        {tab === 'energy' && <EnergyCalculator />}
 
-        {selectedTab === 'calculator' && <EnergyCalculator />}
+        {tab === 'forecast' && (
+          <div className="space-y-6">
+            <CarbonOpportunityTimeline />
+            <ForecastAccuracyTracker />
+          </div>
+        )}
 
-        {selectedTab === 'dekes' && <DekesStats />}
+        {tab === 'analytics' && (
+          <div className="space-y-6">
+            <CarbonSavingsDashboard />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <DecisionConfidencePanel />
+              <CarbonBudgetPanel />
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <ProviderHealthMonitor />
+              <SystemHealth />
+            </div>
+            <PolicyEnforcementPanel />
+          </div>
+        )}
+
+        {tab === 'dekes' && <DekesStats />}
       </div>
     </div>
   )
