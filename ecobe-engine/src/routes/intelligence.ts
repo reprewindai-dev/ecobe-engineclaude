@@ -38,6 +38,14 @@ import {
   computeTemporalPatterns,
 } from '../lib/carbon-intelligence'
 import { logger } from '../lib/logger'
+import {
+  getOrFetchGridSignal,
+  assembleGridSignalSnapshot,
+  assembleGridSignalSnapshots,
+  getCachedGridSignal,
+  ingestAllRegions,
+  getAllSupportedRegions,
+} from '../lib/grid-signals'
 
 const router = Router()
 
@@ -231,6 +239,227 @@ router.post('/refresh-patterns', async (req, res) => {
       return res.status(400).json({ error: 'Invalid request', details: error.errors })
     }
     logger.error({ err: error }, 'Intelligence refresh-patterns error')
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// ─── Grid Signal Intelligence endpoints (/grid/*) ─────────────────────────────
+//
+// These endpoints expose the EIA-930 + WattTime + Electricity Maps enrichment
+// layer. All data is READ-ONLY enrichment — never routing truth.
+//
+// Endpoints:
+//   GET  /api/v1/intelligence/grid/hero-metrics    → multi-region key metrics
+//   GET  /api/v1/intelligence/grid/summary         → cached snapshot for all US BAs
+//   GET  /api/v1/intelligence/grid/opportunities   → regions with curtailment or clean windows
+//   GET  /api/v1/intelligence/grid/region/:region  → full snapshot for one region
+//   POST /api/v1/intelligence/grid/refresh         → trigger on-demand ingest for all regions
+
+// ─── GET /grid/region/:region ────────────────────────────────────────────────
+
+/**
+ * Full GridSignalSnapshot for a single ECOBE region.
+ * Returns cached data if available (5-min TTL), otherwise triggers a live fetch.
+ *
+ * Includes: demand/load, fuel mix, ramp direction, carbonSpikeProbability,
+ * curtailmentProbability, importCarbonLeakageScore, data provenance.
+ */
+router.get('/grid/region/:region', async (req, res) => {
+  const { region } = req.params
+  try {
+    const snapshot = await getOrFetchGridSignal(region, () =>
+      assembleGridSignalSnapshot(region),
+    )
+
+    if (!snapshot) {
+      return res.status(404).json({
+        error: 'No grid signal data available for this region',
+        region,
+        hint: 'Region must be a mapped EIA-930 US balancing authority (e.g. US-MIDA-PJM, US-CAL-CISO)',
+      })
+    }
+
+    return res.json(snapshot)
+  } catch (err) {
+    logger.error({ err, region }, '[intelligence] grid/region error')
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// ─── GET /grid/hero-metrics ───────────────────────────────────────────────────
+
+const heroMetricsSchema = z.object({
+  regions: z.string().optional().transform((v) =>
+    v ? v.split(',').map((r) => r.trim()).filter(Boolean) : getAllSupportedRegions(),
+  ),
+})
+
+/**
+ * Key metrics across multiple regions — suitable for a live dashboard hero section.
+ *
+ * Returns for each region:
+ *   - carbonSpikeProbability, curtailmentProbability, importCarbonLeakageScore
+ *   - loadRampDirection + loadRampStrength
+ *   - renewableRatio, fossilRatio
+ *   - signalQuality, estimatedFlag, timestamp
+ *
+ * Query params:
+ *   regions  comma-separated list (default: all supported US regions)
+ */
+router.get('/grid/hero-metrics', async (req, res) => {
+  try {
+    const { regions } = heroMetricsSchema.parse(req.query)
+
+    const snapshots = await Promise.all(
+      regions.map(async (region) => {
+        const snap = await getCachedGridSignal(region)
+        return { region, snapshot: snap }
+      }),
+    )
+
+    const metrics = snapshots.map(({ region, snapshot }) => ({
+      region,
+      available: snapshot != null,
+      timestamp: snapshot?.timestamp ?? null,
+      signalQuality: snapshot?.signalQuality ?? null,
+      loadRampDirection: snapshot?.loadRampDirection ?? null,
+      loadRampStrength: snapshot?.loadRampStrength ?? null,
+      renewableRatio: snapshot?.renewableRatio ?? null,
+      fossilRatio: snapshot?.fossilRatio ?? null,
+      carbonSpikeProbability: snapshot?.carbonSpikeProbability ?? null,
+      curtailmentProbability: snapshot?.curtailmentProbability ?? null,
+      importCarbonLeakageScore: snapshot?.importCarbonLeakageScore ?? null,
+      estimatedFlag: snapshot?.estimatedFlag ?? null,
+      syntheticFlag: snapshot?.syntheticFlag ?? null,
+    }))
+
+    return res.json({
+      metrics,
+      count: metrics.length,
+      availableCount: metrics.filter((m) => m.available).length,
+      generatedAt: new Date().toISOString(),
+    })
+  } catch (err) {
+    logger.error({ err }, '[intelligence] grid/hero-metrics error')
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// ─── GET /grid/summary ────────────────────────────────────────────────────────
+
+/**
+ * Cached snapshot summary for all supported US regions.
+ * Cache-only — no live fetches. Returns what is currently warm in Redis.
+ * Use GET /grid/region/:region or POST /grid/refresh for live data.
+ */
+router.get('/grid/summary', async (_req, res) => {
+  try {
+    const regions = getAllSupportedRegions()
+    const snapshots = await Promise.all(
+      regions.map(async (region) => ({
+        region,
+        snapshot: await getCachedGridSignal(region),
+      })),
+    )
+
+    const available = snapshots.filter((s) => s.snapshot != null)
+    const missing = snapshots.filter((s) => s.snapshot == null).map((s) => s.region)
+
+    return res.json({
+      snapshots: available.map(({ region, snapshot }) => ({ region, ...snapshot })),
+      availableCount: available.length,
+      totalRegions: regions.length,
+      missingRegions: missing,
+      generatedAt: new Date().toISOString(),
+    })
+  } catch (err) {
+    logger.error({ err }, '[intelligence] grid/summary error')
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// ─── GET /grid/opportunities ──────────────────────────────────────────────────
+
+/**
+ * Identify regions with favourable scheduling opportunities from cached signals.
+ *
+ * Returns regions where:
+ *   - curtailmentProbability > 0.4 (cheap clean power window)
+ *   - carbonSpikeProbability < 0.3 (low risk of fossil ramp)
+ *   - renewableRatio > 0.6 (dominant clean supply)
+ *
+ * Only returns regions with cached data.
+ * Sort: curtailmentProbability desc (most favourable first).
+ */
+router.get('/grid/opportunities', async (_req, res) => {
+  try {
+    const regions = getAllSupportedRegions()
+    const snapshots = await Promise.all(
+      regions.map((r) => getCachedGridSignal(r)),
+    )
+
+    const opportunities = snapshots
+      .filter((s): s is NonNullable<typeof s> => s != null)
+      .filter((s) =>
+        (s.curtailmentProbability != null && s.curtailmentProbability > 0.4) ||
+        (s.renewableRatio != null && s.renewableRatio > 0.6 &&
+          (s.carbonSpikeProbability == null || s.carbonSpikeProbability < 0.3)),
+      )
+      .sort((a, b) => (b.curtailmentProbability ?? 0) - (a.curtailmentProbability ?? 0))
+      .map((s) => ({
+        region: s.region,
+        balancingAuthority: s.balancingAuthority,
+        timestamp: s.timestamp,
+        renewableRatio: s.renewableRatio,
+        curtailmentProbability: s.curtailmentProbability,
+        carbonSpikeProbability: s.carbonSpikeProbability,
+        loadRampDirection: s.loadRampDirection,
+        signalQuality: s.signalQuality,
+        recommendation: s.curtailmentProbability != null && s.curtailmentProbability > 0.4
+          ? 'Curtailment likely — run flexible workloads now for lowest carbon impact'
+          : 'Clean window — high renewable ratio, low fossil pressure',
+      }))
+
+    return res.json({
+      opportunities,
+      count: opportunities.length,
+      generatedAt: new Date().toISOString(),
+    })
+  } catch (err) {
+    logger.error({ err }, '[intelligence] grid/opportunities error')
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// ─── POST /grid/refresh ───────────────────────────────────────────────────────
+
+/**
+ * Trigger on-demand ingest for all mapped US regions.
+ * Fetches live EIA-930 data and updates the Redis cache.
+ *
+ * Use when you need fresh data immediately (e.g., before a scheduling decision).
+ * Normal operation: the background poller keeps the cache warm automatically.
+ */
+router.post('/grid/refresh', async (_req, res) => {
+  try {
+    const results = await ingestAllRegions()
+    const succeeded = results.filter((r) => !r.error).length
+    const failed = results.filter((r) => r.error).length
+
+    return res.json({
+      refreshed: succeeded,
+      failed,
+      results: results.map((r) => ({
+        region: r.region,
+        ba: r.balancingAuthority,
+        ok: !r.error,
+        timestamp: r.timestamp,
+        error: r.error ?? undefined,
+      })),
+      generatedAt: new Date().toISOString(),
+    })
+  } catch (err) {
+    logger.error({ err }, '[intelligence] grid/refresh error')
     return res.status(500).json({ error: 'Internal server error' })
   }
 })
