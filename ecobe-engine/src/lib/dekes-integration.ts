@@ -75,7 +75,14 @@ export interface DekesAnalytics {
 }
 
 /**
- * Optimize a single DEKES query — picks the lowest-carbon eligible region.
+ * Selects the lowest-carbon eligible region for a single DEKES query and records the routing decision.
+ *
+ * Persists a DEKES workload record and returns the chosen region, intensity, and estimated energy/CO2. If the routing result includes a decisionFrameId, snapshots the decision and attempts to create a lease and ingest the decision as fire-and-forget side effects (these do not block the returned result).
+ *
+ * @param query - The DEKES query to optimize (id, query text, and estimatedResults).
+ * @param carbonBudget - Optional maximum allowed carbon intensity in gCO2/kWh for the selected region.
+ * @param regions - Candidate regions to consider for routing.
+ * @returns The optimization outcome including selectedRegion, carbonIntensity, estimatedKwh, estimatedCO2, whether selection is within the provided budget, percent savings versus alternatives, routing alternatives, the persisted workloadId, and optional decision/lease fields when available.
  */
 export async function optimizeQuery(
   query: DekesQuery,

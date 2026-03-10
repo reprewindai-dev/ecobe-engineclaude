@@ -52,12 +52,24 @@ export interface EmitHandoffInput {
   explanation?: string
 }
 
+/**
+ * Generate a unique handoff identifier used for Dekes handoffs.
+ *
+ * @returns A string starting with `hof_` followed by the current millisecond timestamp, an underscore, and six hexadecimal characters (e.g., `hof_1610000000000_a1b2c3`).
+ */
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 function buildHandoffId(): string {
   return 'hof_' + Date.now() + '_' + randomBytes(3).toString('hex')
 }
 
+/**
+ * Constructs the JSON-serializable payload for a Dekes handoff including identifiers, event metadata, and any optional routing, budget, policy, explanation, and deep links.
+ *
+ * @param handoffId - Unique identifier for this handoff
+ * @param input - Input data describing the event and optional routing, budget, policy, and explanation
+ * @returns An object suitable for sending to DEKES containing the handoff fields and any supplied optional sections
+ */
 function buildPayload(handoffId: string, input: EmitHandoffInput): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     handoffId,
@@ -122,6 +134,15 @@ function buildPayload(handoffId: string, input: EmitHandoffInput): Record<string
 // ─── Public function ──────────────────────────────────────────────────────────
 
 /**
+ * Emit a handoff event to DEKES representing a carbon-related decision.
+ *
+ * Persists a DekesHandoff record with status "queued", then — only if DEKES_ENDPOINT is configured —
+ * attempts to forward a spec-compliant payload to DEKES, updates the local record to "processing" or
+ * "failed" based on the HTTP result, and writes a governance audit log entry summarizing the attempt.
+ * This function is fire-and-forget: it catches and logs all errors, does not throw, and will attempt
+ * to mark the local DekesHandoff as failed when an error occurs.
+ *
+ * @param input - Handoff details (organizationId, eventType, severity, and optional routing, budget, policy, decision ids, and explanation)
  * Emit a carbon event handoff to DEKES. Always fire-and-forget — never throws.
  *
  * Steps:

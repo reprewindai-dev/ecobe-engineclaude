@@ -42,6 +42,14 @@ export interface IngestDecisionInput {
   meta?: Record<string, unknown>
 }
 
+/**
+ * Record a dashboard routing decision, deduplicating by `decisionFrameId` when provided.
+ *
+ * @param input - Payload describing the routing decision (organization, regions, CO₂ metrics, metadata, etc.).
+ * Triggers non-blocking post-write side effects such as audit logging, anomaly detection, and conditional budget consumption
+ * which may emit a DEKES handoff; these side effects do not block the primary write.
+ * @returns An object with `id` set to the decision row id and `skipped` indicating whether ingestion was skipped due to an existing `decisionFrameId`.
+ */
 export async function ingestDecision(
   input: IngestDecisionInput,
 ): Promise<{ id: string; skipped: boolean }> {
