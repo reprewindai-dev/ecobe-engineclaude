@@ -7,8 +7,8 @@ import { Providers } from './providers'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'ECOBE Dashboard - Real-Time Carbon Monitoring',
-  description: 'Monitor and optimize carbon emissions in real-time with ECOBE Engine',
+  title: 'CO₂ Router — Carbon-Aware Compute Operations Console',
+  description: 'Real-time carbon routing, decision engine status, and workload optimization',
 }
 
 export default function RootLayout({
@@ -30,20 +30,22 @@ export default function RootLayout({
                       <span className="text-white font-bold text-xl">🌱</span>
                     </div>
                     <div>
-                      <h1 className="text-xl font-bold text-white">ECOBE Engine</h1>
-                      <p className="text-xs text-slate-400">Carbon Optimization Dashboard</p>
+                      <h1 className="text-xl font-bold text-white">CO₂ Router</h1>
+                      <p className="text-xs text-slate-400">Carbon-Aware Compute Operations</p>
                     </div>
                   </div>
-                  <nav className="flex items-center space-x-6">
+                  <nav className="flex items-center space-x-4">
                     <Link href="/" className="text-sm text-slate-300 hover:text-white transition">
-                      Dashboard
+                      Console
                     </Link>
-                    <Link href="/analytics" className="text-sm text-slate-300 hover:text-white transition">
-                      Analytics
-                    </Link>
-                    <Link href="/dekes" className="text-sm text-slate-300 hover:text-white transition">
-                      DEKES
-                    </Link>
+                    <a
+                      href="/api/ecobe/methodology"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-slate-500 hover:text-slate-300 transition"
+                    >
+                      Methodology
+                    </a>
                   </nav>
                 </div>
               </div>
@@ -58,8 +60,8 @@ export default function RootLayout({
             <footer className="border-t border-slate-800 bg-slate-900/50 mt-16">
               <div className="container mx-auto px-6 py-8">
                 <div className="flex items-center justify-between text-sm text-slate-400">
-                  <p>© 2026 ECOBE Engine. Optimizing for a sustainable future.</p>
-                  <p>Powered by Electricity Maps API</p>
+                  <p>© 2026 CO₂ Router. Carbon-aware compute for a sustainable future.</p>
+                  <p>Signal layer: Electricity Maps · Ember</p>
                 </div>
               </div>
             </footer>

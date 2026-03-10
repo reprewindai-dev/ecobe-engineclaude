@@ -1,138 +1,153 @@
 'use client'
 
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { ecobeApi } from '@/lib/api'
-import { CarbonIntensityCard } from '@/components/CarbonIntensityCard'
+import { CarbonReductionMultiplier } from '@/components/CarbonReductionMultiplier'
+import { DecisionEngineStatus } from '@/components/DecisionEngineStatus'
+import { CarbonOpportunityTimeline } from '@/components/CarbonOpportunityTimeline'
+import { DecisionStream } from '@/components/DecisionStream'
+import { CarbonSavingsDashboard } from '@/components/CarbonSavingsDashboard'
+import { CarbonBudgetPanel } from '@/components/CarbonBudgetPanel'
+import { ProviderHealthMonitor } from '@/components/ProviderHealthMonitor'
+import { PolicyEnforcementPanel } from '@/components/PolicyEnforcementPanel'
+import { CarbonOpportunityMap } from '@/components/CarbonOpportunityMap'
+import { ForecastAccuracyTracker } from '@/components/ForecastAccuracyTracker'
 import { GreenRoutingForm } from '@/components/GreenRoutingForm'
+import { DecisionReplay } from '@/components/DecisionReplay'
 import { EnergyCalculator } from '@/components/EnergyCalculator'
+import { DecisionConfidencePanel } from '@/components/DecisionConfidencePanel'
+import { SystemHealth } from '@/components/SystemHealth'
+import { ExecutionIntegrityPanel } from '@/components/ExecutionIntegrityPanel'
 import { DekesStats } from '@/components/DekesStats'
+import { CarbonHeatCalendar } from '@/components/CarbonHeatCalendar'
+import { BestWindowPanel } from '@/components/BestWindowPanel'
+import { IntegrationSourcesPanel } from '@/components/IntegrationSourcesPanel'
+import { DekesImpactCard } from '@/components/DekesImpactCard'
+import { WorkloadImpactGraph } from '@/components/WorkloadImpactGraph'
+import { DekesHandoffPanel } from '@/components/DekesHandoffPanel'
+import { OrgRiskTable } from '@/components/OrgRiskTable'
 
-const POPULAR_REGIONS = [
-  { code: 'US-CAL-CISO', name: 'California' },
-  { code: 'FR', name: 'France' },
-  { code: 'DE', name: 'Germany' },
-  { code: 'GB', name: 'United Kingdom' },
-  { code: 'SE', name: 'Sweden' },
-  { code: 'NO', name: 'Norway' },
+type Tab = 'console' | 'signals' | 'routing' | 'energy' | 'analytics' | 'dekes' | 'patterns' | 'integration'
+
+const TABS: { id: Tab; label: string; sub: string }[] = [
+  { id: 'console', label: 'Console', sub: 'State · Events · Impact' },
+  { id: 'signals', label: 'Signals', sub: 'Regions · Forecast accuracy' },
+  { id: 'routing', label: 'Routing', sub: 'Route · Schedule · Replay' },
+  { id: 'energy', label: 'Energy', sub: 'Carbon equation' },
+  { id: 'analytics', label: 'Analytics', sub: 'Confidence · System · Sources' },
+  { id: 'dekes', label: 'DEKES', sub: 'Workload optimization' },
+  { id: 'patterns', label: 'Patterns', sub: 'Weekly heat calendar' },
+  { id: 'integration', label: 'Integration', sub: 'DEKES · Handoffs · Business activation' },
 ]
 
 export default function DashboardPage() {
-  const [selectedTab, setSelectedTab] = useState<'overview' | 'routing' | 'calculator' | 'dekes'>(
-    'overview'
-  )
-
-  // Health check query
-  const { data: health, isError: healthError } = useQuery({
-    queryKey: ['health'],
-    queryFn: () => ecobeApi.health(),
-    refetchInterval: 30000, // Check every 30 seconds
-  })
+  const [tab, setTab] = useState<Tab>('console')
 
   return (
-    <div className="space-y-8">
-      {/* Status Banner */}
-      <div
-        className={`rounded-lg px-4 py-3 flex items-center justify-between ${
-          healthError
-            ? 'bg-red-500/10 border border-red-500/20'
-            : 'bg-emerald-500/10 border border-emerald-500/20'
-        }`}
-      >
-        <div className="flex items-center space-x-3">
-          <div
-            className={`h-3 w-3 rounded-full ${healthError ? 'bg-red-500' : 'bg-emerald-500 animate-pulse'}`}
-          />
-          <p className={`text-sm font-medium ${healthError ? 'text-red-400' : 'text-emerald-400'}`}>
-            {healthError ? 'ECOBE Engine Offline' : 'ECOBE Engine Online'}
-          </p>
-        </div>
-        {health && (
-          <p className="text-xs text-slate-400">
-            Last updated: {new Date(health.timestamp).toLocaleTimeString()}
-          </p>
-        )}
-      </div>
-
-      {/* Page Header */}
-      <div>
-        <h2 className="text-3xl font-bold text-white mb-2">Carbon Monitoring Dashboard</h2>
-        <p className="text-slate-400">
-          Real-time carbon intensity monitoring and workload optimization
-        </p>
-      </div>
-
-      {/* Tab Navigation */}
+    <div className="space-y-5">
+      {/* Tab navigation */}
       <div className="border-b border-slate-800">
-        <nav className="flex space-x-8">
-          {[
-            { id: 'overview', label: 'Overview' },
-            { id: 'routing', label: 'Green Routing' },
-            { id: 'calculator', label: 'Energy Calculator' },
-            { id: 'dekes', label: 'DEKES Analytics' },
-          ].map((tab) => (
+        <nav className="flex space-x-1 overflow-x-auto">
+          {TABS.map((t) => (
             <button
-              key={tab.id}
-              onClick={() => setSelectedTab(tab.id as any)}
-              className={`py-3 px-1 border-b-2 transition ${
-                selectedTab === tab.id
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`flex-shrink-0 py-2.5 px-4 border-b-2 transition text-left ${
+                tab === t.id
                   ? 'border-emerald-500 text-emerald-400'
-                  : 'border-transparent text-slate-400 hover:text-white'
+                  : 'border-transparent text-slate-500 hover:text-slate-300'
               }`}
             >
-              {tab.label}
+              <span className="text-sm font-medium block">{t.label}</span>
+              <span className="text-xs block mt-0.5 opacity-50">{t.sub}</span>
             </button>
           ))}
         </nav>
       </div>
 
-      {/* Tab Content */}
-      <div>
-        {selectedTab === 'overview' && (
-          <div className="space-y-6">
-            <div>
-              <h3 className="text-xl font-semibold text-white mb-4">
-                Popular Regions - Current Carbon Intensity
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {POPULAR_REGIONS.map((region) => (
-                  <CarbonIntensityCard key={region.code} region={region} />
-                ))}
-              </div>
-            </div>
+      {/* ── CONSOLE ── Control-plane layout (infrastructure pattern) */}
+      {tab === 'console' && (
+        <div className="space-y-5">
+          {/* Layer 1 — System State */}
+          <CarbonReductionMultiplier />
+          <DecisionEngineStatus />
 
-            <div className="bg-slate-900/50 rounded-lg border border-slate-800 p-6">
-              <h3 className="text-lg font-semibold text-white mb-4">About ECOBE Engine</h3>
-              <div className="space-y-3 text-slate-300">
-                <p>
-                  ECOBE Engine provides real-time carbon emissions monitoring and intelligent workload
-                  routing to minimize your infrastructure's environmental impact.
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-                  <div className="bg-slate-800/50 rounded-lg p-4">
-                    <p className="text-emerald-400 font-semibold text-2xl">🌍</p>
-                    <p className="text-sm text-slate-400 mt-2">Real-time carbon data</p>
-                  </div>
-                  <div className="bg-slate-800/50 rounded-lg p-4">
-                    <p className="text-emerald-400 font-semibold text-2xl">⚡</p>
-                    <p className="text-sm text-slate-400 mt-2">Smart green routing</p>
-                  </div>
-                  <div className="bg-slate-800/50 rounded-lg p-4">
-                    <p className="text-emerald-400 font-semibold text-2xl">📊</p>
-                    <p className="text-sm text-slate-400 mt-2">ML-powered forecasting</p>
-                  </div>
-                </div>
-              </div>
-            </div>
+          {/* Layer 2 — Signature visualization */}
+          <CarbonOpportunityTimeline />
+
+          {/* Layer 3 — Live activity */}
+          <DecisionStream />
+
+          {/* Layer 4 — Impact + Budget */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <CarbonSavingsDashboard />
+            <CarbonBudgetPanel />
           </div>
-        )}
 
-        {selectedTab === 'routing' && <GreenRoutingForm />}
+          {/* Layer 5 — Execution integrity */}
+          <ExecutionIntegrityPanel />
 
-        {selectedTab === 'calculator' && <EnergyCalculator />}
+          {/* Layer 6 — Governance */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <ProviderHealthMonitor />
+            <PolicyEnforcementPanel />
+          </div>
+        </div>
+      )}
 
-        {selectedTab === 'dekes' && <DekesStats />}
-      </div>
+      {/* ── SIGNALS ── Regional data + accuracy */}
+      {tab === 'signals' && (
+        <div className="space-y-5">
+          <CarbonOpportunityMap />
+          <ForecastAccuracyTracker />
+        </div>
+      )}
+
+      {/* ── ROUTING ── Route workloads + scheduling + debug replay */}
+      {tab === 'routing' && (
+        <div className="space-y-10">
+          <GreenRoutingForm />
+          <div className="border-t border-slate-800 pt-8">
+            <BestWindowPanel />
+          </div>
+          <div className="border-t border-slate-800 pt-8">
+            <DecisionReplay />
+          </div>
+        </div>
+      )}
+
+      {/* ── ENERGY ── Carbon equation calculator */}
+      {tab === 'energy' && <EnergyCalculator />}
+
+      {/* ── ANALYTICS ── Confidence breakdown + system metrics + integration sources */}
+      {tab === 'analytics' && (
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <DecisionConfidencePanel />
+            <SystemHealth />
+          </div>
+          <IntegrationSourcesPanel />
+          <WorkloadImpactGraph />
+        </div>
+      )}
+
+      {/* ── DEKES ── DEKES workload impact + analytics */}
+      {tab === 'dekes' && (
+        <div className="space-y-5">
+          <DekesImpactCard />
+          <DekesStats />
+        </div>
+      )}
+
+      {/* ── PATTERNS ── Weekly heat calendar */}
+      {tab === 'patterns' && <CarbonHeatCalendar />}
+
+      {/* ── INTEGRATION ── DEKES handoff events + org risk */}
+      {tab === 'integration' && (
+        <div className="space-y-5">
+          <DekesHandoffPanel />
+          <OrgRiskTable />
+        </div>
+      )}
     </div>
   )
 }
