@@ -9,6 +9,9 @@
 import { addHours, addMinutes } from 'date-fns'
 import { prisma } from './db'
 import { routeGreen } from './green-routing'
+import { saveDecisionSnapshot } from './decision-snapshot'
+import { createLease } from './decision-lease'
+import { ingestDecision } from './decision-ingest'
 import { getForecastSignals } from './carbon/provider-router'
 import { CarbonSignal } from './carbon/types'
 
@@ -35,6 +38,10 @@ export interface DekesOptimizeResult {
     score: number
   }>
   workloadId: string
+  decisionFrameId?: string      // lease/snapshot ID — use for revalidate and replay
+  lease_id?: string
+  lease_expires_at?: string
+  must_revalidate_after?: string
 }
 
 export interface DekesScheduleEntry {
@@ -68,7 +75,14 @@ export interface DekesAnalytics {
 }
 
 /**
- * Optimize a single DEKES query — picks the lowest-carbon eligible region.
+ * Selects the lowest-carbon eligible region for a single DEKES query and records the routing decision.
+ *
+ * Persists a DEKES workload record and returns the chosen region, intensity, and estimated energy/CO2. If the routing result includes a decisionFrameId, snapshots the decision and attempts to create a lease and ingest the decision as fire-and-forget side effects (these do not block the returned result).
+ *
+ * @param query - The DEKES query to optimize (id, query text, and estimatedResults).
+ * @param carbonBudget - Optional maximum allowed carbon intensity in gCO2/kWh for the selected region.
+ * @param regions - Candidate regions to consider for routing.
+ * @returns The optimization outcome including selectedRegion, carbonIntensity, estimatedKwh, estimatedCO2, whether selection is within the provided budget, percent savings versus alternatives, routing alternatives, the persisted workloadId, and optional decision/lease fields when available.
  */
 export async function optimizeQuery(
   query: DekesQuery,
@@ -113,6 +127,55 @@ export async function optimizeQuery(
     },
   })
 
+  // Wire into the integrity system — snapshot, lease, and dashboard savings.
+  // All three are fire-and-forget so they never block the DEKES response.
+  let leaseFields: import('./decision-lease').LeaseFields | null = null
+
+  if (routingResult.decisionFrameId) {
+    const allIntensities = [routingResult.carbonIntensity, ...routingResult.alternatives.map((a) => a.carbonIntensity)]
+    const baselineIntensity = Math.max(...allIntensities)
+    const baselineRegion =
+      routingResult.alternatives.find((a) => a.carbonIntensity === baselineIntensity)?.region ?? regions[0]!
+
+    const signalSnapshot = Object.fromEntries(
+      regions.map((r) => [r, {
+        intensity: r === routingResult.selectedRegion
+          ? routingResult.carbonIntensity
+          : (routingResult.alternatives.find((a) => a.region === r)?.carbonIntensity ?? 0),
+        source: null,
+        fallbackUsed: false,
+        disagreementFlag: null,
+      }]),
+    )
+
+    void saveDecisionSnapshot({
+      decisionFrameId: routingResult.decisionFrameId,
+      request: { preferredRegions: regions, maxCarbonGPerKwh: carbonBudget },
+      result: routingResult,
+      signalSnapshot,
+      source: 'DEKES',
+      workloadType: 'query_optimization',
+    })
+
+    leaseFields = await createLease(
+      routingResult.decisionFrameId,
+      undefined,
+      routingResult,
+      { preferredRegions: regions, maxCarbonGPerKwh: carbonBudget },
+      { source: 'DEKES', workloadType: 'query_optimization' },
+    ).catch(() => null)
+
+    void ingestDecision({
+      decisionFrameId: routingResult.decisionFrameId,
+      baselineRegion,
+      chosenRegion: routingResult.selectedRegion,
+      carbonIntensityBaselineGPerKwh: Math.round(baselineIntensity),
+      carbonIntensityChosenGPerKwh: Math.round(routingResult.carbonIntensity),
+      workloadName: 'DEKES',
+      meta: { source: 'DEKES', queryId: query.id },
+    })
+  }
+
   return {
     queryId: query.id,
     selectedRegion: routingResult.selectedRegion,
@@ -123,6 +186,8 @@ export async function optimizeQuery(
     savings,
     alternatives: routingResult.alternatives,
     workloadId: workload.id,
+    ...(routingResult.decisionFrameId ? { decisionFrameId: routingResult.decisionFrameId } : {}),
+    ...(leaseFields ?? {}),
   }
 }
 

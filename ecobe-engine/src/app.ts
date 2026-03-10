@@ -20,8 +20,23 @@ import methodologyRoutes from './routes/methodology'
 import budgetsRoutes from './routes/budgets'
 import intelligenceRoutes from './routes/intelligence'
 import workloadsRoutes from './routes/workloads'
+import integrationsRoutes from './routes/integrations'
 import { attachOrgContext } from './middleware/governance'
 
+/**
+ * Register public health-check endpoints on the provided Express application.
+ *
+ * Registers two unauthenticated routes: GET /health and GET /api/v1/health. Each request verifies database connectivity and attempts to ping Redis, then responds with JSON containing:
+ * - `status`: "healthy" or "unhealthy"
+ * - `service`: "CO2 Router"
+ * - `version`: "1.0.0"
+ * - `timestamp`: ISO 8601 timestamp
+ * - `checks`: object with `database` and `redis` boolean values
+ *
+ * On Redis or database failure the handler responds with HTTP 503 and `status: "unhealthy"`. On unexpected errors the handler responds with HTTP 503 and an error message.
+ *
+ * @param app - Express application to attach the health endpoints to. These routes are intentionally public and should be registered before mounting API routes that enforce API-key authentication.
+ */
 function attachHealthRoutes(app: express.Express) {
   // Health routes are intentionally PUBLIC — no auth required.
   // Load balancers, uptime monitors, and orchestrators must reach these without credentials.
@@ -270,6 +285,15 @@ function attachUiRoute(app: express.Express) {
   })
 }
 
+/**
+ * Mounts API-level middleware and versioned route groups under `/api/v1` on the provided Express app.
+ *
+ * Applies rate limiting, enforces API key authentication, attaches organization context, and mounts the application's
+ * route modules (energy, routing, credits, decisions, dashboard, forecasting, dekes, ci, governance, methodology, budgets,
+ * intelligence, workloads, and integrations) at their respective `/api/v1/*` paths.
+ *
+ * @param app - The Express application instance to configure
+ */
 function attachApiRoutes(app: express.Express) {
   app.use('/api/v1', apiRateLimit)
   app.use('/api/v1', requireApiKey)
@@ -286,8 +310,19 @@ function attachApiRoutes(app: express.Express) {
   app.use('/api/v1/budgets', budgetsRoutes)
   app.use('/api/v1/intelligence', intelligenceRoutes)
   app.use('/api/v1/workloads', workloadsRoutes)
+  app.use('/api/v1/integrations', integrationsRoutes)
 }
 
+/**
+ * Register default fallback middleware: a 404 route and a centralized error handler.
+ *
+ * The first middleware responds to unmatched routes with a 404 status and JSON
+ * body { error: 'Not found' }. The error-handling middleware logs the error
+ * (including request path and method) and responds with a 500 status and JSON
+ * body { error: 'Internal server error' }.
+ *
+ * @param app - The Express application to attach the handlers to
+ */
 function attachFallbackHandlers(app: express.Express) {
   app.use((req, res) => {
     res.status(404).json({ error: 'Not found' })
