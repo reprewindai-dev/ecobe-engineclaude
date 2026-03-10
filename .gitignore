@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 node_modules/
 dist/
 .DS_Store
@@ -24,3 +25,19 @@ ecobe-engine/.env
 # Windsurf
 .windsurf/
 ecobe-engine/.windsurf/
+=======
+# dependencies
+/ecobe-dashboard/node_modules
+
+# next.js
+/ecobe-dashboard/.next
+
+# build outputs
+/ecobe-dashboard/tsconfig.tsbuildinfo
+
+# env
+/ecobe-dashboard/.env
+
+# logs
+*.log
+>>>>>>> a8c7cfc7f04fa8c8228c043ae76b00cf3d920552

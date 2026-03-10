@@ -1,0 +1,9 @@
+{
+  "name": "ecobe-dashboardclaude-root",
+  "private": true,
+  "scripts": {
+    "postinstall": "npm --prefix ecobe-dashboard install",
+    "build": "npm --prefix ecobe-dashboard run build",
+    "start": "npm --prefix ecobe-dashboard run start"
+  }
+}
