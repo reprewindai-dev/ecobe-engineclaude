@@ -157,6 +157,10 @@ model DashboardRoutingDecision {
 
   meta Json @default("{}")
 
+  // Links this record back to the routing decision that produced it.
+  // Unique — prevents duplicate rows when both engine auto-write and client POST /decisions run.
+  decisionFrameId String? @unique
+
   @@index([createdAt])
   @@index([organizationId, createdAt])
   @@index([baselineRegion])
@@ -351,6 +355,52 @@ model DekesWorkload {
 
   @@index([status])
   @@index([dekesQueryId])
+}
+
+// ============================================================================
+// DEKES INTEGRATION — HANDOFF EVENTS
+// ============================================================================
+
+/**
+ * Records every ECOBE → DEKES handoff event.
+ * Events are always persisted here first. If DEKES_ENDPOINT is configured,
+ * the sender service also HTTP-POSTs to DEKES and updates status/sentAt.
+ * DEKES status callbacks update this row via POST /api/v1/integrations/dekes/handoff-status.
+ *
+ * Architectural rule: this table is append-only from the ECOBE side.
+ * DEKES never modifies ECOBE routing decisions.
+ */
+model DekesHandoff {
+  id              String   @id @default(cuid())
+  handoffId       String   @unique            // "hof_<timestamp>_<hex>" — idempotency key
+
+  organizationId  String?
+  decisionId      String?                     // DashboardRoutingDecision.id
+  decisionFrameId String?                     // For /api/v1/route/:id/replay link
+
+  eventType       String                      // BUDGET_WARNING | BUDGET_EXCEEDED | POLICY_DELAY
+  severity        String                      // low | medium | high | critical
+  payloadJson     Json                        // Full handoff payload (spec v1 section 4)
+
+  status          String   @default("queued") // queued | processing | processed | ignored | failed
+
+  // DEKES classification fields — populated via status callback
+  dekesClassification String?                 // opportunity | informational | risk | no_action
+  dekesActionType     String?
+  dekesActionId       String?
+
+  // Lifecycle timestamps
+  sentAt          DateTime?                   // When HTTP POST to DEKES was attempted
+  processedAt     DateTime?
+  failedAt        DateTime?
+  errorMessage    String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([organizationId, createdAt])
+  @@index([status, createdAt])
+  @@index([eventType, createdAt])
 }
 
 // ============================================================================

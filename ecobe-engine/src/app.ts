@@ -21,6 +21,7 @@ import budgetsRoutes from './routes/budgets'
 import intelligenceRoutes from './routes/intelligence'
 import workloadsRoutes from './routes/workloads'
 import integrationsRoutes from './routes/integrations'
+import gridIntelligenceRoutes from './routes/grid-intelligence'
 import { attachOrgContext } from './middleware/governance'
 
 /**
@@ -311,6 +312,7 @@ function attachApiRoutes(app: express.Express) {
   app.use('/api/v1/intelligence', intelligenceRoutes)
   app.use('/api/v1/workloads', workloadsRoutes)
   app.use('/api/v1/integrations', integrationsRoutes)
+  app.use('/api/v1/grid', gridIntelligenceRoutes)
 }
 
 /**

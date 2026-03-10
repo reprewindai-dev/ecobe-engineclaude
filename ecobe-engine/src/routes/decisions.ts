@@ -5,6 +5,7 @@ import { writeAuditLog } from '../lib/governance/audit'
 import { checkOrgPolicy } from '../lib/governance/risk'
 import { detectAnomaly } from '../lib/governance/watchtower'
 import { consumeBudget } from '../lib/carbon-budget'
+import { emitDekesHandoff } from '../lib/dekes-handoff'
 
 const router = Router()
 
@@ -136,9 +137,38 @@ router.post('/', async (req, res) => {
       return res.status(403).json({ error: 'Policy violation', reason: policyCheck.reason })
     }
 
+    // If decisionFrameId is provided and the engine already auto-wrote this decision,
+    // enrich the existing row with the client's richer data (actual kWh, latency, etc.)
+    // rather than creating a duplicate.
+    if (value.decisionFrameId) {
+      const existing = await (prisma as any).dashboardRoutingDecision.findUnique({
+        where: { decisionFrameId: value.decisionFrameId },
+        select: { id: true },
+      })
+      if (existing) {
+        await (prisma as any).dashboardRoutingDecision.update({
+          where: { id: existing.id },
+          data: {
+            ...(estimatedKwh != null ? { estimatedKwh } : {}),
+            ...(co2BaselineG != null ? { co2BaselineG } : {}),
+            ...(co2ChosenG != null ? { co2ChosenG } : {}),
+            ...(latencyEstimateMs != null ? { latencyEstimateMs } : {}),
+            ...(latencyActualMs != null ? { latencyActualMs } : {}),
+            ...(workloadName != null ? { workloadName } : {}),
+            ...(opName != null ? { opName } : {}),
+            ...(dataFreshnessSeconds != null ? { dataFreshnessSeconds } : {}),
+            ...(zoneBaseline != null ? { zoneBaseline } : {}),
+            ...(zoneChosen != null ? { zoneChosen } : {}),
+          },
+        })
+        return res.status(200).json({ ok: true, id: existing.id })
+      }
+    }
+
     const created = await (prisma as any).dashboardRoutingDecision.create({
       data: {
         organizationId: organizationId ?? null,
+        decisionFrameId: value.decisionFrameId ?? null,
         workloadName,
         opName,
         baselineRegion,
@@ -223,6 +253,28 @@ router.post('/', async (req, res) => {
             },
             result: 'SUCCESS',
             riskTier: budgetState.status === 'exceeded' ? 'HIGH' : 'MEDIUM',
+          })
+          // Emit DEKES handoff — fire-and-forget, never blocks response.
+          void emitDekesHandoff({
+            organizationId: organizationId!,
+            decisionId: created.id,
+            decisionFrameId: value.decisionFrameId ?? undefined,
+            eventType: budgetState.status === 'exceeded' ? 'BUDGET_EXCEEDED' : 'BUDGET_WARNING',
+            severity:  budgetState.status === 'exceeded' ? 'high' : 'medium',
+            routing: {
+              selectedRegion:          chosenRegion,
+              baselineRegion:          baselineRegion,
+              carbonIntensity:         carbonIntensityChosenGPerKwh ?? 0,
+              baselineCarbonIntensity: carbonIntensityBaselineGPerKwh ?? undefined,
+            },
+            budget: {
+              budgetCO2Grams:    budgetState.budgetCO2Grams,
+              consumedCO2Grams:  budgetState.consumedCO2Grams,
+              remainingCO2Grams: budgetState.remainingCO2Grams,
+              utilizationPct:    budgetState.utilizationPct,
+              status:            budgetState.status,
+              periodEnd:         budgetState.periodEnd,
+            },
           })
         }
       })

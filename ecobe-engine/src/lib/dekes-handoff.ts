@@ -57,6 +57,7 @@ export interface EmitHandoffInput {
  *
  * @returns A string starting with `hof_` followed by the current millisecond timestamp, an underscore, and six hexadecimal characters (e.g., `hof_1610000000000_a1b2c3`).
  */
+// ─── Internal helpers ─────────────────────────────────────────────────────────
 
 function buildHandoffId(): string {
   return 'hof_' + Date.now() + '_' + randomBytes(3).toString('hex')
@@ -142,6 +143,14 @@ function buildPayload(handoffId: string, input: EmitHandoffInput): Record<string
  * to mark the local DekesHandoff as failed when an error occurs.
  *
  * @param input - Handoff details (organizationId, eventType, severity, and optional routing, budget, policy, decision ids, and explanation)
+ * Emit a carbon event handoff to DEKES. Always fire-and-forget — never throws.
+ *
+ * Steps:
+ * 1. Generate idempotency key and build spec-compliant payload.
+ * 2. Persist to DekesHandoff (status: 'queued').
+ * 3. If DEKES_ENDPOINT configured, HTTP POST to DEKES.
+ * 4. Update DekesHandoff status + sentAt / failedAt.
+ * 5. Write governance audit log entry.
  */
 export async function emitDekesHandoff(input: EmitHandoffInput): Promise<void> {
   const handoffId = buildHandoffId()
