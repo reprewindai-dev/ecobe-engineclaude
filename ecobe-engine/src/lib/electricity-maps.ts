@@ -2,6 +2,36 @@ import axios from 'axios'
 import { env } from '../config/env'
 import { recordIntegrationFailure, recordIntegrationSuccess } from './integration-metrics'
 
+interface LatestCarbonIntensityResponse {
+  zone: string
+  carbonIntensity: number
+  datetime: string
+  fossilFuelPercentage?: number
+  renewablePercentage?: number
+}
+
+interface HistoryPoint {
+  zone: string
+  carbonIntensity: number
+  datetime: string
+  fossilFuelPercentage?: number
+  renewablePercentage?: number
+}
+
+interface HistoryResponse {
+  history: HistoryPoint[]
+}
+
+interface ForecastPoint {
+  zone: string
+  carbonIntensity: number
+  datetime: string
+}
+
+interface ForecastResponse {
+  forecast: ForecastPoint[]
+}
+
 export interface CarbonIntensityData {
   zone: string
   carbonIntensity: number  // gCO2eq/kWh
@@ -47,7 +77,7 @@ export class ElectricityMapsClient {
     }
 
     try {
-      const response = await axios.get(`${this.baseUrl}/v3/carbon-intensity/latest`, {
+      const response = await axios.get<LatestCarbonIntensityResponse>(`${this.baseUrl}/v3/carbon-intensity/latest`, {
         params: { zone },
         headers: { 'auth-token': this.apiKey },
       })
@@ -79,7 +109,7 @@ export class ElectricityMapsClient {
     }
 
     try {
-      const response = await axios.get(`${this.baseUrl}/v3/carbon-intensity/history`, {
+      const response = await axios.get<HistoryResponse>(`${this.baseUrl}/v3/carbon-intensity/history`, {
         params: {
           zone,
           start: start.toISOString(),
@@ -88,7 +118,7 @@ export class ElectricityMapsClient {
         headers: { 'auth-token': this.apiKey },
       })
 
-      const history = response.data.history.map((item: any) => ({
+      const history = response.data.history.map((item) => ({
         zone: item.zone,
         carbonIntensity: item.carbonIntensity,
         datetime: item.datetime,
@@ -111,12 +141,12 @@ export class ElectricityMapsClient {
     }
 
     try {
-      const response = await axios.get(`${this.baseUrl}/v3/carbon-intensity/forecast`, {
+      const response = await axios.get<ForecastResponse>(`${this.baseUrl}/v3/carbon-intensity/forecast`, {
         params: { zone },
         headers: { 'auth-token': this.apiKey },
       })
 
-      const forecast = response.data.forecast.map((item: any) => ({
+      const forecast = response.data.forecast.map((item) => ({
         zone: item.zone,
         carbonIntensity: item.carbonIntensity,
         datetime: item.datetime,

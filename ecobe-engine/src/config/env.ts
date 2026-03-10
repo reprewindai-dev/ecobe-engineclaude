@@ -16,6 +16,23 @@ const envSchema = z.object({
   ELECTRICITY_MAPS_BASE_URL: z.string().default('https://api.electricitymap.org'),
   DEFAULT_MAX_CARBON_G_PER_KWH: z.string().default('400'),
 
+  // Intelligence / vectors
+  UPSTASH_VECTOR_REST_URL: z.string().optional(),
+  UPSTASH_VECTOR_REST_TOKEN: z.string().optional(),
+  UPSTASH_VECTOR_INDEX_NAME: z.string().optional(),
+  OPENAI_API_KEY: z.string().optional(),
+  OPENAI_EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),
+
+  // Intelligence jobs / scheduling
+  QSTASH_TOKEN: z.string().optional(),
+  QSTASH_BASE_URL: z.string().optional(),
+  INTELLIGENCE_JOB_TOKEN: z.string().optional(),
+  QSTASH_CURRENT_SIGNING_KEY: z.string().optional(),
+  QSTASH_NEXT_SIGNING_KEY: z.string().optional(),
+  INTELLIGENCE_ACCURACY_CRON: z.string().default('*/30 * * * *'),
+  INTELLIGENCE_VECTOR_CLEANUP_CRON: z.string().default('0 3 * * *'),
+  INTELLIGENCE_CALIBRATION_CRON: z.string().default('15 * * * *'),
+
   FORECAST_REFRESH_ENABLED: z.string().optional(),
   FORECAST_REFRESH_CRON: z.string().default('*/30 * * * *'),
 
@@ -49,6 +66,9 @@ export const env = {
       ? parsed.data.FORECAST_REFRESH_ENABLED === 'true'
       : parsed.data.NODE_ENV !== 'test',
   FORECAST_REFRESH_CRON: parsed.data.FORECAST_REFRESH_CRON,
+  INTELLIGENCE_ACCURACY_CRON: parsed.data.INTELLIGENCE_ACCURACY_CRON,
+  INTELLIGENCE_VECTOR_CLEANUP_CRON: parsed.data.INTELLIGENCE_VECTOR_CLEANUP_CRON,
+  INTELLIGENCE_CALIBRATION_CRON: parsed.data.INTELLIGENCE_CALIBRATION_CRON,
 }
 
 export type Env = typeof env

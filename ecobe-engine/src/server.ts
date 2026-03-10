@@ -3,6 +3,7 @@ import { prisma } from './lib/db'
 import { redis } from './lib/redis'
 import { createApp } from './app'
 import { startForecastWorker } from './workers/forecast-poller'
+import { scheduleIntelligenceJobs } from './workers/intelligence-scheduler'
 
 const app = createApp()
 
@@ -28,6 +29,9 @@ async function start() {
       console.log(`   API: http://localhost:${env.PORT}/api/v1`)
 
       startForecastWorker()
+      scheduleIntelligenceJobs().catch((error) => {
+        console.error('Intelligence job scheduling failed:', error)
+      })
     })
   } catch (error) {
     console.error('❌ Failed to start server:', error)

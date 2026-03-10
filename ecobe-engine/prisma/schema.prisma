@@ -4,8 +4,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
-  directUrl = env("DATABASE_URL")
 }
 
 // ============================================================================
@@ -156,6 +154,320 @@ model DashboardRoutingDecision {
   @@index([createdAt])
   @@index([baselineRegion])
   @@index([chosenRegion])
+}
+
+// ============================================================================
+// CARBON COMMAND (Decision Engine)
+// ============================================================================
+
+model CarbonCommand {
+  id        String   @id @default(cuid())
+
+  orgId     String
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  requestPayload Json
+
+  workloadType  String?
+  modelFamily   String?
+  executionMode String?
+
+  mode      CarbonCommandMode   @default(IMMEDIATE)
+  status    CarbonCommandStatus @default(PENDING)
+
+  candidateWindowHours Int?
+  allowTimeShifting    Boolean  @default(true)
+  allowCrossRegion     Boolean  @default(true)
+  requireCreditCoverage Boolean @default(false)
+
+  selectedRegion        String?
+  selectedStartAt       DateTime?
+  fallbackRegion        String?
+  expectedCarbonIntensity Int?
+  expectedLatencyMs     Int?
+  expectedCostIndex     Float?
+  estimatedEmissionsKgCo2e Float?
+  estimatedSavingsKgCo2e Float?
+  confidence            Float?
+
+  summaryReason   String?
+  tradeoffSummary String?
+
+  decisionId      String?
+
+  metadata Json @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  trace    CarbonCommandTrace?
+  outcomes CarbonCommandOutcome[]
+  embeddingIndex WorkloadEmbeddingIndex? @relation("CarbonCommandEmbedding")
+  adaptiveRun    AdaptiveRunLog?         @relation("CarbonCommandAdaptiveRun")
+
+  @@index([orgId])
+  @@index([mode])
+  @@index([status])
+  @@index([selectedRegion])
+  @@index([workloadType])
+  @@index([modelFamily])
+}
+
+model CarbonCommandTrace {
+  id        String   @id @default(cuid())
+
+  commandId String   @unique
+  command   CarbonCommand @relation(fields: [commandId], references: [id], onDelete: Cascade)
+
+  scoringModel   String
+  weights        Json
+  inputs         Json
+  environment    Json
+  candidates     Json
+  rejected       Json
+  selection      Json
+  traceJson      Json
+
+  createdAt DateTime @default(now())
+}
+
+model CarbonCommandOutcome {
+  id        String   @id @default(cuid())
+
+  commandId String   @unique
+  command   CarbonCommand @relation(fields: [commandId], references: [id], onDelete: Cascade)
+
+  orgId     String
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  actualRegion          String
+  actualStartAt         DateTime
+  actualEndAt           DateTime?
+  actualLatencyMs       Int?
+  actualGpuHours        Float?
+  actualCpuHours        Float?
+  actualMemoryGb        Float?
+  actualCarbonIntensity Float?
+  actualEmissionsKgCo2e Float?
+  actualCostUsd         Float?
+  costIndexObserved     Float?
+
+  measurementSource CarbonMeasurementSource @default(ESTIMATED)
+  providerExecutionId String? @unique
+
+  predictedEmissionsKgCo2e Float?
+  predictedLatencyMs       Int?
+  predictedCostIndex       Float?
+
+  emissionsVarianceKg   Float?
+  emissionsVariancePct  Float?
+  latencyVarianceMs     Int?
+  latencyVariancePct    Float?
+  costVariancePct       Float?
+  regionMatch           Boolean @default(false)
+  slaMet                Boolean?
+  fallbackTriggered     Boolean? @default(false)
+  completed             Boolean  @default(false)
+  predictionQuality     PredictionQuality @default(MEDIUM)
+
+  comparisonJson Json @default("{}")
+  learningSignals Json @default("{}")
+  metadata        Json @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId])
+  @@index([actualRegion])
+}
+
+enum CarbonCommandMode {
+  IMMEDIATE
+  SCHEDULED
+  ADVISORY
+}
+
+enum CarbonCommandStatus {
+  PENDING
+  RECOMMENDED
+  EXECUTED
+  FAILED
+}
+
+enum CarbonMeasurementSource {
+  ESTIMATED
+  PROVIDER_REPORTED
+  METERED
+}
+
+enum PredictionQuality {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+// ============================================================================
+// ORGANIZATIONS & USAGE
+// ============================================================================
+
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum OrgPlanTier {
+  FREE
+  GROWTH
+  ENTERPRISE
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  apiKey    String   @unique
+  billingEmail String?
+  planTier  OrgPlanTier        @default(FREE)
+  status    OrganizationStatus @default(ACTIVE)
+  monthlyCommandLimit Int      @default(1000)
+  enforceCreditCoverage Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  commands CarbonCommand[]
+  outcomes CarbonCommandOutcome[]
+  usageCounters OrgUsageCounter[]
+}
+
+model OrgUsageCounter {
+  id        String   @id @default(cuid())
+  orgId     String
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  periodStart DateTime
+  commandCount Int    @default(0)
+  estimatedEmissionsKg Float @default(0)
+  lastCommandAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orgId, periodStart])
+  @@index([orgId])
+}
+
+// ============================================================================
+// CARBON COMMAND ACCURACY (Daily Aggregates)
+// ============================================================================
+
+model CarbonCommandAccuracyDaily {
+  id        String   @id @default(cuid())
+
+  date DateTime
+  orgId String
+  workloadType String?
+  region       String?
+
+  totalCommands          Int    @default(0)
+  regionMatchCount       Int    @default(0)
+  avgEmissionsVariancePct Float  @default(0)
+  avgLatencyVariancePct   Float  @default(0)
+  avgCostVariancePct      Float  @default(0)
+  highQualityCount       Int    @default(0)
+  mediumQualityCount     Int    @default(0)
+  lowQualityCount        Int    @default(0)
+  estimatedSavingsKgCo2e  Float  @default(0)
+  verifiedSavingsKgCo2e   Float  @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([date, orgId, workloadType, region])
+}
+
+// ============================================================================
+// WORKLOAD EMBEDDING INDEX
+// ============================================================================
+
+model WorkloadEmbeddingIndex {
+  id        String   @id @default(cuid())
+  commandId String   @unique
+  orgId     String
+  vectorId  String?
+
+  workloadType String?
+  modelFamily  String?
+  executionMode String?
+  gpuHoursBucket String?
+  gpuHours     Float?
+  cpuHours     Float?
+  memoryGb     Float?
+  region       String?
+  carbonIntensity Float?
+  emissionsKgCo2e Float?
+  savingsKgCo2e   Float?
+  latencyMs       Int?
+
+  createdAt DateTime @default(now())
+
+  command CarbonCommand @relation("CarbonCommandEmbedding", fields: [commandId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([workloadType])
+  @@index([region])
+}
+
+// ============================================================================
+// ADAPTIVE OPTIMIZATION
+// ============================================================================
+
+model AdaptiveProfile {
+  id        String   @id @default(cuid())
+  orgId     String
+  workloadType String?
+  modelFamily  String?
+  region       String?
+
+  weightModifiersJson        Json @default("{}")
+  regionAdjustmentsJson      Json @default("{}")
+  executionModeAdjustmentsJson Json @default("{}")
+  confidenceModifiersJson    Json @default("{}")
+
+  lastUpdatedAt DateTime @default(now())
+
+  @@unique([orgId, workloadType, modelFamily, region])
+}
+
+model AdaptiveSignal {
+  id        String   @id @default(cuid())
+  orgId     String
+  signalType String
+  workloadType String?
+  modelFamily  String?
+  region       String?
+  metric       String
+  value        Float
+  threshold    Float?
+  details      Json   @default("{}")
+  createdAt    DateTime @default(now())
+
+  @@index([orgId])
+  @@index([signalType])
+}
+
+model AdaptiveRunLog {
+  id        String   @id @default(cuid())
+  commandId String   @unique
+  orgId     String
+
+  baseScoreJson       Json @default("{}")
+  adjustmentsJson     Json @default("{}")
+  finalScoreJson      Json @default("{}")
+  reasoningJson       Json @default("{}")
+
+  createdAt DateTime @default(now())
+
+  command CarbonCommand @relation("CarbonCommandAdaptiveRun", fields: [commandId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
 }
 
 // ============================================================================
@@ -366,7 +678,47 @@ model IntegrationMetric {
   lastSuccessAt  DateTime?
   lastFailureAt  DateTime?
   lastError      String?
+  lastErrorCode  String?
+  lastErrorAt    DateTime?
+  lastLatencyMs  Float?
+  totalLatencyMs Float    @default(0)
+  latencySamples Int      @default(0)
+  latencyP95Ms   Float?
+  alertActive    Boolean  @default(false)
+  alertMessage   String?
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+model IntegrationEvent {
+  id         String   @id @default(cuid())
+  source     String
+  success    Boolean
+  durationMs Float?
+  statusCode Int?
+  errorCode  String?
+  message    String?
+  createdAt  DateTime @default(now())
+
+  @@index([source, createdAt])
+  @@index([source, success, createdAt])
+}
+
+// ============================================================================
+// WORKLOAD DECISION OUTCOMES
+// ============================================================================
+
+model WorkloadDecisionOutcome {
+  id          String   @id @default(uuid())
+  workloadId  String
+  region      String?
+  carbonSaved Float
+  latency     Float
+  cost        Float
+  success     Boolean
+  createdAt   DateTime @default(now())
+
+  @@index([workloadId])
+  @@index([createdAt])
 }

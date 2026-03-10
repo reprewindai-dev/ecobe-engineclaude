@@ -4,11 +4,22 @@ import { env } from './config/env'
 import { prisma } from './lib/db'
 import { redis } from './lib/redis'
 import energyRoutes from './routes/energy'
+import dekesRoutes from './routes/dekes'
 import routingRoutes from './routes/routing'
 import creditsRoutes from './routes/credits'
 import decisionsRoutes from './routes/decisions'
 import dashboardRoutes from './routes/dashboard'
 import forecastingRoutes from './routes/forecasting'
+import carbonRoutes from './routes/carbon-command'
+import organizationsRoutes from './routes/organizations'
+import intelligenceRoutes from './routes/intelligence'
+
+function rawBodySaver(_req: express.Request, _res: express.Response, buf: Buffer) {
+  if (buf?.length) {
+    const rawReq = _req as { rawBody?: string }
+    rawReq.rawBody = buf.toString('utf8')
+  }
+}
 
 function attachHealthRoutes(app: express.Express) {
   async function healthHandler(req: express.Request, res: express.Response) {
@@ -249,11 +260,15 @@ function attachUiRoute(app: express.Express) {
 
 function attachApiRoutes(app: express.Express) {
   app.use('/api/v1/energy', energyRoutes)
+  app.use('/api/v1/dekes', dekesRoutes)
   app.use('/api/v1/route', routingRoutes)
   app.use('/api/v1/credits', creditsRoutes)
   app.use('/api/v1/decisions', decisionsRoutes)
   app.use('/api/v1/dashboard', dashboardRoutes)
   app.use('/api/v1/forecasting', forecastingRoutes)
+  app.use('/api/v1/carbon', carbonRoutes)
+  app.use('/api/v1/organizations', organizationsRoutes)
+  app.use('/api/v1/intelligence', intelligenceRoutes)
 }
 
 function attachFallbackHandlers(app: express.Express) {
@@ -272,8 +287,8 @@ export function createApp() {
   const app = express()
 
   app.set('trust proxy', 1)
-  app.use(express.json({ limit: '1mb' }))
-  app.use(express.urlencoded({ extended: true, limit: '1mb' }))
+  app.use(express.json({ limit: '1mb', verify: rawBodySaver }))
+  app.use(express.urlencoded({ extended: true, limit: '1mb', verify: rawBodySaver }))
 
   attachHealthRoutes(app)
   attachUiRoute(app)

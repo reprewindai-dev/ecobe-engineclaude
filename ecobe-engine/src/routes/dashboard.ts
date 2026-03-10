@@ -1,11 +1,131 @@
 import { Router } from 'express'
 import { z } from 'zod'
+import {
+  startOfDay,
+  startOfWeek,
+  startOfMonth,
+  addDays,
+  addWeeks,
+  addMonths,
+  formatISO,
+} from 'date-fns'
+import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/db'
 import { electricityMaps } from '../lib/electricity-maps'
 import { getIntegrationMetric, computeIntegrationSuccessRate } from '../lib/integration-metrics'
 import { getForecastRefreshSummary, getLastForecastRefreshState } from '../lib/forecast-refresh'
 
 const router = Router()
+
+type AccuracyRange = '7d' | '30d' | '90d' | 'custom'
+type AccuracyGroupBy = 'day' | 'week' | 'month'
+
+const rangeToDurationDays: Record<Exclude<AccuracyRange, 'custom'>, number> = {
+  '7d': 7,
+  '30d': 30,
+  '90d': 90,
+}
+
+const resolveAccuracyRange = (
+  range: AccuracyRange,
+  startDate?: string,
+  endDate?: string
+): { start: Date; end: Date } => {
+  if (range === 'custom') {
+    if (!startDate || !endDate) {
+      throw new Error('startDate and endDate are required for custom range')
+    }
+    return { start: new Date(startDate), end: new Date(endDate) }
+  }
+  const days = rangeToDurationDays[range]
+  const end = new Date()
+  const start = addDays(end, -days)
+  return { start, end }
+}
+
+const groupAdders: Record<AccuracyGroupBy, (date: Date, amount: number) => Date> = {
+  day: addDays,
+  week: addWeeks,
+  month: addMonths,
+}
+
+const groupStarts: Record<AccuracyGroupBy, (date: Date) => Date> = {
+  day: startOfDay,
+  week: startOfWeek,
+  month: startOfMonth,
+}
+
+interface AccuracySummary {
+  totalCommands: number
+  completedCommands: number
+  regionMatchRate: number
+  slaMetRate: number
+  avgEmissionsVariancePct: number | null
+  avgLatencyVariancePct: number | null
+  avgCostVariancePct: number | null
+  predictionQuality: {
+    high: number
+    medium: number
+    low: number
+  }
+  totalEstimatedSavingsKgCo2e: number
+  totalVerifiedSavingsKgCo2e: number
+}
+
+interface TrendRow {
+  date: string
+  commands: number
+  completed: number
+  regionMatchRate: number
+  slaMetRate: number
+  avgEmissionsVariancePct: number | null
+  verifiedSavingsKgCo2e: number
+}
+
+interface BreakdownRow {
+  key: string
+  commands: number
+  completed: number
+  avgEmissionsVariancePct: number | null
+  verifiedSavingsKgCo2e: number
+  regionMatchRate?: number
+}
+
+const safeAvg = (values: (number | null)[]): number | null => {
+  const filtered = values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
+  if (filtered.length === 0) return null
+  const avg = filtered.reduce((sum, v) => sum + v, 0) / filtered.length
+  return Number(avg.toFixed(2))
+}
+
+const rate = (numerator: number, denominator: number): number => {
+  if (!denominator) return 0
+  return Number((numerator / denominator).toFixed(4))
+}
+
+const buildInsightMessages = (
+  summary: AccuracySummary,
+  breakdowns: { byRegion: BreakdownRow[]; byWorkloadType: BreakdownRow[] }
+): string[] => {
+  const insights: string[] = []
+  if (summary.avgEmissionsVariancePct !== null && summary.avgEmissionsVariancePct < 10) {
+    insights.push('Prediction accuracy remained strong (emissions variance under 10%).')
+  }
+  if (summary.regionMatchRate < 0.85) {
+    insights.push('Region execution drifted from recommendations; review fallback behavior.')
+  }
+  const topSavingsRegion = breakdowns.byRegion[0]
+  if (topSavingsRegion && topSavingsRegion.verifiedSavingsKgCo2e > 0) {
+    insights.push(`Region ${topSavingsRegion.key} delivered the highest verified carbon savings.`)
+  }
+  if (summary.totalVerifiedSavingsKgCo2e > summary.totalEstimatedSavingsKgCo2e * 0.9) {
+    insights.push('Verified savings closely tracked projected savings in this window.')
+  }
+  if (insights.length === 0) {
+    insights.push('Collect more completed workloads to generate actionable insights.')
+  }
+  return insights
+}
 
 type DecisionMetricsRow = {
   createdAt: Date
@@ -112,6 +232,28 @@ router.get('/decisions/export', async (req, res) => {
 const metricsQuerySchema = z.object({
   window: z.enum(['24h', '7d']).default('24h'),
 })
+
+const accuracyQuerySchema = z
+  .object({
+    orgId: z.string().min(1, 'orgId is required'),
+    range: z.enum(['7d', '30d', '90d', 'custom']).default('30d'),
+    startDate: z.string().datetime().optional(),
+    endDate: z.string().datetime().optional(),
+    workloadType: z.string().optional(),
+    region: z.string().optional(),
+    modelFamily: z.string().optional(),
+    groupBy: z.enum(['day', 'week', 'month']).default('day'),
+  })
+  .superRefine((value, ctx) => {
+    if (value.range === 'custom') {
+      if (!value.startDate || !value.endDate) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'startDate and endDate are required when range=custom',
+        })
+      }
+    }
+  })
 
 const percentile = (sorted: number[], p: number): number | null => {
   if (sorted.length === 0) return null
@@ -272,6 +414,377 @@ router.get('/metrics', async (req, res) => {
   }
 })
 
+router.get('/accuracy', async (req, res) => {
+  try {
+    const { orgId, range, startDate, endDate, workloadType, region, modelFamily, groupBy } =
+      accuracyQuerySchema.parse(req.query)
+
+    const { start, end } = resolveAccuracyRange(range, startDate, endDate)
+
+    const commandWhere: Prisma.CarbonCommandWhereInput = {
+      orgId,
+      createdAt: { gte: start, lte: end },
+    }
+    if (workloadType) {
+      commandWhere.workloadType = workloadType
+    }
+    if (modelFamily) {
+      commandWhere.modelFamily = modelFamily
+    }
+
+    const commands = await prisma.carbonCommand.findMany({
+      where: commandWhere,
+      select: {
+        id: true,
+        createdAt: true,
+        workloadType: true,
+        modelFamily: true,
+        selectedRegion: true,
+        estimatedSavingsKgCo2e: true,
+        executionMode: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    })
+
+    if (commands.length === 0) {
+      return res.json({
+        success: true,
+        range: {
+          startDate: start.toISOString(),
+          endDate: end.toISOString(),
+          groupBy,
+        },
+        summary: {
+          totalCommands: 0,
+          completedCommands: 0,
+          regionMatchRate: 0,
+          slaMetRate: 0,
+          avgEmissionsVariancePct: null,
+          avgLatencyVariancePct: null,
+          avgCostVariancePct: null,
+          predictionQuality: { high: 0, medium: 0, low: 0 },
+          totalEstimatedSavingsKgCo2e: 0,
+          totalVerifiedSavingsKgCo2e: 0,
+        },
+        trends: [],
+        breakdowns: { byWorkloadType: [], byRegion: [] },
+        insights: ['No command data available for the selected period.'],
+      })
+    }
+
+    const commandIds = commands.map((cmd) => cmd.id)
+    const outcomes = await prisma.carbonCommandOutcome.findMany({
+      where: {
+        commandId: { in: commandIds },
+        orgId,
+        createdAt: { gte: start, lte: end },
+      },
+      select: {
+        commandId: true,
+        actualRegion: true,
+        regionMatch: true,
+        slaMet: true,
+        emissionsVariancePct: true,
+        latencyVariancePct: true,
+        costVariancePct: true,
+        predictedEmissionsKgCo2e: true,
+        actualEmissionsKgCo2e: true,
+        predictionQuality: true,
+      },
+    })
+
+    let filteredCommands = commands
+    let filteredOutcomes = outcomes
+
+    if (region) {
+      const regionCommandIds = new Set(
+        outcomes.filter((o) => o.actualRegion === region).map((o) => o.commandId)
+      )
+      filteredOutcomes = outcomes.filter((o) => o.actualRegion === region)
+      filteredCommands = commands.filter((cmd) => regionCommandIds.has(cmd.id))
+    }
+
+    if (filteredCommands.length === 0) {
+      return res.json({
+        success: true,
+        range: {
+          startDate: start.toISOString(),
+          endDate: end.toISOString(),
+          groupBy,
+        },
+        summary: {
+          totalCommands: 0,
+          completedCommands: 0,
+          regionMatchRate: 0,
+          slaMetRate: 0,
+          avgEmissionsVariancePct: null,
+          avgLatencyVariancePct: null,
+          avgCostVariancePct: null,
+          predictionQuality: { high: 0, medium: 0, low: 0 },
+          totalEstimatedSavingsKgCo2e: 0,
+          totalVerifiedSavingsKgCo2e: 0,
+        },
+        trends: [],
+        breakdowns: { byWorkloadType: [], byRegion: [] },
+        insights: ['No command data available for the selected filters.'],
+      })
+    }
+
+    const bucketStats = new Map<
+      string,
+      {
+        start: Date
+        commands: number
+        completed: number
+        regionMatchCount: number
+        slaMetCount: number
+        emissionsVariance: (number | null)[]
+        verifiedSavings: number[]
+      }
+    >()
+    const workloadStats = new Map<
+      string,
+      {
+        commands: number
+        completed: number
+        emissionsVariance: (number | null)[]
+        verifiedSavings: number[]
+      }
+    >()
+    const regionStats = new Map<
+      string,
+      {
+        commands: number
+        completed: number
+        regionMatchCount: number
+        emissionsVariance: (number | null)[]
+        verifiedSavings: number[]
+      }
+    >()
+    const commandMeta = new Map<
+      string,
+      {
+        createdAt: Date
+        workloadType: string | null
+        selectedRegion: string | null
+        estimatedSavings: number
+      }
+    >()
+
+    const groupStartFn = groupStarts[groupBy]
+
+    const getBucket = (date: Date) => {
+      const bucketStart = groupStartFn(date)
+      const key = formatISO(bucketStart)
+      if (!bucketStats.has(key)) {
+        bucketStats.set(key, {
+          start: bucketStart,
+          commands: 0,
+          completed: 0,
+          regionMatchCount: 0,
+          slaMetCount: 0,
+          emissionsVariance: [],
+          verifiedSavings: [],
+        })
+      }
+      return bucketStats.get(key)!
+    }
+
+    const ensureWorkloadStat = (key: string) => {
+      if (!workloadStats.has(key)) {
+        workloadStats.set(key, {
+          commands: 0,
+          completed: 0,
+          emissionsVariance: [],
+          verifiedSavings: [],
+        })
+      }
+      return workloadStats.get(key)!
+    }
+
+    const ensureRegionStat = (key: string) => {
+      if (!regionStats.has(key)) {
+        regionStats.set(key, {
+          commands: 0,
+          completed: 0,
+          regionMatchCount: 0,
+          emissionsVariance: [],
+          verifiedSavings: [],
+        })
+      }
+      return regionStats.get(key)!
+    }
+
+    filteredCommands.forEach((command) => {
+      commandMeta.set(command.id, {
+        createdAt: command.createdAt,
+        workloadType: command.workloadType ?? null,
+        selectedRegion: command.selectedRegion ?? null,
+        estimatedSavings: command.estimatedSavingsKgCo2e ?? 0,
+      })
+      const bucket = getBucket(command.createdAt)
+      bucket.commands += 1
+      const workloadKey = command.workloadType ?? 'unknown'
+      ensureWorkloadStat(workloadKey).commands += 1
+    })
+
+    let regionMatchCount = 0
+    let slaMetCount = 0
+    let slaConsidered = 0
+    const emissionsVarianceValues: (number | null)[] = []
+    const latencyVarianceValues: (number | null)[] = []
+    const costVarianceValues: (number | null)[] = []
+    let verifiedSavingsTotal = 0
+
+    filteredOutcomes.forEach((outcome) => {
+      const command = commandMeta.get(outcome.commandId)
+      if (!command) return
+
+      const bucket = getBucket(command.createdAt)
+      bucket.completed += 1
+
+      if (outcome.regionMatch) {
+        bucket.regionMatchCount += 1
+        regionMatchCount += 1
+      }
+      if (typeof outcome.slaMet === 'boolean') {
+        slaConsidered += 1
+        if (outcome.slaMet) {
+          bucket.slaMetCount += 1
+          slaMetCount += 1
+        }
+      }
+
+      if (typeof outcome.emissionsVariancePct === 'number') {
+        bucket.emissionsVariance.push(outcome.emissionsVariancePct)
+        emissionsVarianceValues.push(outcome.emissionsVariancePct)
+      } else {
+        bucket.emissionsVariance.push(null)
+        emissionsVarianceValues.push(null)
+      }
+      latencyVarianceValues.push(
+        typeof outcome.latencyVariancePct === 'number' ? outcome.latencyVariancePct : null
+      )
+      costVarianceValues.push(
+        typeof outcome.costVariancePct === 'number' ? outcome.costVariancePct : null
+      )
+
+      const predicted = outcome.predictedEmissionsKgCo2e ?? 0
+      const actual = outcome.actualEmissionsKgCo2e ?? predicted
+      const verifiedSavings = Math.max(predicted - actual, 0)
+      bucket.verifiedSavings.push(verifiedSavings)
+      verifiedSavingsTotal += verifiedSavings
+
+      const workloadKey = command.workloadType ?? 'unknown'
+      const workloadStat = ensureWorkloadStat(workloadKey)
+      workloadStat.completed += 1
+      workloadStat.emissionsVariance.push(outcome.emissionsVariancePct ?? null)
+      workloadStat.verifiedSavings.push(verifiedSavings)
+
+      const regionKey = outcome.actualRegion ?? command.selectedRegion ?? 'unknown'
+      const regionStat = ensureRegionStat(regionKey)
+      regionStat.commands += 1
+      regionStat.completed += 1
+      if (outcome.regionMatch) {
+        regionStat.regionMatchCount += 1
+      }
+      regionStat.emissionsVariance.push(outcome.emissionsVariancePct ?? null)
+      regionStat.verifiedSavings.push(verifiedSavings)
+    })
+
+    const totalEstimatedSavings = filteredCommands.reduce(
+      (sum, cmd) => sum + (cmd.estimatedSavingsKgCo2e ?? 0),
+      0
+    )
+
+    const summary: AccuracySummary = {
+      totalCommands: filteredCommands.length,
+      completedCommands: filteredOutcomes.length,
+      regionMatchRate: rate(regionMatchCount, filteredOutcomes.length),
+      slaMetRate: rate(slaMetCount, slaConsidered || filteredOutcomes.length),
+      avgEmissionsVariancePct: safeAvg(emissionsVarianceValues),
+      avgLatencyVariancePct: safeAvg(latencyVarianceValues),
+      avgCostVariancePct: safeAvg(costVarianceValues),
+      predictionQuality: {
+        high: filteredOutcomes.filter((o) => o.predictionQuality === 'HIGH').length,
+        medium: filteredOutcomes.filter((o) => o.predictionQuality === 'MEDIUM').length,
+        low: filteredOutcomes.filter((o) => o.predictionQuality === 'LOW').length,
+      },
+      totalEstimatedSavingsKgCo2e: Number(totalEstimatedSavings.toFixed(3)),
+      totalVerifiedSavingsKgCo2e: Number(verifiedSavingsTotal.toFixed(3)),
+    }
+
+    const trends: TrendRow[] = Array.from(bucketStats.values())
+      .sort((a, b) => a.start.getTime() - b.start.getTime())
+      .map((bucket) => ({
+        date: formatISO(bucket.start, { representation: 'date' }),
+        commands: bucket.commands,
+        completed: bucket.completed,
+        regionMatchRate: rate(bucket.regionMatchCount, bucket.completed),
+        slaMetRate: rate(bucket.slaMetCount, bucket.completed || bucket.slaMetCount),
+        avgEmissionsVariancePct: safeAvg(bucket.emissionsVariance),
+        verifiedSavingsKgCo2e: Number(
+          bucket.verifiedSavings.reduce((sum, v) => sum + v, 0).toFixed(3)
+        ),
+      }))
+
+    const breakdowns = {
+      byWorkloadType: Array.from(workloadStats.entries())
+        .map(([workloadType, stats]) => ({
+          key: workloadType || 'unknown',
+          workloadType,
+          commands: stats.commands,
+          completed: stats.completed,
+          avgEmissionsVariancePct: safeAvg(stats.emissionsVariance),
+          verifiedSavingsKgCo2e: Number(
+            stats.verifiedSavings.reduce((sum, v) => sum + v, 0).toFixed(3)
+          ),
+        }))
+        .sort((a, b) => b.verifiedSavingsKgCo2e - a.verifiedSavingsKgCo2e),
+      byRegion: Array.from(regionStats.entries())
+        .map(([region, stats]) => ({
+          key: region || 'unknown',
+          region,
+          commands: stats.commands,
+          completed: stats.completed,
+          avgEmissionsVariancePct: safeAvg(stats.emissionsVariance),
+          verifiedSavingsKgCo2e: Number(
+            stats.verifiedSavings.reduce((sum, v) => sum + v, 0).toFixed(3)
+          ),
+          regionMatchRate: rate(stats.regionMatchCount, stats.completed),
+        }))
+        .sort((a, b) => b.verifiedSavingsKgCo2e - a.verifiedSavingsKgCo2e),
+    }
+
+    const insights = buildInsightMessages(summary, breakdowns)
+
+    return res.json({
+      success: true,
+      range: {
+        startDate: start.toISOString(),
+        endDate: end.toISOString(),
+        groupBy,
+      },
+      summary,
+      trends,
+      breakdowns,
+      insights,
+    })
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_REQUEST', message: 'Invalid request', details: error.errors },
+      })
+    }
+    console.error('Dashboard accuracy error:', error)
+    return res.status(500).json({
+      success: false,
+      error: { code: 'SERVER_ERROR', message: 'Internal server error' },
+    })
+  }
+})
+
 router.get('/region-mapping', async (_req, res) => {
   try {
     const decisions = await prisma.dashboardRoutingDecision.findMany({
@@ -378,22 +891,22 @@ router.post('/what-if/intensities', async (req, res) => {
 
 router.get('/regions', async (_req, res) => {
   try {
-    const regions = await prisma.region.findMany({
+    const regions = (await prisma.region.findMany({
       where: { enabled: true },
       select: { code: true, name: true, country: true },
       orderBy: { code: 'asc' },
-    })
+    })) as { code: string; name: string | null; country: string | null }[]
 
     const enriched = await Promise.all(
-      regions.map(async (r) => {
+      regions.map(async (regionRecord: { code: string; name: string | null; country: string | null }) => {
         const latest = await prisma.carbonIntensity.findFirst({
-          where: { region: r.code },
+          where: { region: regionRecord.code },
           orderBy: { timestamp: 'desc' },
           select: { carbonIntensity: true, timestamp: true },
         })
 
         return {
-          ...r,
+          ...regionRecord,
           carbonIntensityGPerKwh: latest?.carbonIntensity ?? null,
           fetchedAt: latest?.timestamp ?? null,
         }
