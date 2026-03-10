@@ -5,6 +5,7 @@ import { writeAuditLog } from '../lib/governance/audit'
 import { checkOrgPolicy } from '../lib/governance/risk'
 import { detectAnomaly } from '../lib/governance/watchtower'
 import { consumeBudget } from '../lib/carbon-budget'
+import { emitDekesHandoff } from '../lib/dekes-handoff'
 
 const router = Router()
 
@@ -252,6 +253,28 @@ router.post('/', async (req, res) => {
             },
             result: 'SUCCESS',
             riskTier: budgetState.status === 'exceeded' ? 'HIGH' : 'MEDIUM',
+          })
+          // Emit DEKES handoff — fire-and-forget, never blocks response.
+          void emitDekesHandoff({
+            organizationId: organizationId!,
+            decisionId: created.id,
+            decisionFrameId: value.decisionFrameId ?? undefined,
+            eventType: budgetState.status === 'exceeded' ? 'BUDGET_EXCEEDED' : 'BUDGET_WARNING',
+            severity:  budgetState.status === 'exceeded' ? 'high' : 'medium',
+            routing: {
+              selectedRegion:          chosenRegion,
+              baselineRegion:          baselineRegion,
+              carbonIntensity:         carbonIntensityChosenGPerKwh ?? 0,
+              baselineCarbonIntensity: carbonIntensityBaselineGPerKwh ?? undefined,
+            },
+            budget: {
+              budgetCO2Grams:    budgetState.budgetCO2Grams,
+              consumedCO2Grams:  budgetState.consumedCO2Grams,
+              remainingCO2Grams: budgetState.remainingCO2Grams,
+              utilizationPct:    budgetState.utilizationPct,
+              status:            budgetState.status,
+              periodEnd:         budgetState.periodEnd,
+            },
           })
         }
       })

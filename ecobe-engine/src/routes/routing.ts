@@ -5,6 +5,7 @@ import { saveDecisionSnapshot } from '../lib/decision-snapshot'
 import { predictCleanWindow } from '../lib/carbon-window-prediction'
 import { createLease, revalidateLease } from '../lib/decision-lease'
 import { ingestDecision } from '../lib/decision-ingest'
+import { emitDekesHandoff } from '../lib/dekes-handoff'
 import { prisma } from '../lib/db'
 import { logger } from '../lib/logger'
 
@@ -80,6 +81,28 @@ router.post('/green', async (req, res) => {
     // Policy gate: if org requires green routing and the best available region still
     // violates the ceiling, return a delay recommendation instead of a route.
     if (requireGreen && enforcedMaxCarbon && result.carbonIntensity > enforcedMaxCarbon) {
+      // Emit POLICY_DELAY event to DEKES — fire-and-forget, never blocks the response.
+      if (organizationId) {
+        void emitDekesHandoff({
+          organizationId,
+          decisionFrameId: result.decisionFrameId,
+          eventType: 'POLICY_DELAY',
+          severity: 'medium',
+          routing: {
+            selectedRegion:  result.selectedRegion,
+            carbonIntensity: result.carbonIntensity,
+            qualityTier:     result.qualityTier,
+          },
+          policy: {
+            maxCarbonGPerKwh:    enforcedMaxCarbon,
+            requireGreenRouting: true,
+            actionTaken:         'delay',
+            retryAfterMinutes:   delayWindowMinutes,
+          },
+          explanation: `All regions exceed policy ceiling of ${enforcedMaxCarbon} gCO2/kWh. Best available: ${result.selectedRegion} at ${result.carbonIntensity} gCO2/kWh. Retry after ${delayWindowMinutes} minutes.`,
+        })
+      }
+
       return res.status(202).json({
         action: 'delay',
         reason: 'carbon_policy_violation',

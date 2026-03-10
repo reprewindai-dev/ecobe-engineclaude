@@ -19,6 +19,7 @@ import { prisma } from './db'
 import { writeAuditLog } from './governance/audit'
 import { detectAnomaly } from './governance/watchtower'
 import { consumeBudget } from './carbon-budget'
+import { emitDekesHandoff } from './dekes-handoff'
 
 export interface IngestDecisionInput {
   organizationId?: string
@@ -111,7 +112,34 @@ export async function ingestDecision(
   })
 
   if (input.organizationId && (input.co2ChosenG ?? 0) > 0) {
-    void consumeBudget(input.organizationId, input.co2ChosenG ?? 0).catch(() => {})
+    void consumeBudget(input.organizationId, input.co2ChosenG ?? 0)
+      .then((budgetState) => {
+        if (budgetState && budgetState.status !== 'within') {
+          // Emit DEKES handoff — fire-and-forget, never blocks caller.
+          void emitDekesHandoff({
+            organizationId:  input.organizationId!,
+            decisionId:      created.id as string,
+            decisionFrameId: input.decisionFrameId,
+            eventType: budgetState.status === 'exceeded' ? 'BUDGET_EXCEEDED' : 'BUDGET_WARNING',
+            severity:  budgetState.status === 'exceeded' ? 'high' : 'medium',
+            routing: {
+              selectedRegion:          input.chosenRegion,
+              baselineRegion:          input.baselineRegion,
+              carbonIntensity:         input.carbonIntensityChosenGPerKwh ?? 0,
+              baselineCarbonIntensity: input.carbonIntensityBaselineGPerKwh,
+            },
+            budget: {
+              budgetCO2Grams:    budgetState.budgetCO2Grams,
+              consumedCO2Grams:  budgetState.consumedCO2Grams,
+              remainingCO2Grams: budgetState.remainingCO2Grams,
+              utilizationPct:    budgetState.utilizationPct,
+              status:            budgetState.status,
+              periodEnd:         budgetState.periodEnd,
+            },
+          })
+        }
+      })
+      .catch(() => {})
   }
 
   return { id: created.id as string, skipped: false }
