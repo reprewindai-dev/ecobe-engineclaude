@@ -2,6 +2,8 @@ import { prisma } from './db'
 import { getBestCarbonSignal } from './carbon/provider-router'
 import { assembleDecisionFrame } from './decision-data-assembler'
 import { reconcileForecastActuals, computeRankingStability } from './forecast-scorecard'
+import { getCachedGridSignal } from './grid-signals/grid-signal-cache'
+import type { GridSignalSnapshot } from './grid-signals/types'
 
 export interface RoutingRequest {
   preferredRegions: string[]
@@ -106,6 +108,50 @@ export interface RoutingResult {
    * This feeds into qualityTier but is also surfaced explicitly for transparency.
    */
   provider_disagreement: { flag: boolean; pct: number | null } | null
+
+  // ── Grid Signal Intelligence enrichment (non-routing, EIA-930 + WattTime) ────
+  // All fields are optional. Null = enrichment not available for this region.
+  // NEVER used as routing truth — for observability and scheduling hints only.
+
+  /** EIA-930 Balancing Authority code for the selected region */
+  balancingAuthority?: string | null
+
+  /**
+   * Demand change percentage (signed) vs. prior hour, from EIA-930 BALANCE.
+   * Positive = rising demand. Leading indicator of fossil ramp pressure.
+   */
+  demandRampPct?: number | null
+
+  /**
+   * Probability 0–1 that a carbon intensity spike is imminent in the selected region.
+   * Derived from: rising demand + high fossil ratio + import pressure + forecast instability.
+   */
+  carbonSpikeProbability?: number | null
+
+  /**
+   * Probability 0–1 that renewable curtailment is occurring or imminent.
+   * High curtailment → cheap clean energy window, especially for flexible loads.
+   */
+  curtailmentProbability?: number | null
+
+  /**
+   * Carbon leakage score 0–1 for the selected region.
+   * Measures how much the zone's emissions are under-reported due to fossil imports.
+   * 0 = self-sufficient or clean imports, 1 = heavy fossil import dependency.
+   */
+  importCarbonLeakageScore?: number | null
+
+  /**
+   * True if any grid signal input was estimated (not measured).
+   * Present when EIA-930 data quality is flagged as estimated.
+   */
+  estimatedFlag?: boolean
+
+  /**
+   * True if grid signals were synthetically modeled (no real EIA-930 data available).
+   * When true, treat predictive enrichment fields as advisory only.
+   */
+  syntheticFlag?: boolean
 }
 
 // ─── Policy mode weight presets ───────────────────────────────────────────────
@@ -419,6 +465,14 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
   const best = scored[0]
   const worstLiveCi = Math.max(...regionData.map((r) => r.carbonIntensity))
 
+  // Non-blocking grid signal enrichment from cache (no live fetch here)
+  let gridSignal: GridSignalSnapshot | null = null
+  try {
+    gridSignal = await getCachedGridSignal(best.region)
+  } catch {
+    // Cache unavailable — proceed without enrichment
+  }
+
   return {
     selectedRegion: best.region,
     carbonIntensity: best.carbonIntensity,
@@ -440,5 +494,13 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
       carbonIntensity: r.carbonIntensity,
       score: r.score,
     })),
+    // Grid signal enrichment (all optional, null = not available)
+    balancingAuthority: gridSignal?.balancingAuthority ?? null,
+    demandRampPct: gridSignal?.demandChangePct ?? null,
+    carbonSpikeProbability: gridSignal?.carbonSpikeProbability ?? null,
+    curtailmentProbability: gridSignal?.curtailmentProbability ?? null,
+    importCarbonLeakageScore: gridSignal?.importCarbonLeakageScore ?? null,
+    estimatedFlag: gridSignal?.estimatedFlag,
+    syntheticFlag: gridSignal?.syntheticFlag,
   }
 }

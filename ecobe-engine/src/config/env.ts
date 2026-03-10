@@ -55,6 +55,17 @@ const envSchema = z.object({
   // Electricity Maps — forecast horizon hours (24, 48, or 72; default: 24)
   // Higher values require a higher-tier API plan.
   EM_FORECAST_HORIZON_HOURS: z.enum(['24', '48', '72']).optional(),
+
+  // EIA-930 Open Data API (https://www.eia.gov/opendata/)
+  // Rate limit: 1000 req/hour per key. Required for grid signal intelligence.
+  EIA930_API_KEY: z.string().optional(),
+  // Polling interval in minutes (default: 5). Minimum: 1.
+  EIA930_POLLING_INTERVAL_MIN: z.string().optional(),
+
+  // WattTime v3 API (https://docs.watttime.org/)
+  // Username + password for JWT auth. Alternative: WATTTIME_API_KEY (legacy).
+  WATTTIME_USERNAME: z.string().optional(),
+  WATTTIME_PASSWORD: z.string().optional(),
 })
 
 const parsed = envSchema.safeParse(process.env)

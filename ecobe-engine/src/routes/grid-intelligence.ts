@@ -21,31 +21,16 @@
  */
 
 import { Router, Request, Response } from 'express'
-import {
-  assembleGridSnapshot,
-  assembleGridSnapshots,
-  findGreenestZone,
-  getElectricityMix,
-  getElectricityMixForecast,
-  getElectricityFlows,
-  getElectricityFlowsForecast,
-  getNetLoad,
-  getNetLoadForecast,
-  getDayAheadPrice,
-  getDayAheadPriceForecast,
-  getZoneLevelSummary,
-  isGreenSchedulingWindow,
-  evaluateFossilSpikeRisk,
-  evaluateFossilSpikeRiskMultiZone,
-  getZoneTrustProfile,
-  rankZonesByTrust,
-  getAccessibleZones,
-  getFullAccessZones,
-  getDataCenters,
-  getZoneForDataCenter,
-  optimizeComputeJob,
-  optimizeChargingJob,
-} from '../lib/electricity-maps'
+import { assembleGridSnapshot, assembleGridSnapshots, findGreenestZone } from '../lib/electricity-maps/grid-snapshot'
+import { getElectricityMix, getElectricityMixForecast } from '../lib/electricity-maps/generation'
+import { getElectricityFlows, getElectricityFlowsForecast } from '../lib/electricity-maps/flows'
+import { getNetLoad, getNetLoadForecast } from '../lib/electricity-maps/netload'
+import { getDayAheadPrice, getDayAheadPriceForecast } from '../lib/electricity-maps/price'
+import { getZoneLevelSummary, isGreenSchedulingWindow } from '../lib/electricity-maps/levels'
+import { evaluateFossilSpikeRisk, evaluateFossilSpikeRiskMultiZone } from '../lib/electricity-maps/fossil-spike'
+import { getZoneTrustProfile, rankZonesByTrust } from '../lib/electricity-maps/grid-trust'
+import { getAccessibleZones, getFullAccessZones, getDataCenters, getZoneForDataCenter } from '../lib/electricity-maps/zones'
+import { optimizeComputeJob, optimizeChargingJob } from '../lib/electricity-maps/optimizers'
 
 const router = Router()
 

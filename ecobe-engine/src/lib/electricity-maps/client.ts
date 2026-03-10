@@ -13,7 +13,7 @@
  * The client does NOT implement caching or polling — those live in service modules above it.
  */
 
-import axios, { AxiosInstance } from 'axios'
+import axios from 'axios'
 import { env } from '../../config/env'
 import { recordIntegrationFailure, recordIntegrationSuccess } from '../integration-metrics'
 import type {
@@ -44,7 +44,7 @@ import type {
 const PROVIDER = 'ELECTRICITY_MAPS'
 
 export class ElectricityMapsFullClient {
-  private readonly http: AxiosInstance
+  private readonly http: ReturnType<typeof axios.create>
 
   constructor() {
     this.http = axios.create({

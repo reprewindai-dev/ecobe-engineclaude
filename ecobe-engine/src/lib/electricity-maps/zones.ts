@@ -174,5 +174,5 @@ export async function getUpdatedSince(params: {
     limit: params.limit,
   })
   if (!res) return []
-  return res.updates
+  return res.updates.map((u) => ({ updatedAt: u.updated_at, datetime: u.datetime }))
 }
