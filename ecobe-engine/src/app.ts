@@ -20,6 +20,7 @@ import methodologyRoutes from './routes/methodology'
 import budgetsRoutes from './routes/budgets'
 import intelligenceRoutes from './routes/intelligence'
 import workloadsRoutes from './routes/workloads'
+import integrationsRoutes from './routes/integrations'
 import { attachOrgContext } from './middleware/governance'
 
 function attachHealthRoutes(app: express.Express) {
@@ -286,6 +287,7 @@ function attachApiRoutes(app: express.Express) {
   app.use('/api/v1/budgets', budgetsRoutes)
   app.use('/api/v1/intelligence', intelligenceRoutes)
   app.use('/api/v1/workloads', workloadsRoutes)
+  app.use('/api/v1/integrations', integrationsRoutes)
 }
 
 function attachFallbackHandlers(app: express.Express) {

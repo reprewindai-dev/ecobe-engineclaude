@@ -11,6 +11,9 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { routeGreen } from '../lib/green-routing'
+import { saveDecisionSnapshot } from '../lib/decision-snapshot'
+import { createLease } from '../lib/decision-lease'
+import { ingestDecision } from '../lib/decision-ingest'
 import { findOptimalWindow } from '../lib/carbon-forecasting'
 
 const router = Router()
@@ -95,6 +98,59 @@ router.post('/carbon-route', async (req, res) => {
 
     const selectedRunner = regionToRunner.get(routingResult.selectedRegion) ?? runners[0]!.name
 
+    // Wire into integrity system — snapshot, lease, and dashboard savings.
+    // All three are fire-and-forget so they never block the CI response.
+    const maxCI = Math.max(...allIntensities)
+    const baselineRegion =
+      routingResult.alternatives.find((a) => a.carbonIntensity === maxCI)?.region ?? regions[0]!
+
+    const ciSignalSnapshot = Object.fromEntries(
+      regions.map((r) => [r, {
+        intensity: r === routingResult.selectedRegion
+          ? routingResult.carbonIntensity
+          : (routingResult.alternatives.find((a) => a.region === r)?.carbonIntensity ?? 0),
+        source: null,
+        fallbackUsed: false,
+        disagreementFlag: null,
+      }]),
+    )
+
+    let ciLeaseFields: import('../lib/decision-lease').LeaseFields | null = null
+
+    if (routingResult.decisionFrameId) {
+      void saveDecisionSnapshot({
+        decisionFrameId: routingResult.decisionFrameId,
+        request: {
+          preferredRegions: regions,
+          carbonWeight: carbon_weight,
+          latencyWeight: (1 - carbon_weight) / 2,
+          costWeight: (1 - carbon_weight) / 2,
+        },
+        result: routingResult,
+        signalSnapshot: ciSignalSnapshot,
+        source: 'CI',
+        workloadType: body.workload_type,
+      })
+
+      ciLeaseFields = await createLease(
+        routingResult.decisionFrameId,
+        undefined,
+        routingResult,
+        { preferredRegions: regions },
+        { source: 'CI', workloadType: body.workload_type },
+      ).catch(() => null)
+
+      void ingestDecision({
+        decisionFrameId: routingResult.decisionFrameId,
+        baselineRegion,
+        chosenRegion: routingResult.selectedRegion,
+        carbonIntensityBaselineGPerKwh: Math.round(maxCI),
+        carbonIntensityChosenGPerKwh: Math.round(routingResult.carbonIntensity),
+        workloadName: 'CI',
+        meta: { source: 'CI', workload_type: body.workload_type, selected_runner: selectedRunner },
+      })
+    }
+
     // Optionally find a better time window if caller allows delay
     let optimalWindow = null
     let recommendation: 'run_now' | 'delay' = 'run_now'
@@ -135,6 +191,8 @@ router.post('/carbon-route', async (req, res) => {
         score: Math.round(a.score * 1000) / 1000,
       })),
       timestamp: new Date().toISOString(),
+      ...(routingResult.decisionFrameId ? { decision_id: routingResult.decisionFrameId } : {}),
+      ...(ciLeaseFields ?? {}),
     })
   } catch (error: any) {
     if (error instanceof z.ZodError) {

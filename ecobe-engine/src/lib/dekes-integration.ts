@@ -9,6 +9,9 @@
 import { addHours, addMinutes } from 'date-fns'
 import { prisma } from './db'
 import { routeGreen } from './green-routing'
+import { saveDecisionSnapshot } from './decision-snapshot'
+import { createLease } from './decision-lease'
+import { ingestDecision } from './decision-ingest'
 import { getForecastSignals } from './carbon/provider-router'
 import { CarbonSignal } from './carbon/types'
 
@@ -35,6 +38,10 @@ export interface DekesOptimizeResult {
     score: number
   }>
   workloadId: string
+  decisionFrameId?: string      // lease/snapshot ID — use for revalidate and replay
+  lease_id?: string
+  lease_expires_at?: string
+  must_revalidate_after?: string
 }
 
 export interface DekesScheduleEntry {
@@ -113,6 +120,55 @@ export async function optimizeQuery(
     },
   })
 
+  // Wire into the integrity system — snapshot, lease, and dashboard savings.
+  // All three are fire-and-forget so they never block the DEKES response.
+  let leaseFields: import('./decision-lease').LeaseFields | null = null
+
+  if (routingResult.decisionFrameId) {
+    const allIntensities = [routingResult.carbonIntensity, ...routingResult.alternatives.map((a) => a.carbonIntensity)]
+    const baselineIntensity = Math.max(...allIntensities)
+    const baselineRegion =
+      routingResult.alternatives.find((a) => a.carbonIntensity === baselineIntensity)?.region ?? regions[0]!
+
+    const signalSnapshot = Object.fromEntries(
+      regions.map((r) => [r, {
+        intensity: r === routingResult.selectedRegion
+          ? routingResult.carbonIntensity
+          : (routingResult.alternatives.find((a) => a.region === r)?.carbonIntensity ?? 0),
+        source: null,
+        fallbackUsed: false,
+        disagreementFlag: null,
+      }]),
+    )
+
+    void saveDecisionSnapshot({
+      decisionFrameId: routingResult.decisionFrameId,
+      request: { preferredRegions: regions, maxCarbonGPerKwh: carbonBudget },
+      result: routingResult,
+      signalSnapshot,
+      source: 'DEKES',
+      workloadType: 'query_optimization',
+    })
+
+    leaseFields = await createLease(
+      routingResult.decisionFrameId,
+      undefined,
+      routingResult,
+      { preferredRegions: regions, maxCarbonGPerKwh: carbonBudget },
+      { source: 'DEKES', workloadType: 'query_optimization' },
+    ).catch(() => null)
+
+    void ingestDecision({
+      decisionFrameId: routingResult.decisionFrameId,
+      baselineRegion,
+      chosenRegion: routingResult.selectedRegion,
+      carbonIntensityBaselineGPerKwh: Math.round(baselineIntensity),
+      carbonIntensityChosenGPerKwh: Math.round(routingResult.carbonIntensity),
+      workloadName: 'DEKES',
+      meta: { source: 'DEKES', queryId: query.id },
+    })
+  }
+
   return {
     queryId: query.id,
     selectedRegion: routingResult.selectedRegion,
@@ -123,6 +179,8 @@ export async function optimizeQuery(
     savings,
     alternatives: routingResult.alternatives,
     workloadId: workload.id,
+    ...(routingResult.decisionFrameId ? { decisionFrameId: routingResult.decisionFrameId } : {}),
+    ...(leaseFields ?? {}),
   }
 }
 
