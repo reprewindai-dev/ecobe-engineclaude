@@ -51,6 +51,10 @@ const envSchema = z.object({
   // Dev-only escape hatch: allow unauthenticated access when no API key is configured.
   // NEVER set to true in production.
   ALLOW_INSECURE_NO_API_KEY: z.string().optional(),
+
+  // Electricity Maps — forecast horizon hours (24, 48, or 72; default: 24)
+  // Higher values require a higher-tier API plan.
+  EM_FORECAST_HORIZON_HOURS: z.enum(['24', '48', '72']).optional(),
 })
 
 const parsed = envSchema.safeParse(process.env)
