@@ -4,6 +4,7 @@ import { routeGreen } from '../lib/green-routing'
 import { saveDecisionSnapshot } from '../lib/decision-snapshot'
 import { predictCleanWindow } from '../lib/carbon-window-prediction'
 import { createLease, revalidateLease } from '../lib/decision-lease'
+import { ingestDecision } from '../lib/decision-ingest'
 import { prisma } from '../lib/db'
 import { logger } from '../lib/logger'
 
@@ -139,6 +140,32 @@ router.post('/green', async (req, res) => {
         { ...data, preferredRegions: regions },
         { source: data.source, workloadType: data.workloadType },
       ).catch(() => null)
+
+      // Auto-write to DashboardRoutingDecision so savings/integrity metrics are populated
+      // regardless of whether the client also calls POST /api/v1/decisions.
+      // Uses decisionFrameId for deduplication — safe if client enriches later.
+      const allIntensities = [result.carbonIntensity, ...result.alternatives.map((a) => a.carbonIntensity)]
+      const baselineCI = Math.max(...allIntensities)
+      const baselineRegion =
+        result.alternatives.find((a) => a.carbonIntensity === baselineCI)?.region ?? regions[0]!
+
+      void ingestDecision({
+        organizationId,
+        decisionFrameId: result.decisionFrameId,
+        baselineRegion,
+        chosenRegion: result.selectedRegion,
+        carbonIntensityBaselineGPerKwh: Math.round(baselineCI),
+        carbonIntensityChosenGPerKwh: Math.round(result.carbonIntensity),
+        explanation: result.explanation,
+        fallbackUsed: signalSnapshot[result.selectedRegion]?.fallbackUsed ?? false,
+        sourceUsed: signalSnapshot[result.selectedRegion]?.source ?? undefined,
+        workloadName: data.source ?? undefined,
+        meta: {
+          source: data.source,
+          workloadType: data.workloadType,
+          policyMode: data.policyMode,
+        },
+      })
     }
 
     res.json({

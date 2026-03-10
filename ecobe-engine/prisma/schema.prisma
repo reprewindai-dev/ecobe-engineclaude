@@ -157,6 +157,10 @@ model DashboardRoutingDecision {
 
   meta Json @default("{}")
 
+  // Links this record back to the routing decision that produced it.
+  // Unique — prevents duplicate rows when both engine auto-write and client POST /decisions run.
+  decisionFrameId String? @unique
+
   @@index([createdAt])
   @@index([organizationId, createdAt])
   @@index([baselineRegion])
