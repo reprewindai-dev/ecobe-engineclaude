@@ -17,6 +17,9 @@ import type {
   OpportunityResult,
   BestWindowRequest,
   BestWindowResult,
+  DekesIntegrationSummary,
+  DekesHandoff,
+  DekesOrgRisk,
 } from '@/types'
 
 const API_BASE = process.env.NEXT_PUBLIC_ECOBE_API_URL || '/api/ecobe'
@@ -229,6 +232,33 @@ export const ecobeApi = {
 
   async getBestWindow(request: BestWindowRequest): Promise<BestWindowResult> {
     const { data } = await api.post('/intelligence/best-window', request)
+    return data
+  },
+
+  // ── DEKES Integration ─────────────────────────────────────────────────────────
+  // Read-only — handoffs are emitted by the ECOBE engine, never by the dashboard.
+  // All routes resolve through the existing /api/ecobe proxy → ECOBE engine.
+  async getDekesIntegrationSummary(): Promise<DekesIntegrationSummary> {
+    const { data } = await api.get('/integrations/dekes/summary')
+    return data
+  },
+
+  async getDekesIntegrationEvents(
+    limit = 50
+  ): Promise<{ handoffs: DekesHandoff[] }> {
+    const { data } = await api.get('/integrations/dekes/events', {
+      params: { limit },
+    })
+    return data
+  },
+
+  async getDekesHandoffById(handoffId: string): Promise<DekesHandoff> {
+    const { data } = await api.get(`/integrations/dekes/events/${encodeURIComponent(handoffId)}`)
+    return data
+  },
+
+  async getDekesIntegrationMetrics(): Promise<{ orgRisks: DekesOrgRisk[] }> {
+    const { data } = await api.get('/integrations/dekes/metrics')
     return data
   },
 

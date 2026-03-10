@@ -428,3 +428,82 @@ export function getStabilityColor(stability: ForecastStability | null): string {
   }
   return colors[stability]
 }
+
+// ─── DEKES Integration ────────────────────────────────────────────────────────
+// All types below are READ-ONLY from the dashboard's perspective.
+// Handoffs are emitted by the ECOBE engine — never written by the dashboard.
+
+export type DekesHandoffEventType =
+  | 'BUDGET_WARNING'
+  | 'BUDGET_EXCEEDED'
+  | 'POLICY_DELAY'
+  | 'POLICY_BLOCK'
+  | 'HIGH_CARBON_PATTERN'
+  | 'LOW_CONFIDENCE_REGION'
+  | 'CLEAN_WINDOW_OPPORTUNITY'
+  | 'PROVIDER_DISAGREEMENT_ALERT'
+  | 'EXECUTION_DRIFT_RISK'
+  | 'ROUTING_POLICY_INSIGHT'
+
+export type HandoffSeverity = 'low' | 'medium' | 'high' | 'critical'
+export type HandoffStatus = 'queued' | 'processing' | 'processed' | 'ignored' | 'failed'
+export type HandoffClassification = 'opportunity' | 'informational' | 'risk' | 'no_action'
+
+export interface DekesHandoff {
+  handoffId: string
+  organizationId: string
+  decisionId: string | null
+  decisionFrameId: string | null
+  eventType: DekesHandoffEventType
+  severity: HandoffSeverity
+  timestamp: string
+  status: HandoffStatus
+  dekesClassification: HandoffClassification | null
+  dekesActionType: string | null
+  dekesActionId: string | null
+  processedAt: string | null
+  routing: {
+    selectedRegion: string
+    baselineRegion: string
+    carbonIntensity: number
+    carbonDeltaGPerKwh: number
+    qualityTier: QualityTier
+    forecastStability: ForecastStability | null
+    score: number
+  } | null
+  budget: {
+    status: 'ok' | 'warning' | 'exceeded'
+    usedCO2Grams: number
+    remainingCO2Grams: number
+  } | null
+  policy: {
+    policyName: string | null
+    actionTaken: string | null
+  } | null
+  explanation: string | null
+  replayUrl: string | null
+}
+
+export interface DekesIntegrationSummary {
+  total: number
+  queued: number
+  processing: number
+  processed: number
+  ignored: number
+  failed: number
+  byEventType: Partial<Record<DekesHandoffEventType, number>>
+  opportunitiesGenerated: number
+  actionsCreated: number
+  highPriorityOrgs: number
+  avgProcessingLatencyMs: number | null
+}
+
+export interface DekesOrgRisk {
+  organizationId: string
+  budgetStatus: 'ok' | 'warning' | 'exceeded'
+  highCarbonPatternCount: number
+  policyDelayCount: number
+  latestHandoffType: DekesHandoffEventType | null
+  latestClassification: HandoffClassification | null
+  totalHandoffs: number
+}

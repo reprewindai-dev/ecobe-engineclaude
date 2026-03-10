@@ -23,8 +23,10 @@ import { BestWindowPanel } from '@/components/BestWindowPanel'
 import { IntegrationSourcesPanel } from '@/components/IntegrationSourcesPanel'
 import { DekesImpactCard } from '@/components/DekesImpactCard'
 import { WorkloadImpactGraph } from '@/components/WorkloadImpactGraph'
+import { DekesHandoffPanel } from '@/components/DekesHandoffPanel'
+import { OrgRiskTable } from '@/components/OrgRiskTable'
 
-type Tab = 'console' | 'signals' | 'routing' | 'energy' | 'analytics' | 'dekes' | 'patterns'
+type Tab = 'console' | 'signals' | 'routing' | 'energy' | 'analytics' | 'dekes' | 'patterns' | 'integration'
 
 const TABS: { id: Tab; label: string; sub: string }[] = [
   { id: 'console', label: 'Console', sub: 'State · Events · Impact' },
@@ -34,6 +36,7 @@ const TABS: { id: Tab; label: string; sub: string }[] = [
   { id: 'analytics', label: 'Analytics', sub: 'Confidence · System · Sources' },
   { id: 'dekes', label: 'DEKES', sub: 'Workload optimization' },
   { id: 'patterns', label: 'Patterns', sub: 'Weekly heat calendar' },
+  { id: 'integration', label: 'Integration', sub: 'DEKES · Handoffs · Business activation' },
 ]
 
 export default function DashboardPage() {
@@ -137,6 +140,14 @@ export default function DashboardPage() {
 
       {/* ── PATTERNS ── Weekly heat calendar */}
       {tab === 'patterns' && <CarbonHeatCalendar />}
+
+      {/* ── INTEGRATION ── DEKES handoff events + org risk */}
+      {tab === 'integration' && (
+        <div className="space-y-5">
+          <DekesHandoffPanel />
+          <OrgRiskTable />
+        </div>
+      )}
     </div>
   )
 }
