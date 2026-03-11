@@ -5,17 +5,18 @@ FROM node:22-alpine AS base
 FROM base AS deps
 # Check for https://github.com/nodejs/docker-node/pull/1454
 RUN apk add --no-cache libc6-compat
-WORKDIR /app
+WORKDIR /app/ecobe-engine
 
-# Copy package files
-COPY ecobe-engine/package.json ecobe-engine/package-lock.json* ./
-# Install ALL dependencies (including @prisma/client)
+# Copy package files scoped to the engine workspace
+COPY ecobe-engine/package.json ./package.json
+COPY ecobe-engine/package-lock.json* ./package-lock.json
+# Install ALL dependencies (including @prisma/client) within the engine workspace
 RUN npm ci
 
 # Build the application
 FROM base AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
+WORKDIR /app/ecobe-engine
+COPY --from=deps /app/ecobe-engine/node_modules ./node_modules
 COPY ecobe-engine ./
 
 # Generate Prisma client FIRST
@@ -26,7 +27,7 @@ RUN npm run build
 
 # Production image
 FROM base AS runner
-WORKDIR /app
+WORKDIR /app/ecobe-engine
 
 ENV NODE_ENV production
 
@@ -35,12 +36,12 @@ RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 --ingroup nodejs ecobe
 
 # Copy built application
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/ecobe-engine/dist ./dist
+COPY --from=builder /app/ecobe-engine/node_modules ./node_modules
+COPY --from=builder /app/ecobe-engine/package.json ./package.json
+COPY --from=builder /app/ecobe-engine/prisma ./prisma
 # Copy generated Prisma client
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/ecobe-engine/node_modules/.prisma ./node_modules/.prisma
 
 # DO NOT copy .env files in production - use Back4App environment variables
 
