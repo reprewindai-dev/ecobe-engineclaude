@@ -8,7 +8,7 @@ RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
 # Copy package files
-COPY package.json package-lock.json* ./
+COPY ecobe-engine/package.json ecobe-engine/package-lock.json* ./
 # Install ALL dependencies (including @prisma/client)
 RUN npm ci
 
@@ -16,7 +16,7 @@ RUN npm ci
 FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY ecobe-engine ./
 
 # Generate Prisma client FIRST
 RUN npx prisma generate
