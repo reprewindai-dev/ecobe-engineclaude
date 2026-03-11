@@ -7,7 +7,7 @@ import { z } from 'zod'
 
 // Initialize Stripe
 const stripe = new Stripe(env.STRIPE_SECRET_KEY || '', {
-  apiVersion: '2024-12-18.acacia',
+  apiVersion: '2024-12-18.acacia' as any,
 })
 
 // Pricing Configuration
@@ -129,9 +129,9 @@ export class BillingService {
     // Get the appropriate price ID
     let priceId: string | null = null
     if (planTier === OrgPlanTier.GROWTH) {
-      priceId = billingPeriod === 'monthly' 
-        ? PRICING.GROWTH.stripePriceIdMonthly 
-        : PRICING.GROWTH.stripePriceIdAnnual
+      priceId = billingPeriod === 'monthly'
+        ? process.env.STRIPE_PRICE_MONTHLY || null
+        : process.env.STRIPE_PRICE_YEARLY || null
     }
 
     if (!priceId) {
@@ -405,7 +405,7 @@ export class BillingService {
         metadata: {
           stripeSubscriptionId: subscription.id,
           subscriptionStatus: subscription.status,
-          currentPeriodEnd: subscription.current_period_end,
+          currentPeriodEnd: (subscription as any).current_period_end || null,
         },
       },
     })

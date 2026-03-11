@@ -160,7 +160,7 @@ router.get('/opportunities', async (req, res) => {
 
     // Detect curtailment windows
     const curtailmentWindows = CurtailmentDetector.getTopCurtailmentWindows(
-      CurtailmentDetector.detectCurtailmentWindows(flatSnapshots, 0.6),
+      CurtailmentDetector.detectCurtailmentWindows(flatSnapshots as any, 0.6),
       5
     )
 
@@ -173,7 +173,7 @@ router.get('/opportunities', async (req, res) => {
 
     // Detect carbon spike risks
     const spikeRisks = RampDetector.getTopCarbonSpikeRisks(
-      RampDetector.detectCarbonSpikeRisks(flatSnapshots, 0.7),
+      RampDetector.detectCarbonSpikeRisks(flatSnapshots as any, 0.7),
       5
     )
 
@@ -366,7 +366,7 @@ router.get('/import-leakage', async (req, res) => {
     }))
 
     // Analyze import carbon leakage
-    const leakages = InterchangeAnalyzer.analyzeImportCarbonLeakage(flatSnapshots)
+    const leakages = InterchangeAnalyzer.analyzeImportCarbonLeakage(flatSnapshots as any)
     const topLeakages = InterchangeAnalyzer.getTopImportLeakages(leakages, 10)
 
     return res.json({

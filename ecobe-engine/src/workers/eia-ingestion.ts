@@ -404,7 +404,7 @@ export class EIAIngestionWorker {
   } {
     return {
       isRunning: this.isRunning,
-      schedule: this.ingestionTask?.getOptions().scheduled
+      schedule: (this.ingestionTask as any)?.getOptions?.()?.scheduled || '0 */15 * * * *',
     }
   }
 }

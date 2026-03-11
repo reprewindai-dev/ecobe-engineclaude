@@ -188,8 +188,8 @@ export class ProviderRouter {
           carbonIntensity: intensity.carbonIntensity,
           isForecast: false,
           source: 'electricity_maps',
-          timestamp: intensity.date,
-          estimatedFlag: !intensity.estimated,
+          timestamp: (intensity as any).date || new Date().toISOString(),
+          estimatedFlag: !(intensity as any).estimated,
           syntheticFlag: false,
           confidence: 0.7,
           metadata: { 
