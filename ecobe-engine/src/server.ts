@@ -4,6 +4,7 @@ import { redis } from './lib/redis'
 import { createApp } from './app'
 import { startForecastWorker } from './workers/forecast-poller'
 import { scheduleIntelligenceJobs } from './workers/intelligence-scheduler'
+import { startEIAIngestionWorker } from './workers/eia-ingestion'
 
 const app = createApp()
 
@@ -29,6 +30,9 @@ async function start() {
       console.log(`   API: http://localhost:${env.PORT}/api/v1`)
 
       startForecastWorker()
+      startEIAIngestionWorker().catch((error) => {
+        console.error('EIA ingestion worker failed:', error)
+      })
       scheduleIntelligenceJobs().catch((error) => {
         console.error('Intelligence job scheduling failed:', error)
       })

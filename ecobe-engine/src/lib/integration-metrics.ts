@@ -2,6 +2,9 @@ import { prisma } from './db'
 
 export type IntegrationSource =
   | 'ELECTRICITY_MAPS'
+  | 'WATTTIME'
+  | 'EMBER'
+  | 'EIA_930'
   | 'OPENAI'
   | 'UPSTASH_VECTOR'
   | 'DEKES_API'

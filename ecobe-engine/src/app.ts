@@ -13,6 +13,7 @@ import forecastingRoutes from './routes/forecasting'
 import carbonRoutes from './routes/carbon-command'
 import organizationsRoutes from './routes/organizations'
 import intelligenceRoutes from './routes/intelligence'
+import gridIntelligenceRoutes from './routes/intelligence/grid'
 
 function rawBodySaver(_req: express.Request, _res: express.Response, buf: Buffer) {
   if (buf?.length) {
@@ -269,6 +270,7 @@ function attachApiRoutes(app: express.Express) {
   app.use('/api/v1/carbon', carbonRoutes)
   app.use('/api/v1/organizations', organizationsRoutes)
   app.use('/api/v1/intelligence', intelligenceRoutes)
+  app.use('/api/v1/intelligence/grid', gridIntelligenceRoutes)
 }
 
 function attachFallbackHandlers(app: express.Express) {

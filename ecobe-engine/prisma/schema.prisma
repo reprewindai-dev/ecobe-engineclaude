@@ -190,6 +190,13 @@ model CarbonCommand {
   estimatedSavingsKgCo2e Float?
   confidence            Float?
 
+  // Grid signal intelligence
+  balancingAuthority     String?
+  demandRampPct         Float?
+  carbonSpikeProbability Float?
+  curtailmentProbability Float?
+  importCarbonLeakageScore Float?
+
   summaryReason   String?
   tradeoffSummary String?
 
@@ -258,6 +265,13 @@ model CarbonCommandOutcome {
   predictedEmissionsKgCo2e Float?
   predictedLatencyMs       Int?
   predictedCostIndex       Float?
+
+  // Grid signal intelligence at execution time
+  actualBalancingAuthority     String?
+  actualDemandRampPct         Float?
+  actualCarbonSpikeProbability Float?
+  actualCurtailmentProbability Float?
+  actualImportCarbonLeakageScore Float?
 
   emissionsVarianceKg   Float?
   emissionsVariancePct  Float?
@@ -331,6 +345,7 @@ model Organization {
   status    OrganizationStatus @default(ACTIVE)
   monthlyCommandLimit Int      @default(1000)
   enforceCreditCoverage Boolean @default(false)
+  metadata  Json     @default("{}")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -721,4 +736,119 @@ model WorkloadDecisionOutcome {
 
   @@index([workloadId])
   @@index([createdAt])
+}
+
+// ============================================================================
+// GRID SIGNAL INTELLIGENCE LAYER
+// ============================================================================
+
+model GridSignalSnapshot {
+  id        String   @id @default(cuid())
+
+  region    String
+  balancingAuthority String?
+
+  timestamp DateTime
+
+  // Demand and generation
+  demandMwh            Float?
+  demandChangeMwh      Float?
+  demandChangePct      Float?
+  netGenerationMwh     Float?
+  netInterchangeMwh    Float?
+
+  // Fuel mix
+  renewableRatio        Float?
+  fossilRatio          Float?
+
+  // Derived intelligence
+  carbonSpikeProbability Float?
+  curtailmentProbability Float?
+  importCarbonLeakageScore Float?
+
+  // Data quality
+  signalQuality         SignalQuality @default(MEDIUM)
+  estimatedFlag         Boolean @default(false)
+  syntheticFlag         Boolean @default(false)
+
+  // Source
+  source                 String @default("eia930")
+  metadata               Json    @default("{}")
+
+  createdAt DateTime @default(now())
+
+  @@index([region, timestamp])
+  @@index([timestamp])
+  @@unique([region, timestamp, source])
+}
+
+enum SignalQuality {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+model Eia930BalanceRaw {
+  id        String   @id @default(cuid())
+
+  period    String
+  respondent String
+  respondentName String
+  type      String
+  value     Float
+  valueUnits String
+
+  region    String
+  balancingAuthority String?
+
+  ingestedAt DateTime @default(now())
+
+  @@index([region, period])
+  @@index([respondent, period])
+}
+
+model Eia930InterchangeRaw {
+  id        String   @id @default(cuid())
+
+  period    String
+  fromBa    String
+  fromBaName String
+  toBa      String
+  toBaName  String
+  type      String
+  value     Float
+  valueUnits String
+
+  region    String
+  balancingAuthority String?
+
+  ingestedAt DateTime @default(now())
+
+  @@index([region, period])
+  @@index([fromBa, period])
+  @@index([toBa, period])
+}
+
+model Eia930SubregionRaw {
+  id        String   @id @default(cuid())
+
+  period    String
+  respondent String
+  respondentName String
+  parent    String
+  parentName String
+  subregion String
+  subregionName String
+  type      String
+  value     Float
+  valueUnits String
+
+  region    String
+  balancingAuthority String?
+
+  ingestedAt DateTime @default(now())
+
+  @@index([region, period])
+  @@index([parent, period])
+  @@index([subregion, period])
 }

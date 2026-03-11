@@ -20,6 +20,9 @@ import {
   ensureCreditCoverage,
   incrementOrgUsage,
 } from './organizations'
+import { providerRouter } from './carbon/provider-router'
+import { GridSignalCache } from './grid-signals/grid-signal-cache'
+import { GridSignalAudit } from './grid-signals/grid-signal-audit'
 
 const toJsonObject = (value: unknown): Prisma.JsonObject => {
   const normalized = value ?? {}
@@ -98,6 +101,17 @@ interface CandidateContext {
   latencyFit: boolean
   eligible: boolean
   rejectionReason?: string
+  
+  // Grid signal intelligence fields (GUARANTEED for dashboard)
+  balancingAuthority?: string | null
+  demandRampPct?: number | null
+  carbonSpikeProbability?: number | null
+  curtailmentProbability?: number | null
+  importCarbonLeakageScore?: number | null
+  estimatedFlag?: boolean | null
+  syntheticFlag?: boolean | null
+  signalQuality?: 'high' | 'medium' | 'low'
+  
   scores?: CandidateScores
 }
 
@@ -214,13 +228,9 @@ async function getForecastedCarbonIntensity(region: string, hoursAhead: number):
 }
 
 async function resolveCarbonIntensity(region: string, startAt: Date): Promise<number> {
-  const now = new Date()
-  const minutesUntilStart = differenceInMinutes(startAt, now)
-  if (minutesUntilStart <= 10) {
-    return getCurrentCarbonIntensity(region)
-  }
-  const hoursAhead = differenceHoursCeil(now, startAt)
-  return getForecastedCarbonIntensity(region, hoursAhead)
+  // Use provider router with WattTime as primary source
+  const routingSignal = await providerRouter.getRoutingSignal(region, startAt)
+  return routingSignal.carbonIntensity
 }
 
 function estimateEnergyKwh(workload: CarbonCommandWorkload): number {
@@ -231,6 +241,84 @@ function estimateEnergyKwh(workload: CarbonCommandWorkload): number {
 
 function calculateEmissionsKg(carbonIntensity: number, energyKwh: number): number {
   return (carbonIntensity * energyKwh) / 1000 // carbonIntensity in gCO2/kWh
+}
+
+/**
+ * Enrich candidate with grid signal intelligence (GUARANTEED for dashboard)
+ */
+async function enrichCandidateWithGridSignals(
+  candidate: CandidateContext,
+  region: string,
+  timestamp: Date
+): Promise<CandidateContext> {
+  try {
+    // Try to get cached grid signals first
+    const cachedSignals = await GridSignalCache.getCachedSnapshots(region)
+    
+    if (cachedSignals && cachedSignals.length > 0) {
+      const latest = cachedSignals[0]
+      return {
+        ...candidate,
+        balancingAuthority: latest.balancingAuthority,
+        demandRampPct: latest.demandChangePct,
+        carbonSpikeProbability: latest.carbonSpikeProbability,
+        curtailmentProbability: latest.curtailmentProbability,
+        importCarbonLeakageScore: latest.importCarbonLeakageScore,
+        estimatedFlag: latest.estimatedFlag,
+        syntheticFlag: latest.syntheticFlag,
+        signalQuality: latest.signalQuality
+      }
+    }
+
+    // Fallback to database lookup
+    const snapshot = await prisma.gridSignalSnapshot.findFirst({
+      where: { region },
+      orderBy: { timestamp: 'desc' }
+    })
+
+    if (snapshot) {
+      return {
+        ...candidate,
+        balancingAuthority: snapshot.balancingAuthority,
+        demandRampPct: snapshot.demandChangePct,
+        carbonSpikeProbability: snapshot.carbonSpikeProbability,
+        curtailmentProbability: snapshot.curtailmentProbability,
+        importCarbonLeakageScore: snapshot.importCarbonLeakageScore,
+        estimatedFlag: snapshot.estimatedFlag,
+        syntheticFlag: snapshot.syntheticFlag,
+        signalQuality: (snapshot.signalQuality?.toLowerCase() as 'high' | 'medium' | 'low') || 'medium'
+      }
+    }
+
+    // Last resort: ensure required fields exist (null values)
+    return {
+      ...candidate,
+      balancingAuthority: null,
+      demandRampPct: null,
+      carbonSpikeProbability: null,
+      curtailmentProbability: null,
+      importCarbonLeakageScore: null,
+      estimatedFlag: null,
+      syntheticFlag: null,
+      signalQuality: 'low'
+    }
+
+  } catch (error) {
+    console.warn(`Failed to enrich candidate with grid signals for ${region}:`, error)
+    
+    // Ensure required fields exist even on error
+    return {
+      ...candidate,
+      balancingAuthority: null,
+      demandRampPct: null,
+      carbonSpikeProbability: null,
+      curtailmentProbability: null,
+      importCarbonLeakageScore: null,
+      estimatedFlag: null,
+      syntheticFlag: null,
+      signalQuality: 'low'
+    }
+  }
 }
 
 function buildSummaryReason(candidate: CandidateContext, payload: CarbonCommandPayload): string {
@@ -422,6 +510,14 @@ async function persistDecision(
         estimatedEmissionsKgCo2e: analytics.estimatedEmissionsKgCo2e,
         estimatedSavingsKgCo2e: analytics.estimatedSavingsKgCo2e,
         confidence: analytics.confidence,
+        
+        // GUARANTEED dashboard fields
+        balancingAuthority: selection.best.balancingAuthority,
+        demandRampPct: selection.best.demandRampPct,
+        carbonSpikeProbability: selection.best.carbonSpikeProbability,
+        curtailmentProbability: selection.best.curtailmentProbability,
+        importCarbonLeakageScore: selection.best.importCarbonLeakageScore,
+        
         summaryReason: summary.reason,
         tradeoffSummary: summary.tradeoff,
         decisionId: crypto.randomUUID(),
@@ -542,7 +638,8 @@ export async function processCarbonCommand(payload: CarbonCommandPayload): Promi
         rejectionReasons.push({ candidateId, reason: rejectionReason })
       }
 
-      candidates.push({
+      // Create base candidate
+      let candidate: CandidateContext = {
         candidateId,
         region,
         startAt,
@@ -553,7 +650,12 @@ export async function processCarbonCommand(payload: CarbonCommandPayload): Promi
         latencyFit,
         eligible,
         rejectionReason,
-      })
+      }
+
+      // Enrich with grid signal intelligence (GUARANTEED for dashboard)
+      candidate = await enrichCandidateWithGridSignals(candidate, region, startAt)
+
+      candidates.push(candidate)
     }
   }
 

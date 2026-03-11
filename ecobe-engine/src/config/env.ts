@@ -15,6 +15,28 @@ const envSchema = z.object({
   ELECTRICITY_MAPS_API_KEY: z.string().optional(),
   ELECTRICITY_MAPS_BASE_URL: z.string().default('https://api.electricitymap.org'),
   DEFAULT_MAX_CARBON_G_PER_KWH: z.string().default('400'),
+  
+  // WattTime
+  WATTTIME_USERNAME: z.string().optional(),
+  WATTTIME_PASSWORD: z.string().optional(),
+  WATTTIME_BASE_URL: z.string().optional(),
+  
+  // Ember
+  EMBER_API_KEY: z.string().optional(),
+  EMBER_BASE_URL: z.string().default('https://api.ember-climate.org'),
+  
+  // EIA
+  EIA_API_KEY: z.string().optional(),
+  EIA_BASE_URL: z.string().default('https://api.eia.gov'),
+  WATTTIME_API_KEY: z.string().optional(),
+
+  // Grid Signal Cache
+  GRID_SIGNAL_CACHE_TTL: z.string().default('900'),
+  GRID_FEATURE_CACHE_TTL: z.string().default('3600'),
+
+  // Ingestion
+  EIA_INGESTION_SCHEDULE: z.string().default('0 */15 * * * *'),
+  EIA_BACKFILL_ENABLED: z.string().default('true'),
 
   // Intelligence / vectors
   UPSTASH_VECTOR_REST_URL: z.string().optional(),
@@ -43,6 +65,16 @@ const envSchema = z.object({
   // External integrations
   ECOBE_ENGINE_URL: z.string().optional(),
   ECOBE_ENGINE_API_KEY: z.string().optional(),
+
+  // Authentication
+  JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters').optional(),
+  
+  // Stripe Billing
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  STRIPE_GROWTH_MONTHLY_PRICE_ID: z.string().optional(),
+  STRIPE_GROWTH_ANNUAL_PRICE_ID: z.string().optional(),
+  STRIPE_ENTERPRISE_PRICE_ID: z.string().optional(),
 })
 
 const parsed = envSchema.safeParse(process.env)
