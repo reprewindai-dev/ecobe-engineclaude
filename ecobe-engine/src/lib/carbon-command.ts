@@ -5,13 +5,13 @@ import { prisma } from './db'
 import { redis } from './redis'
 import { electricityMaps } from './electricity-maps'
 import { forecastCarbonIntensity } from './carbon-forecasting'
-import { Prisma } from '@prisma/client'
 import { indexWorkloadEmbedding } from './workload-embedding'
 import { buildAdaptiveRun, logAdaptiveRun } from './adaptive'
 import { analyzeSimilarWorkloads } from './intelligence/similarity'
 import { applyAdaptiveOptimization } from './intelligence/optimizer'
 import { storeWorkloadFingerprint } from './intelligence/vector-store'
 import type { SimilarityInsight } from './intelligence/similarity'
+import { toInputJson } from './json'
 import {
   requireActiveOrganization,
   getOrCreateUsageCounter,
@@ -23,11 +23,6 @@ import {
 import { providerRouter } from './carbon/provider-router'
 import { GridSignalCache } from './grid-signals/grid-signal-cache'
 import { GridSignalAudit } from './grid-signals/grid-signal-audit'
-
-const toJsonObject = (value: unknown): Prisma.JsonObject => {
-  const normalized = value ?? {}
-  return JSON.parse(JSON.stringify(normalized)) as Prisma.JsonObject
-}
 
 export type Priority = 'low' | 'medium' | 'high'
 export type ExecutionMode = 'immediate' | 'scheduled' | 'advisory'
@@ -491,7 +486,7 @@ async function persistDecision(
     const command = await tx.carbonCommand.create({
       data: {
         orgId: payload.orgId,
-        requestPayload: toJsonObject(payload),
+        requestPayload: toInputJson(payload),
         workloadType: payload.workload.type,
         modelFamily: payload.workload.modelFamily,
         executionMode: payload.execution?.mode ?? 'immediate',
@@ -521,7 +516,7 @@ async function persistDecision(
         summaryReason: summary.reason,
         tradeoffSummary: summary.tradeoff,
         decisionId: crypto.randomUUID(),
-        metadata: toJsonObject(payload.metadata ?? {}),
+        metadata: toInputJson(payload.metadata ?? {}),
       },
     })
 
@@ -529,8 +524,8 @@ async function persistDecision(
       data: {
         commandId: command.id,
         scoringModel: SCORING_MODEL_VERSION,
-        weights: toJsonObject(weights),
-        inputs: toJsonObject({
+        weights: toInputJson(weights),
+        inputs: toInputJson({
           orgId: payload.orgId,
           workload: payload.workload,
           constraints: payload.constraints,
@@ -556,12 +551,12 @@ async function persistDecision(
           candidateId: reason.candidateId,
           reason: reason.reason,
         })) as Prisma.JsonArray,
-        selection: toJsonObject({
+        selection: toInputJson({
           selectedCandidateId: selection.best.candidateId,
           fallbackCandidateId: selection.fallback?.candidateId,
           selectionReason: summary.reason,
         }),
-        traceJson: toJsonObject({
+        traceJson: toInputJson({
           traceId: crypto.randomUUID(),
           candidatesEvaluated: candidates.length,
           similarityInsight,

@@ -1,10 +1,11 @@
 {
   "build": {
-    "builder": "NIXPACKS",
-    "buildCommand": "cd ecobe-engine && npm ci && npm run build"
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "Dockerfile"
   },
   "deploy": {
-    "startCommand": "cd ecobe-engine && npm run start",
-    "healthcheckPath": "/health"
+    "healthcheckPath": "/health",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 5
   }
 }

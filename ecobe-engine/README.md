@@ -294,16 +294,16 @@ docker build -t ecobe-engine .
 docker run -p 3000:3000 --env-file .env ecobe-engine
 ```
 
-### Back4App Containers
+### Railway (Dockerized CO₂ Router Engine)
 
-See [BACK4APP.md](./BACK4APP.md) for detailed deployment instructions.
+The production engine runs as a Docker container on Railway. Redeployments build the root `Dockerfile`, push the image, and Railway runs it with the env vars defined in your project.
 
-### GitHub Actions
+1. Install the Railway CLI: `npm i -g @railway/cli`
+2. Log in: `railway login`
+3. Select project: `railway link`
+4. Deploy the Docker image: `railway up`
 
-CI/CD pipeline automatically:
-- Builds Docker image
-- Pushes to GHCR
-- Deploys to Back4App on main branch
+Railway automatically applies the health check (`/health`) and restart policy defined in `railway.json`.
 
 ## Architecture
 

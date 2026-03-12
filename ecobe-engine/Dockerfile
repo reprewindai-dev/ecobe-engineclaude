@@ -5,8 +5,8 @@ RUN apk add --no-cache libc6-compat
 # Install dependencies once for the engine workspace
 FROM base AS deps
 WORKDIR /app/ecobe-engine
-COPY ecobe-engine/package.json ./package.json
-COPY ecobe-engine/package-lock.json* ./package-lock.json
+COPY package.json ./package.json
+COPY package-lock.json* ./package-lock.json
 RUN npm ci
 
 # Build the application with Prisma client generation
@@ -15,7 +15,7 @@ WORKDIR /app/ecobe-engine
 ARG BUILDTIME_DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=public"
 ENV DATABASE_URL=${BUILDTIME_DATABASE_URL}
 COPY --from=deps /app/ecobe-engine/node_modules ./node_modules
-COPY ecobe-engine/ ./
+COPY . ./
 RUN npx prisma generate
 RUN npm run build
 
