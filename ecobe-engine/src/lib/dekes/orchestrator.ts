@@ -1,8 +1,6 @@
 import { randomUUID } from 'crypto'
-import pLimit from 'p-limit'
 import {
   AggregatedCandidate,
-  AggregationInput,
   AgentResult,
   DiscoveryTrigger,
   LeadCandidate,
@@ -93,41 +91,65 @@ export class DekesOrchestrator {
   }
 
   private async runSpecialists(trigger: DiscoveryTrigger, agents: SpecialistName[]): Promise<AgentResult[]> {
-    const limit = pLimit(this.config.parallelism)
     const controller = new AbortController()
+    const timeoutHandles = new Map<SpecialistName, NodeJS.Timeout>()
 
-    const promises = agents.map((name) =>
-      limit(async () => {
-        const entry = this.specialistMap.get(name)
-        if (!entry) {
-          throw new Error(`Specialist ${name} is not registered`)
+    const tasks = agents.map(async (name) => {
+      const entry = this.specialistMap.get(name)
+      if (!entry) {
+        throw new Error(`Specialist ${name} is not registered`)
+      }
+
+      const start = Date.now()
+      try {
+        const timeoutHandle = setTimeout(() => controller.abort(), this.config.agentTimeoutMs)
+        timeoutHandles.set(name, timeoutHandle)
+        const result = await entry.run(trigger, controller.signal)
+        clearTimeout(timeoutHandle)
+        const parsed = agentResultSchema.parse(result)
+        this.config.metrics.histogram(`dekes.agent.${name}.latency_ms`, Date.now() - start)
+        this.config.metrics.increment(`dekes.agent.${name}.success`)
+        return parsed
+      } catch (error) {
+        this.config.metrics.increment(`dekes.agent.${name}.failure`)
+        this.config.log({
+          level: 'error',
+          event: 'dekes.agent.failed',
+          agent: name,
+          triggerId: trigger.triggerId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+        throw error
+      } finally {
+        const handle = timeoutHandles.get(name)
+        if (handle) {
+          clearTimeout(handle)
         }
+      }
+    })
 
-        const start = Date.now()
-        try {
-          const timeout = setTimeout(() => controller.abort(), this.config.agentTimeoutMs)
-          const result = await entry.run(trigger, controller.signal)
-          clearTimeout(timeout)
+    if (tasks.length <= this.config.parallelism) {
+      return Promise.all(tasks)
+    }
 
-          const parsed = agentResultSchema.parse(result)
-          this.config.metrics.histogram(`dekes.agent.${name}.latency_ms`, Date.now() - start)
-          this.config.metrics.increment(`dekes.agent.${name}.success`)
-          return parsed
-        } catch (error) {
-          this.config.metrics.increment(`dekes.agent.${name}.failure`)
-          this.config.log({
-            level: 'error',
-            event: 'dekes.agent.failed',
-            agent: name,
-            triggerId: trigger.triggerId,
-            error: error instanceof Error ? error.message : String(error),
-          })
-          throw error
-        }
-      })
-    )
+    const results: AgentResult[] = []
+    const executing = new Set<Promise<void>>()
 
-    return Promise.all(promises)
+    for (const task of tasks) {
+      const wrapped = (async () => {
+        const value = await task
+        results.push(value)
+      })()
+      executing.add(wrapped)
+      wrapped.finally(() => executing.delete(wrapped)).catch(() => {})
+
+      if (executing.size >= this.config.parallelism) {
+        await Promise.race(executing)
+      }
+    }
+
+    await Promise.all(executing)
+    return results
   }
 
   private async runAggregation(trigger: DiscoveryTrigger, agentResponses: AgentResult[]): Promise<AggregatedCandidate> {
