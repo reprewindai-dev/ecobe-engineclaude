@@ -625,6 +625,33 @@ model DekesWorkload {
   @@index([dekesQueryId])
 }
 
+model DekesLeadCandidate {
+  id                       String   @id @default(cuid())
+  candidateId              String   @unique
+  orgId                    String
+  domain                   String
+  company                  String?
+  primaryContactName       String?
+  primaryContactRole       String?
+  primaryContactEmail      String?
+  primaryContactConfidence Float?
+  businessType             String?
+  intentScore              Float
+  icpFitScore              Float
+  sourceSignals            Json     @default("[]")
+  riskFlags                Json     @default("[]")
+  verificationStatus       String
+  confidenceBreakdown      Json     @default("{}")
+  rawAgentFindings         Json     @default("[]")
+  verificationPayload      Json     @default("{}")
+  metadata                 Json     @default("{}")
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@index([orgId])
+  @@index([domain])
+}
+
 // ============================================================================
 // REGION METADATA
 // ============================================================================
