@@ -5,6 +5,11 @@ import { GridSignalCache } from '../grid-signals/grid-signal-cache'
 import { GridSignalAudit } from '../grid-signals/grid-signal-audit'
 import { EmberStructuralProfile, type RegionStructuralProfile } from '../ember/structural-profile'
 
+interface WeightedSignal {
+  provider: ProviderSignal
+  weight: number
+}
+
 export interface ProviderSignal {
   carbonIntensity: number // gCO2eq/kWh
   isForecast: boolean
@@ -25,117 +30,124 @@ export interface ProviderDisagreement {
 
 export interface RoutingSignal {
   carbonIntensity: number
-  source: 'watttime' | 'electricity_maps' | 'eia930' | 'fallback'
+  source: 'watttime' | 'electricity_maps' | 'ember' | 'fallback'
   isForecast: boolean
   confidence: number
   provenance: {
     sourceUsed: string
-    validationSource?: string
+    contributingSources: string[]
     referenceTime: string
     fetchedAt: string
     fallbackUsed: boolean
     disagreementFlag: boolean
     disagreementPct: number
+    validationNotes?: string
   }
 }
 
 /**
- * PROVIDER DOCTRINE - LOCKED HIERARCHY
- * 
- * 1. WattTime MOER + MOER forecast = PRIMARY CAUSAL ROUTING SIGNAL
- *    - Drives all routing and delay scheduling decisions
- *    - Electricity Maps MUST NOT replace WattTime in fast-path routing
- * 
- * 2. Electricity Maps = COHERENT GRID INTELLIGENCE
- *    - Flow-traced carbon context
- *    - Validation and cross-checking only
- *    - NOT for fast-path routing decisions
- * 
- * 3. Ember = STRUCTURAL CONTEXT + VALIDATION ONLY
- *    - NOT a real-time routing provider
- *    - Structural carbon baseline, trends, capacity analysis
- *    - Validation of signal plausibility
- * 
- * 4. EIA-930 = PREDICTIVE TELEMETRY
- *    - Grid stress indicators, demand trends
- *    - Derived features for routing enhancement
- *    - NOT primary carbon intensity source
+ * PROVIDER DOCTRINE – LOCKED HIERARCHY (REV 2026-03-12)
+ *
+ * PRIMARY (Live Carbon Signal)
+ *  - Electricity Maps => authoritative realtime intensity + flow-traced context
+ *  - Required for every routing decision
+ *
+ * SECONDARY (Marginal Signal Amplifier)
+ *  - WattTime => marginal operating emission rate (MOER) enriches primary
+ *  - Never used alone; always blended with Electricity Maps weight
+ *
+ * BASELINE / VALIDATION
+ *  - Ember => structural baseline + historical sanity check
+ *  - Supplies confidence dampening when primary deviates beyond tolerance
+ *
+ * FALLBACK
+ *  - Static fallback only when both API providers are unavailable
  */
 export class ProviderRouter {
   /**
-   * Get routing signal with strict provider hierarchy enforcement
-   * WattTime is ALWAYS the primary source for routing decisions
+   * Produce a routing signal aligned with the locked provider stack:
+   * Electricity Maps (primary) + WattTime (marginal) blended into a
+   * confidence-weighted score, with Ember providing baseline validation.
    */
   async getRoutingSignal(region: string, timestamp: Date): Promise<RoutingSignal> {
     const referenceTime = timestamp.toISOString()
     const fetchedAt = new Date().toISOString()
 
-    // 1. PRIMARY: Try WattTime MOER (current or forecast)
-    const watttimeSignal = await this.getWattTimeSignal(region, timestamp)
-    
-    if (watttimeSignal) {
-      // Validate with other providers for disagreement detection
-      const validation = await this.validateSignal(watttimeSignal, region, timestamp)
-      
+    const electricityMapsSignal = await this.getElectricityMapsSignal(region, timestamp)
+    const wattTimeSignal = await this.getWattTimeSignal(region, timestamp)
+
+    if (electricityMapsSignal) {
+      const weightedSignals: WeightedSignal[] = [
+        { provider: electricityMapsSignal, weight: electricityMapsSignal.confidence ?? 0.7 }
+      ]
+
+      if (wattTimeSignal) {
+        const marginWeight = wattTimeSignal.confidence ?? (wattTimeSignal.isForecast ? 0.5 : 0.7)
+        weightedSignals.push({ provider: wattTimeSignal, weight: marginWeight })
+      }
+
+      const blended = this.blendSignals(weightedSignals)
+      const validation = await this.validateWithEmber(blended, region, timestamp)
+
       return {
-        carbonIntensity: watttimeSignal.carbonIntensity,
-        source: 'watttime',
-        isForecast: watttimeSignal.isForecast,
-        confidence: watttimeSignal.confidence || 0.8,
+        carbonIntensity: blended.carbonIntensity,
+        source: 'electricity_maps',
+        isForecast: blended.isForecast,
+        confidence: validation.adjustedConfidence,
         provenance: {
-          sourceUsed: 'WATTTIME_MOER',
-          validationSource: validation.validationSource,
+          sourceUsed: blended.provenanceSource,
+          contributingSources: weightedSignals.map((s) => s.provider.source),
           referenceTime,
           fetchedAt,
           fallbackUsed: false,
           disagreementFlag: validation.disagreement.level !== 'none',
-          disagreementPct: validation.disagreement.disagreementPct
+          disagreementPct: validation.disagreement.disagreementPct,
+          validationNotes: validation.validationNotes
         }
       }
     }
 
-    // 2. FALLBACK: Electricity Maps (only if WattTime unavailable)
-    const emSignal = await this.getElectricityMapsSignal(region, timestamp)
-    
-    if (emSignal) {
-      const validation = await this.validateSignal(emSignal, region, timestamp)
-      
+    if (wattTimeSignal) {
+      const validation = await this.validateWithEmber(wattTimeSignal, region, timestamp)
+
       return {
-        carbonIntensity: emSignal.carbonIntensity,
-        source: 'electricity_maps',
-        isForecast: false,
-        confidence: emSignal.confidence || 0.6,
+        carbonIntensity: wattTimeSignal.carbonIntensity,
+        source: 'watttime',
+        isForecast: wattTimeSignal.isForecast,
+        confidence: validation.adjustedConfidence,
         provenance: {
-          sourceUsed: 'ELECTRICITY_MAPS_FALLBACK',
-          validationSource: validation.validationSource,
+          sourceUsed: wattTimeSignal.metadata?.signalType === 'forecast_moer' ? 'WATTTIME_MOER_FORECAST' : 'WATTTIME_MOER',
+          contributingSources: ['watttime'],
           referenceTime,
           fetchedAt,
           fallbackUsed: true,
           disagreementFlag: validation.disagreement.level !== 'none',
-          disagreementPct: validation.disagreement.disagreementPct
+          disagreementPct: validation.disagreement.disagreementPct,
+          validationNotes: validation.validationNotes
         }
       }
     }
 
-    // 3. LAST RESORT: Static fallback
     return {
-      carbonIntensity: 400, // gCO2eq/kWh
+      carbonIntensity: 450,
       source: 'fallback',
       isForecast: false,
-      confidence: 0.1,
+      confidence: 0.05,
       provenance: {
         sourceUsed: 'STATIC_FALLBACK',
+        contributingSources: [],
         referenceTime,
         fetchedAt,
         fallbackUsed: true,
         disagreementFlag: false,
-        disagreementPct: 0
+        disagreementPct: 0,
+        validationNotes: 'Primary and marginal providers unavailable'
       }
     }
   }
 
   /**
-   * Get WattTime MOER signal (primary routing source)
+   * Get WattTime MOER signal (marginal amplifier)
    */
   private async getWattTimeSignal(region: string, timestamp: Date): Promise<ProviderSignal | null> {
     try {
@@ -192,7 +204,7 @@ export class ProviderRouter {
           estimatedFlag: !(intensity as any).estimated,
           syntheticFlag: false,
           confidence: 0.7,
-          metadata: { 
+          metadata: {
             signalType: 'current_intensity',
             zone: intensity.zone,
             zoneName: intensity.zone || 'Unknown'
@@ -207,32 +219,124 @@ export class ProviderRouter {
   }
 
   /**
-   * Validate signal against other providers for disagreement detection
+   * Blend provider signals using confidence weights
    */
-  private async validateSignal(
-    primarySignal: ProviderSignal,
+  private blendSignals(signals: WeightedSignal[]): {
+    carbonIntensity: number
+    isForecast: boolean
+    provenanceSource: string
+  } {
+    if (signals.length === 0) {
+      return {
+        carbonIntensity: 0,
+        isForecast: false,
+        provenanceSource: 'NO_SIGNAL'
+      }
+    }
+
+    const totalWeight = signals.reduce((sum, s) => sum + s.weight, 0)
+    if (totalWeight === 0) {
+      return {
+        carbonIntensity: signals[0].provider.carbonIntensity,
+        isForecast: signals[0].provider.isForecast,
+        provenanceSource: signals[0].provider.source.toUpperCase()
+      }
+    }
+
+    const blendedIntensity =
+      signals.reduce((sum, s) => sum + s.provider.carbonIntensity * s.weight, 0) / totalWeight
+
+    const forecastWeight = signals.reduce(
+      (sum, s) => sum + (s.provider.isForecast ? s.weight : 0),
+      0
+    )
+
+    const provenanceSource = signals
+      .map((s) => `${s.provider.source.toUpperCase()}_${Math.round((s.weight / totalWeight) * 100)}%`)
+      .join('::')
+
+    return {
+      carbonIntensity: blendedIntensity,
+      isForecast: forecastWeight / totalWeight > 0.4,
+      provenanceSource
+    }
+  }
+
+  /**
+   * Validate blended signal against Ember baseline to adjust confidence
+   */
+  private async validateWithEmber(
+    signal: ProviderSignal | { carbonIntensity: number; isForecast: boolean; provenanceSource: string },
     region: string,
     timestamp: Date
   ): Promise<{
-    validationSource?: string
+    adjustedConfidence: number
     disagreement: ProviderDisagreement
+    validationNotes?: string
   }> {
-    const signals: ProviderSignal[] = [primarySignal]
+    const signals: ProviderSignal[] = []
 
-    // Get validation signals (NOT for routing, only for disagreement detection)
-    const emSignal = await this.getElectricityMapsSignal(region, timestamp)
-    if (emSignal) signals.push(emSignal)
-
-    // Calculate disagreement
-    const disagreement = this.calculateDisagreement(signals)
-
-    // Determine validation source
-    let validationSource: string | undefined
-    if (emSignal && disagreement.level !== 'severe') {
-      validationSource = 'electricity_maps'
+    if ('source' in signal) {
+      signals.push(signal)
+    } else {
+      signals.push({
+        carbonIntensity: signal.carbonIntensity,
+        isForecast: signal.isForecast,
+        source: 'electricity_maps',
+        timestamp: timestamp.toISOString(),
+        estimatedFlag: false,
+        syntheticFlag: false
+      })
     }
 
-    return { validationSource, disagreement }
+    const wattTimeValidation = await this.getWattTimeSignal(region, timestamp)
+    if (wattTimeValidation) {
+      signals.push(wattTimeValidation)
+    }
+
+    const disagreement = this.calculateDisagreement(signals)
+
+    let validationNotes: string | undefined
+    let confidencePenalty = 0
+
+    const emberProfile = await this.getStructuralProfile(region)
+    if (emberProfile?.structuralCarbonBaseline) {
+      const deviation = Math.abs(emberProfile.structuralCarbonBaseline - signals[0].carbonIntensity)
+      const deviationPct = (deviation / Math.max(emberProfile.structuralCarbonBaseline, 1)) * 100
+
+      if (deviationPct > 30) {
+        confidencePenalty += 0.3
+        validationNotes = `High deviation (${deviationPct.toFixed(1)}%) from Ember baseline`
+      } else if (deviationPct > 15) {
+        confidencePenalty += 0.15
+        validationNotes = `Moderate deviation (${deviationPct.toFixed(1)}%) from Ember baseline`
+      }
+    }
+
+    if (disagreement.level === 'high') {
+      confidencePenalty += 0.2
+      validationNotes = validationNotes
+        ? `${validationNotes}; High provider disagreement`
+        : 'High provider disagreement'
+    } else if (disagreement.level === 'medium') {
+      confidencePenalty += 0.1
+      validationNotes = validationNotes
+        ? `${validationNotes}; Moderate provider disagreement`
+        : 'Moderate provider disagreement'
+    }
+
+    const baseConfidence =
+      'confidence' in signal && typeof signal.confidence === 'number'
+        ? signal.confidence
+        : 0.75
+
+    const adjustedConfidence = Math.max(0.05, baseConfidence - confidencePenalty)
+
+    return {
+      adjustedConfidence,
+      disagreement,
+      validationNotes
+    }
   }
 
   /**
@@ -274,9 +378,38 @@ export class ProviderRouter {
    */
   async getStructuralProfile(region: string): Promise<RegionStructuralProfile | null> {
     try {
-      // For now, return null as Ember structural profile needs to be implemented
-      // This would fetch Ember data and derive structural profile
-      return null
+      const entityCode = region.toUpperCase()
+      const emberData = await ember.deriveStructuralProfile(region, entityCode)
+
+      if (!emberData) {
+        return null
+      }
+
+      const profile = EmberStructuralProfile.deriveStructuralProfile(
+        {
+          carbonIntensity: emberData.carbonIntensityMonthly.map((point) => ({
+            year: point.date,
+            value: point.carbon_intensity
+          })),
+          demand: emberData.demandYearly.map((point) => ({
+            year: point.date,
+            value: point.value
+          })),
+          capacity: emberData.capacity.map((point) => ({
+            year: point.date,
+            fuelTech: point.technology,
+            value: point.capacity_mw
+          }))
+        },
+        region
+      )
+
+      const validation = EmberStructuralProfile.validateProfile(profile)
+      if (!validation.isValid) {
+        console.warn('Ember structural profile warnings:', validation.warnings)
+      }
+
+      return profile
     } catch (error) {
       console.warn(`Failed to get Ember structural profile for ${region}:`, error)
     }
