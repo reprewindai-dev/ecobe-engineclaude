@@ -1,19 +1,25 @@
-import type { Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
+import type { InputJsonValue, JsonValue } from '@prisma/client/runtime/library'
 
-export const toInputJson = (value: unknown): Prisma.InputJsonValue => {
-  if (value === undefined) {
-    return null
+type PrismaJsonNull = (typeof Prisma.JsonNullValueInput)['JsonNull']
+
+const JSON_NULL: PrismaJsonNull = Prisma.JsonNullValueInput.JsonNull
+
+export type JsonInput = InputJsonValue | PrismaJsonNull
+
+export const toInputJson = (value: unknown): JsonInput => {
+  if (value === undefined || value === null) {
+    return JSON_NULL
   }
 
-  // Ensure the value is serializable and strips functions/undefined
-  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue
+  return JSON.parse(JSON.stringify(value)) as InputJsonValue
 }
 
 export const parseJsonRecord = <T extends Record<string, unknown>>(
-  value: Prisma.JsonValue | null | undefined,
+  value: JsonValue | PrismaJsonNull | null | undefined,
   fallback: T = {} as T
 ): T => {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
+  if (value && value !== JSON_NULL && typeof value === 'object' && !Array.isArray(value)) {
     return value as T
   }
 

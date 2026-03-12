@@ -1,5 +1,6 @@
 import crypto from 'crypto'
 import { addHours, differenceInMinutes } from 'date-fns'
+import { Prisma } from '@prisma/client'
 import { env } from '../config/env'
 import { prisma } from './db'
 import { redis } from './redis'
@@ -338,9 +339,13 @@ function buildTradeoff(candidate: CandidateContext, fallback?: CandidateContext)
 
 async function fetchCandidateRegions(payload: CarbonCommandPayload): Promise<string[]> {
   const { constraints } = payload
-  const baseRegions = constraints.mustRunRegions && constraints.mustRunRegions.length > 0 ? constraints.mustRunRegions : null
+  const excludedRegions = constraints.excludedRegions ?? []
+  const excludedSet = excludedRegions.length > 0 ? new Set(excludedRegions) : null
+
+  const baseRegions =
+    constraints.mustRunRegions && constraints.mustRunRegions.length > 0 ? constraints.mustRunRegions : null
   if (baseRegions) {
-    return baseRegions.filter((region) => !(constraints.excludedRegions ?? []).includes(region))
+    return baseRegions.filter((region: string) => !excludedSet?.has(region))
   }
 
   const rows = await prisma.region.findMany({
@@ -349,12 +354,12 @@ async function fetchCandidateRegions(payload: CarbonCommandPayload): Promise<str
     orderBy: { code: 'asc' },
     take: 50,
   })
-  const regionCodes = rows.map((r) => r.code)
+  const regionCodes = rows.map((row: { code: string }) => row.code)
   if (regionCodes.length === 0) {
     return []
   }
-  if (constraints.excludedRegions?.length) {
-    return regionCodes.filter((region) => !constraints.excludedRegions!.includes(region))
+  if (excludedSet) {
+    return regionCodes.filter((region: string) => !excludedSet.has(region))
   }
   return regionCodes
 }
@@ -505,7 +510,7 @@ async function persistDecision(
         estimatedEmissionsKgCo2e: analytics.estimatedEmissionsKgCo2e,
         estimatedSavingsKgCo2e: analytics.estimatedSavingsKgCo2e,
         confidence: analytics.confidence,
-        
+
         // GUARANTEED dashboard fields
         balancingAuthority: selection.best.balancingAuthority,
         demandRampPct: selection.best.demandRampPct,
@@ -536,21 +541,25 @@ async function persistDecision(
           carbonDataProvider: 'electricity_maps',
           forecastModel: 'moving-average-v1',
         },
-        candidates: candidates.map((candidate) => ({
-          candidateId: candidate.candidateId,
-          region: candidate.region,
-          startAt: candidate.startAt.toISOString(),
-          carbonIntensity: candidate.carbonIntensity ?? null,
-          latencyMs: candidate.latencyMs,
-          costIndex: candidate.costIndex,
-          eligible: candidate.eligible,
-          scores: candidate.scores ?? null,
-          rejectionReason: candidate.rejectionReason ?? null,
-        })) as Prisma.JsonArray,
-        rejected: rejectionReasons.map((reason) => ({
-          candidateId: reason.candidateId,
-          reason: reason.reason,
-        })) as Prisma.JsonArray,
+        candidates: toInputJson(
+          candidates.map((candidate) => ({
+            candidateId: candidate.candidateId,
+            region: candidate.region,
+            startAt: candidate.startAt.toISOString(),
+            carbonIntensity: candidate.carbonIntensity ?? null,
+            latencyMs: candidate.latencyMs,
+            costIndex: candidate.costIndex,
+            eligible: candidate.eligible,
+            scores: candidate.scores ?? null,
+            rejectionReason: candidate.rejectionReason ?? null,
+          }))
+        ),
+        rejected: toInputJson(
+          rejectionReasons.map((reason) => ({
+            candidateId: reason.candidateId,
+            reason: reason.reason,
+          }))
+        ),
         selection: toInputJson({
           selectedCandidateId: selection.best.candidateId,
           fallbackCandidateId: selection.fallback?.candidateId,
@@ -599,7 +608,19 @@ export async function processCarbonCommand(payload: CarbonCommandPayload): Promi
       costPerKwh: true,
     },
   })
-  const regionMeta = new Map(regionRecords.map((region) => [region.code, region]))
+  const regionMetaEntries = regionRecords.map(
+    (region): [string, { code: string; typicalLatencyMs: number | null; costPerKwh: number | null }] => [
+      region.code,
+      {
+        code: region.code,
+        typicalLatencyMs: region.typicalLatencyMs,
+        costPerKwh: region.costPerKwh,
+      },
+    ]
+  )
+  const regionMeta = new Map<string, { code: string; typicalLatencyMs: number | null; costPerKwh: number | null }>(
+    regionMetaEntries
+  )
 
   const candidates: CandidateContext[] = []
   const rejectionReasons: Array<{ candidateId: string; reason: string }> = []

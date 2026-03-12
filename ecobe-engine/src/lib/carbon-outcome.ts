@@ -8,6 +8,7 @@ import {
 } from '@prisma/client'
 import { prisma } from './db'
 import { recordAdaptiveSignal, upsertAdaptiveProfile } from './adaptive'
+import { toInputJson } from './json'
 
 const equalsNullFilter = { equals: null } as const
 const toNullableFilter = (value: string | null | undefined) => value ?? equalsNullFilter
@@ -531,7 +532,7 @@ export async function processCarbonOutcome(payload: CarbonOutcomePayload): Promi
         fallbackTriggered: payload.status.fallbackTriggered ?? false,
         completed: payload.status.completed,
         predictionQuality: quality,
-        comparisonJson: {
+        comparisonJson: toInputJson({
           predictedRegion,
           actualRegion: payload.execution.actualRegion,
           predictedStartAt: predictedStartAt?.toISOString(),
@@ -543,9 +544,9 @@ export async function processCarbonOutcome(payload: CarbonOutcomePayload): Promi
           actualLatencyMs: actualLatency,
           predictedCostIndex,
           actualCostIndex,
-        } as Prisma.JsonObject,
-        learningSignals: learningSignals as Prisma.JsonObject,
-        metadata: (payload.metadata ?? {}) as Prisma.JsonObject,
+        }),
+        learningSignals: toInputJson(learningSignals),
+        metadata: toInputJson(payload.metadata ?? {}),
       },
     })
 

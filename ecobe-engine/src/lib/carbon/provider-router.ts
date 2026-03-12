@@ -3,7 +3,7 @@ import { electricityMaps } from '../electricity-maps'
 import { ember } from '../ember'
 import { GridSignalCache } from '../grid-signals/grid-signal-cache'
 import { GridSignalAudit } from '../grid-signals/grid-signal-audit'
-import { EmberStructuralProfile, type RegionStructuralProfile } from '../ember/structural-profile'
+import { EmberStructuralProfile, type EmberData, type RegionStructuralProfile } from '../ember/structural-profile'
 
 interface WeightedSignal {
   provider: ProviderSignal
@@ -379,30 +379,13 @@ export class ProviderRouter {
   async getStructuralProfile(region: string): Promise<RegionStructuralProfile | null> {
     try {
       const entityCode = region.toUpperCase()
-      const emberData = await ember.deriveStructuralProfile(region, entityCode)
+      const emberData = await this.fetchEmberStructuralData(entityCode)
 
       if (!emberData) {
         return null
       }
 
-      const profile = EmberStructuralProfile.deriveStructuralProfile(
-        {
-          carbonIntensity: emberData.carbonIntensityMonthly.map((point) => ({
-            year: point.date,
-            value: point.carbon_intensity
-          })),
-          demand: emberData.demandYearly.map((point) => ({
-            year: point.date,
-            value: point.value
-          })),
-          capacity: emberData.capacity.map((point) => ({
-            year: point.date,
-            fuelTech: point.technology,
-            value: point.capacity_mw
-          }))
-        },
-        region
-      )
+      const profile = EmberStructuralProfile.deriveStructuralProfile(emberData, region)
 
       const validation = EmberStructuralProfile.validateProfile(profile)
       if (!validation.isValid) {
@@ -415,6 +398,40 @@ export class ProviderRouter {
     }
 
     return null
+  }
+
+  private async fetchEmberStructuralData(entityCode: string): Promise<EmberData | null> {
+    const [carbonIntensityYearly, demandYearly, capacityMonthly] = await Promise.all([
+      ember.getCarbonIntensityYearly(entityCode),
+      ember.getElectricityDemand(entityCode, 'yearly'),
+      ember.getInstalledCapacity(entityCode)
+    ])
+
+    if (
+      carbonIntensityYearly.length === 0 &&
+      demandYearly.length === 0 &&
+      capacityMonthly.length === 0
+    ) {
+      return null
+    }
+
+    const emberData: EmberData = {
+      carbonIntensity: carbonIntensityYearly.map((point) => ({
+        year: point.date,
+        value: Number.isFinite(point.carbon_intensity) ? point.carbon_intensity : null
+      })),
+      demand: demandYearly.map((point) => ({
+        year: point.date,
+        value: Number.isFinite(point.value) ? point.value : null
+      })),
+      capacity: capacityMonthly.map((point) => ({
+        year: point.date,
+        fuelTech: point.technology ?? 'unknown',
+        value: Number.isFinite(point.capacity_mw) ? point.capacity_mw : null
+      }))
+    }
+
+    return emberData
   }
 
   /**
@@ -501,6 +518,7 @@ export class ProviderRouter {
         confidence: 0.8,
         provenance: {
           sourceUsed: `CACHED_${cached.providers[0]}`,
+          contributingSources: cached.providers,
           referenceTime: timestamp.toISOString(),
           fetchedAt: new Date().toISOString(),
           fallbackUsed: false,
