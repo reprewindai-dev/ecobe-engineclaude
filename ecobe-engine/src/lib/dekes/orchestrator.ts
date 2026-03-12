@@ -1,22 +1,20 @@
 import { randomUUID } from 'crypto'
 import pLimit from 'p-limit'
-import { z } from 'zod'
 import {
   AggregatedCandidate,
   AggregationInput,
   AgentResult,
   DiscoveryTrigger,
   LeadCandidate,
+  SpecialistName,
   VerificationReport,
   aggregationInputSchema,
   agentResultSchema,
-  companyIntelligenceSchema,
   discoveryTriggerSchema,
-  domainContactSchema,
-  icpSimilaritySchema,
-  intentSignalSchema,
   leadCandidateSchema,
-  verificationReportSchema,
+  LeadCandidatePublisher,
+  Aggregator,
+  Verifier,
 } from './types'
 
 export interface OrchestratorConfig {
@@ -31,23 +29,9 @@ export interface OrchestratorConfig {
   }
 }
 
-export type SpecialistName = 'company' | 'domain_contact' | 'intent' | 'icp'
-
 export interface SpecialistRegistryEntry {
   name: SpecialistName
   run: (trigger: DiscoveryTrigger, signal: AbortSignal) => Promise<AgentResult>
-}
-
-export interface Aggregator {
-  aggregate(input: AggregationInput, signal: AbortSignal): Promise<AggregatedCandidate>
-}
-
-export interface Verifier {
-  verify(candidate: AggregatedCandidate, signal: AbortSignal): Promise<VerificationReport>
-}
-
-export interface LeadCandidatePublisher {
-  publish(candidate: LeadCandidate): Promise<void>
 }
 
 export class DekesOrchestrator {
