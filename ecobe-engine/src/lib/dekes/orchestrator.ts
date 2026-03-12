@@ -10,6 +10,7 @@ import {
   agentResultSchema,
   discoveryTriggerSchema,
   leadCandidateSchema,
+  verificationReportSchema,
   LeadCandidatePublisher,
   Aggregator,
   Verifier,

@@ -1,23 +1,13 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
-import { ecobeApi } from '@/lib/api'
 import { getQualityTierBadge, getCarbonLevel } from '@/types'
+import { useDashboardSavings, useRecentDecisions } from '@/lib/hooks/dashboard-data'
 
 export function CarbonReductionMultiplier() {
-  const { data: decisionsData } = useQuery({
-    queryKey: ['decisions', 100],
-    queryFn: () => ecobeApi.getDecisions(100),
-    refetchInterval: 30_000,
-  })
+  const { data: decisionResponse } = useRecentDecisions(100)
+  const { data: savings } = useDashboardSavings('30d')
 
-  const { data: savings } = useQuery({
-    queryKey: ['dashboard-savings', '30d'],
-    queryFn: () => ecobeApi.getDashboardSavings('30d'),
-    refetchInterval: 5 * 60_000,
-  })
-
-  const decisions = decisionsData?.decisions ?? []
+  const decisions = decisionResponse?.decisions ?? []
 
   // Compute CRM: baseline_ci / chosen_ci per decision
   const validDecisions = decisions.filter(
