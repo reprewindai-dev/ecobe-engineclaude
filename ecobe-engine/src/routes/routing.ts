@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { routeGreen } from '../lib/green-routing'
+import { prisma } from '../lib/db'
 
 const router = Router()
 
@@ -25,6 +26,86 @@ router.post('/green', async (req, res) => {
       return res.status(400).json({ error: 'Invalid request', details: error.errors })
     }
     console.error('Green routing error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// Replay a past routing decision by decisionFrameId
+router.get('/:decisionFrameId/replay', async (req, res) => {
+  try {
+    const { decisionFrameId } = req.params
+
+    // Try to find the decision in DashboardRoutingDecision first
+    const decision = await prisma.dashboardRoutingDecision.findFirst({
+      where: {
+        meta: {
+          path: ['decisionFrameId'],
+          equals: decisionFrameId
+        }
+      }
+    })
+
+    if (!decision) {
+      return res.status(404).json({ error: 'Decision frame not found' })
+    }
+
+    // Construct replay response with all grid signal fields
+    const replayResult = {
+      decisionFrameId,
+      replayedAt: new Date().toISOString(),
+      createdAt: decision.createdAt.toISOString(),
+      organizationId: decision.workloadName ?? null,
+      workloadType: decision.opName ?? null,
+      source: (decision.meta as any)?.source ?? null,
+      request: {
+        regions: [decision.baselineRegion, decision.chosenRegion],
+        targetTime: null,
+        durationMinutes: null,
+        maxCarbonGPerKwh: null,
+        weights: { carbon: 0.5, latency: 0.3, cost: 0.2 }
+      },
+      signals: {
+        [decision.baselineRegion]: {
+          intensity: decision.carbonIntensityBaselineGPerKwh ?? 0,
+          source: decision.sourceUsed ?? 'unknown',
+          fallbackUsed: decision.fallbackUsed ?? false,
+          disagreementFlag: decision.disagreementFlag ?? false
+        },
+        [decision.chosenRegion]: {
+          intensity: decision.carbonIntensityChosenGPerKwh ?? 0,
+          source: decision.sourceUsed ?? 'unknown',
+          fallbackUsed: decision.fallbackUsed ?? false,
+          disagreementFlag: decision.disagreementFlag ?? false
+        }
+      },
+      selectedRegion: decision.chosenRegion,
+      carbonIntensity: decision.carbonIntensityChosenGPerKwh ?? 0,
+      baselineIntensity: decision.carbonIntensityBaselineGPerKwh ?? 0,
+      carbon_delta_g_per_kwh: (decision.carbonIntensityBaselineGPerKwh ?? 0) - (decision.carbonIntensityChosenGPerKwh ?? 0),
+      qualityTier: (decision.meta as any)?.qualityTier ?? 'medium',
+      forecast_stability: (decision.meta as any)?.forecast_stability ?? null,
+      score: (decision.meta as any)?.score ?? 0,
+      explanation: decision.reason ?? '',
+      sourceUsed: decision.sourceUsed ?? null,
+      referenceTime: decision.referenceTime?.toISOString() ?? null,
+      fallbackUsed: decision.fallbackUsed ?? false,
+      providerDisagreement: decision.disagreementFlag ?? false,
+      // Grid signal fields
+      balancingAuthority: decision.balancingAuthority ?? null,
+      demandRampPct: decision.demandRampPct ?? null,
+      carbonSpikeProbability: decision.carbonSpikeProbability ?? null,
+      curtailmentProbability: decision.curtailmentProbability ?? null,
+      importCarbonLeakageScore: decision.importCarbonLeakageScore ?? null,
+      // Data quality flags
+      estimatedFlag: decision.estimatedFlag ?? false,
+      syntheticFlag: decision.syntheticFlag ?? false,
+      validationSource: decision.validationSource ?? null,
+      disagreementPct: decision.disagreementPct ?? null
+    }
+
+    res.json(replayResult)
+  } catch (error: any) {
+    console.error('Replay error:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 })

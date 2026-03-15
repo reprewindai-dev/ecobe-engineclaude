@@ -59,6 +59,22 @@ const decisionSchema = z
     data_freshness_seconds: z.number().int().nonnegative().optional(),
     dataFreshnessSeconds: z.number().int().nonnegative().optional(),
 
+    // Grid signal fields
+    balancingAuthority: z.string().optional(),
+    demandRampPct: z.number().optional(),
+    carbonSpikeProbability: z.number().optional(),
+    curtailmentProbability: z.number().optional(),
+    importCarbonLeakageScore: z.number().optional(),
+
+    // Provenance fields
+    sourceUsed: z.string().optional(),
+    validationSource: z.string().optional(),
+    referenceTime: z.string().datetime().optional(),
+    disagreementFlag: z.boolean().optional(),
+    disagreementPct: z.number().optional(),
+    estimatedFlag: z.boolean().optional(),
+    syntheticFlag: z.boolean().optional(),
+
     meta: z.unknown().optional(),
   })
   .superRefine((value, ctx) => {
@@ -108,6 +124,8 @@ router.post('/', async (req, res) => {
     const createdAtStr = value.ts ?? value.createdAt
     const createdAt = createdAtStr ? new Date(createdAtStr) : undefined
 
+    const referenceTime = value.referenceTime ? new Date(value.referenceTime) : undefined
+
     const created = await prisma.dashboardRoutingDecision.create({
       data: {
         createdAt,
@@ -128,6 +146,20 @@ router.post('/', async (req, res) => {
         fallbackUsed,
         dataFreshnessSeconds,
         requestCount,
+        // Grid signal fields
+        balancingAuthority: value.balancingAuthority ?? null,
+        demandRampPct: value.demandRampPct ?? null,
+        carbonSpikeProbability: value.carbonSpikeProbability ?? null,
+        curtailmentProbability: value.curtailmentProbability ?? null,
+        importCarbonLeakageScore: value.importCarbonLeakageScore ?? null,
+        // Provenance fields
+        sourceUsed: value.sourceUsed ?? null,
+        validationSource: value.validationSource ?? null,
+        referenceTime,
+        disagreementFlag: value.disagreementFlag ?? null,
+        disagreementPct: value.disagreementPct ?? null,
+        estimatedFlag: value.estimatedFlag ?? null,
+        syntheticFlag: value.syntheticFlag ?? null,
         meta: (value.meta ?? {}) as any,
       },
       select: { id: true },

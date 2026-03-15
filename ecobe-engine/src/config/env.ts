@@ -44,7 +44,7 @@ const envSchema = z.object({
   UPSTASH_VECTOR_INDEX_NAME: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),
-  OPTIMIZE_API_KEY: z.string().min(1, 'OPTIMIZE_API_KEY is required'),
+  OPTIMIZE_API_KEY: z.string().optional(),
 
   // Intelligence jobs / scheduling
   QSTASH_TOKEN: z.string().optional(),

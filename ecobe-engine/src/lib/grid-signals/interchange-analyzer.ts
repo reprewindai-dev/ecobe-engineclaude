@@ -81,6 +81,9 @@ export class InterchangeAnalyzer {
       localCarbonIntensity
     )
 
+    // Mark as heuristic-only only if real provider data is not available
+    const isHeuristicOnly = !neighborCarbonIntensities[snapshot.region]
+
     return {
       region: snapshot.region,
       balancingAuthority: snapshot.balancingAuthority,
@@ -90,7 +93,7 @@ export class InterchangeAnalyzer {
       localCarbonIntensity,
       timestamp: snapshot.timestamp,
       confidence: this.determineConfidence(snapshot, neighborCarbonIntensity, localCarbonIntensity),
-      isHeuristicOnly: true // IMPORTANT: Always mark as heuristic-only
+      isHeuristicOnly
     }
   }
 

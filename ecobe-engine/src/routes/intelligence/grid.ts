@@ -310,15 +310,38 @@ router.get('/hero-metrics', async (req, res) => {
     const carbonReductionMultiplier = baselineEmissions > 0 ? baselineEmissions / optimizedEmissions : 1
 
     // Calculate confidence metrics
-    const highConfidenceCount = totalCommands.filter(cmd => 
+    const highConfidenceCount = totalCommands.filter(cmd =>
       cmd.confidence && cmd.confidence >= 0.8
     ).length
 
-    const highConfidencePct = totalCommands.length > 0 ? 
+    const highConfidencePct = totalCommands.length > 0 ?
       (highConfidenceCount / totalCommands.length) * 100 : 0
 
-    // Calculate provider disagreement rate (simplified)
-    const disagreementRate = 3.1 // Would come from actual disagreement tracking
+    // Calculate actual provider disagreement rate from recent traces
+    const recentTraces = await prisma.carbonCommandTrace.findMany({
+      where: {
+        createdAt: { gte: monthStart }
+      },
+      select: { traceJson: true },
+      take: 1000,
+      orderBy: { createdAt: 'desc' }
+    })
+
+    let disagreementCount = 0
+    for (const trace of recentTraces) {
+      try {
+        const traceData = typeof trace.traceJson === 'string'
+          ? JSON.parse(trace.traceJson)
+          : trace.traceJson
+        if (traceData?.provenance?.disagreementFlag === true) {
+          disagreementCount++
+        }
+      } catch { /* ignore parse errors */ }
+    }
+
+    const disagreementRate = recentTraces.length > 0
+      ? Math.round((disagreementCount / recentTraces.length) * 1000) / 10
+      : 0
 
     const response = {
       timestamp: new Date().toISOString(),
@@ -365,8 +388,22 @@ router.get('/import-leakage', async (req, res) => {
       signalQuality: (s.signalQuality as any)?.toLowerCase?.() || 'medium'
     }))
 
-    // Analyze import carbon leakage
-    const leakages = InterchangeAnalyzer.analyzeImportCarbonLeakage(flatSnapshots as any)
+    // Fetch real provider carbon intensities for neighbor regions
+    const { providerRouter } = await import('../../lib/carbon/provider-router')
+    const neighborIntensities: Record<string, number> = {}
+    await Promise.all(
+      targetRegions.map(async (region) => {
+        try {
+          const signal = await providerRouter.getRoutingSignal(region, new Date())
+          if (signal && signal.source !== 'fallback') {
+            neighborIntensities[region] = signal.carbonIntensity
+          }
+        } catch { /* ignore - will use heuristic fallback */ }
+      })
+    )
+
+    // Analyze import carbon leakage with real provider intensities
+    const leakages = InterchangeAnalyzer.analyzeImportCarbonLeakage(flatSnapshots as any, neighborIntensities)
     const topLeakages = InterchangeAnalyzer.getTopImportLeakages(leakages, 10)
 
     return res.json({

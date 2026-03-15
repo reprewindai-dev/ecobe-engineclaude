@@ -11,6 +11,8 @@ import { ProviderHealthMonitor } from '@/components/ProviderHealthMonitor'
 import { PolicyEnforcementPanel } from '@/components/PolicyEnforcementPanel'
 import { CarbonOpportunityMap } from '@/components/CarbonOpportunityMap'
 import { ForecastAccuracyTracker } from '@/components/ForecastAccuracyTracker'
+import { GridIntelligencePanel } from '@/components/GridIntelligencePanel'
+import { EmberStructuralPanel } from '@/components/EmberStructuralPanel'
 import { GreenRoutingForm } from '@/components/GreenRoutingForm'
 import { DecisionReplay } from '@/components/DecisionReplay'
 import { EnergyCalculator } from '@/components/EnergyCalculator'
@@ -98,6 +100,8 @@ export default function DashboardPage() {
       {tab === 'signals' && (
         <div className="space-y-5">
           <CarbonOpportunityMap />
+          <GridIntelligencePanel />
+          <EmberStructuralPanel />
           <ForecastAccuracyTracker />
         </div>
       )}

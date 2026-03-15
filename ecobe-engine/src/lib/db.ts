@@ -7,11 +7,16 @@ const createPrismaClient = () => {
     log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
   })
 
-  return baseClient.$extends(
-    withOptimize({
-      apiKey: env.OPTIMIZE_API_KEY,
-    })
-  )
+  // Only attach Prisma Optimize when API key is available
+  if (env.OPTIMIZE_API_KEY) {
+    return baseClient.$extends(
+      withOptimize({
+        apiKey: env.OPTIMIZE_API_KEY,
+      })
+    )
+  }
+
+  return baseClient
 }
 
 type PrismaClientWithExtensions = ReturnType<typeof createPrismaClient>

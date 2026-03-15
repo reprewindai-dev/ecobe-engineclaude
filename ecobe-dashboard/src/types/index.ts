@@ -62,6 +62,18 @@ export interface GreenRoutingResult {
   confidenceBand?: { low: number; mid: number; high: number; empirical: boolean }
   dataResolutionMinutes?: number
   predicted_clean_window?: PredictedCleanWindow | null
+  // Grid signal fields
+  balancingAuthority?: string | null
+  demandRampPct?: number | null
+  carbonSpikeProbability?: number | null
+  curtailmentProbability?: number | null
+  importCarbonLeakageScore?: number | null
+  // Data quality flags
+  estimatedFlag?: boolean | null
+  syntheticFlag?: boolean | null
+  source_used?: string | null
+  validation_source?: string | null
+  fallback_used?: boolean | null
   // Lease fields — present when the engine issues a time-bounded routing token
   lease_id?: string
   lease_expires_at?: string          // ISO-8601 — hard expiry of the routing decision
@@ -284,6 +296,17 @@ export interface DecisionReplayResult {
   referenceTime: string | null
   fallbackUsed: boolean
   providerDisagreement: boolean
+  // Grid signal fields
+  balancingAuthority?: string | null
+  demandRampPct?: number | null
+  carbonSpikeProbability?: number | null
+  curtailmentProbability?: number | null
+  importCarbonLeakageScore?: number | null
+  // Data quality flags
+  estimatedFlag?: boolean
+  syntheticFlag?: boolean
+  validationSource?: string | null
+  disagreementPct?: number | null
 }
 
 // ─── Provider Health ──────────────────────────────────────────────────────────
@@ -371,6 +394,94 @@ export interface BestWindowResult {
   overallAvg: number
   cleanerThanAvgPct: number  // % below average
   confidence: 'high' | 'medium' | 'low'
+}
+
+// ─── Grid Intelligence ───────────────────────────────────────────────────────
+
+export interface GridSignalSummaryRegion {
+  region: string
+  balancingAuthority: string | null
+  demandRampPct: number | null
+  renewableRatio: number | null
+  fossilRatio: number | null
+  carbonSpikeProbability: number | null
+  curtailmentProbability: number | null
+  importCarbonLeakageScore: number | null
+  signalQuality: 'high' | 'medium' | 'low'
+}
+
+export interface GridSignalSummary {
+  timestamp: string
+  regions: GridSignalSummaryRegion[]
+}
+
+export interface CurtailmentWindow {
+  region: string
+  balancingAuthority: string | null
+  startTime: string
+  endTime: string
+  curtailmentProbability: number
+  expectedCarbonIntensity: number | null
+  confidence: 'high' | 'medium' | 'low'
+}
+
+export interface CarbonSpikeRisk {
+  region: string
+  balancingAuthority: string | null
+  carbonSpikeProbability: number
+  expectedRampPct: number | null
+  confidence: 'high' | 'medium' | 'low'
+}
+
+export interface GridOpportunities {
+  timestamp: string
+  topCurtailmentWindows: CurtailmentWindow[]
+  topCarbonSpikeRisks: CarbonSpikeRisk[]
+}
+
+export interface GridHeroMetrics {
+  timestamp: string
+  carbonReductionMultiplier: number
+  carbonAvoidedKgToday: number
+  carbonAvoidedKgMonth: number
+  highConfidenceDecisionPct: number
+  providerDisagreementRatePct: number
+}
+
+export interface ImportLeakageEntry {
+  region: string
+  balancingAuthority: string | null
+  importVolumeMwh: number
+  leakageScore: number
+  neighborCarbonIntensity: number | null
+  localCarbonIntensity: number | null
+  timestamp: string
+  confidence: 'high' | 'medium' | 'low'
+  isHeuristicOnly: boolean
+}
+
+export interface GridImportLeakage {
+  timestamp: string
+  topImportLeakages: ImportLeakageEntry[]
+  summary: Record<string, ImportLeakageEntry[]>
+}
+
+export interface RegionStructuralProfile {
+  region: string
+  structuralCarbonBaseline: number | null
+  carbonTrendDirection: 'increasing' | 'decreasing' | 'stable' | null
+  demandTrendTwh: number | null
+  demandPerCapita: number | null
+  fossilDependenceScore: number | null
+  renewableDependenceScore: number | null
+  generationMixProfile: Record<string, number> | null
+  windCapacityGw: number | null
+  solarCapacityGw: number | null
+  windCapacityTrend: 'increasing' | 'decreasing' | 'stable' | null
+  solarCapacityTrend: 'increasing' | 'decreasing' | 'stable' | null
+  confidenceRole: string
+  source: string
+  updatedAt: string
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

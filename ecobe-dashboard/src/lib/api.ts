@@ -20,6 +20,10 @@ import type {
   DekesIntegrationSummary,
   DekesHandoff,
   DekesOrgRisk,
+  GridHeroMetrics,
+  GridSignalSummary,
+  GridOpportunities,
+  GridImportLeakage,
 } from '@/types'
 
 const API_BASE = process.env.NEXT_PUBLIC_ECOBE_API_URL || '/api/ecobe'
@@ -232,6 +236,47 @@ export const ecobeApi = {
 
   async getBestWindow(request: BestWindowRequest): Promise<BestWindowResult> {
     const { data } = await api.post('/intelligence/best-window', request)
+    return data
+  },
+
+  // ── Grid Intelligence ───────────────────────────────────────────────────────────
+  async getGridHeroMetrics(): Promise<GridHeroMetrics> {
+    const { data } = await api.get('/intelligence/grid/hero-metrics')
+    return data
+  },
+
+  async getGridSummary(regions?: string[]): Promise<GridSignalSummary> {
+    const { data } = await api.get('/intelligence/grid/summary', {
+      params: regions ? { regions } : undefined,
+    })
+    return data
+  },
+
+  async getGridOpportunities(regions?: string[]): Promise<GridOpportunities> {
+    const { data } = await api.get('/intelligence/grid/opportunities', {
+      params: regions ? { regions } : undefined,
+    })
+    return data
+  },
+
+  async getGridRegionDetail(region: string, hours = 24): Promise<any> {
+    const { data } = await api.get(`/intelligence/grid/region/${encodeURIComponent(region)}`, {
+      params: { hours },
+    })
+    return data
+  },
+
+  async getGridImportLeakage(regions?: string[]): Promise<GridImportLeakage> {
+    const { data } = await api.get('/intelligence/grid/import-leakage', {
+      params: regions ? { regions } : undefined,
+    })
+    return data
+  },
+
+  async getGridAudit(region: string, hours = 24): Promise<any> {
+    const { data } = await api.get(`/intelligence/grid/audit/${encodeURIComponent(region)}`, {
+      params: { hours },
+    })
     return data
   },
 
