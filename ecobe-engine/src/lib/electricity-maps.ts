@@ -68,13 +68,9 @@ export class ElectricityMapsClient {
 
   async getCarbonIntensity(zone: string): Promise<CarbonIntensityData | null> {
     if (!this.apiKey) {
-      console.warn(`No Electricity Maps API key - using default ${env.DEFAULT_MAX_CARBON_G_PER_KWH} gCO2/kWh`)
+      // No fake data — return null so the router correctly falls through to WattTime
       await this.logFailure('Missing Electricity Maps API key')
-      return {
-        zone,
-        carbonIntensity: env.DEFAULT_MAX_CARBON_G_PER_KWH,
-        datetime: new Date().toISOString(),
-      }
+      return null
     }
 
     try {

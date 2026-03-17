@@ -1,4 +1,4 @@
-import { EmberClient, type EmberCarbonIntensityData, type EmberElectricityData, type EmberCapacityData } from '../ember'
+import { EmberClient, type EmberCarbonIntensityData, type EmberDemandData, type EmberGenerationData, type EmberCapacityData } from '../ember'
 
 export interface EmberData {
   carbonIntensity: Array<{

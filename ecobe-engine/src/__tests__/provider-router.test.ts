@@ -20,6 +20,7 @@ jest.mock('../lib/ember', () => ({
     getCarbonIntensityYearly: jest.fn().mockResolvedValue([]),
     getElectricityDemand: jest.fn().mockResolvedValue([]),
     getInstalledCapacity: jest.fn().mockResolvedValue([]),
+    deriveStructuralProfile: jest.fn().mockResolvedValue(null),
   }
 }))
 
@@ -319,11 +320,25 @@ describe('ProviderRouter', () => {
       })
       wattTime.getCurrentMOER.mockResolvedValue(null)
 
-      ember.getCarbonIntensityYearly.mockResolvedValue([
-        { date: 2024, carbon_intensity: 150 }
-      ])
-      ember.getElectricityDemand.mockResolvedValue([])
-      ember.getInstalledCapacity.mockResolvedValue([])
+      // Mock deriveStructuralProfile directly since getStructuralProfile now delegates to EmberClient
+      ember.deriveStructuralProfile.mockResolvedValue({
+        region: 'us-east-1',
+        entityCode: 'USA',
+        structuralCarbonBaseline: 150,
+        carbonTrendDirection: 'flat',
+        demandTrendTwh: 4000,
+        demandPerCapita: 12,
+        fossilDependenceScore: 0.6,
+        renewableDependenceScore: 0.4,
+        generationMixProfile: { Gas: 2000, Coal: 500, Wind: 400, Solar: 300 },
+        windCapacityGw: 150,
+        solarCapacityGw: 400,
+        windCapacityTrend: 0.02,
+        solarCapacityTrend: 0.07,
+        confidenceRole: 'validation',
+        source: 'ember',
+        updatedAt: new Date().toISOString(),
+      })
 
       const signal = await router.getRoutingSignal('us-east-1', new Date())
 

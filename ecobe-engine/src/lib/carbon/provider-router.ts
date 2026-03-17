@@ -3,6 +3,7 @@ import { electricityMaps } from '../electricity-maps'
 import { ember } from '../ember'
 import { GridSignalCache } from '../grid-signals/grid-signal-cache'
 import { GridSignalAudit } from '../grid-signals/grid-signal-audit'
+import { getRegionMapping } from '../grid-signals/region-mapping'
 import { EmberStructuralProfile, type EmberData, type RegionStructuralProfile } from '../ember/structural-profile'
 
 interface WeightedSignal {
@@ -151,10 +152,29 @@ export class ProviderRouter {
   /**
    * Get WattTime MOER signal (marginal amplifier)
    */
+  // WattTime v3 uses sub-regional names, not top-level BA codes
+  private static WATTTIME_REGION_MAP: Record<string, string> = {
+    'us-east-1': 'PJM_DC',         // N. Virginia → PJM sub-region
+    'us-east-2': 'PJM_ROANOKE',    // Ohio → PJM sub-region
+    'us-west-1': 'CAISO_NORTH',    // N. California → CAISO
+    'us-west-2': 'BPA',            // Oregon → Bonneville Power
+    'us-central1': 'MISO_MI',      // Iowa → MISO sub-region
+    'us-east4': 'PJM_DC',          // GCP N. Virginia
+    'us-west1': 'BPA',             // GCP Oregon
+    'eastus': 'PJM_DC',            // Azure Virginia
+    'eastus2': 'PJM_DC',           // Azure Virginia
+    'westus2': 'BPA',              // Azure Washington
+    'centralus': 'SPP_NORTH',      // Azure Iowa → SPP
+    'southcentralus': 'ERCOT_SOUTH', // Azure Texas
+  }
+
   private async getWattTimeSignal(region: string, timestamp: Date): Promise<ProviderSignal | null> {
     try {
+      // Map cloud region to WattTime v3 sub-regional name
+      const wattTimeRegion = ProviderRouter.WATTTIME_REGION_MAP[region] ?? region
+
       // Try current MOER first
-      const currentMoer = await wattTime.getCurrentMOER(region)
+      const currentMoer = await wattTime.getCurrentMOER(wattTimeRegion)
       if (currentMoer) {
         return {
           carbonIntensity: currentMoer.moer,
@@ -169,7 +189,7 @@ export class ProviderRouter {
       }
 
       // Fall back to MOER forecast for future timestamps
-      const forecastMoer = await wattTime.getMOERForecast(region, timestamp)
+      const forecastMoer = await wattTime.getMOERForecast(wattTimeRegion, timestamp)
       if (forecastMoer.length > 0) {
         const forecast = forecastMoer[0]
         return {
@@ -309,15 +329,25 @@ export class ProviderRouter {
 
     const emberProfile = await this.getStructuralProfile(region)
     if (emberProfile?.structuralCarbonBaseline) {
-      const deviation = Math.abs(emberProfile.structuralCarbonBaseline - signal.carbonIntensity)
-      const deviationPct = (deviation / Math.max(emberProfile.structuralCarbonBaseline, 1)) * 100
+      // Determine if the signal is in gCO2/kWh or is a WattTime percentile (0-100)
+      // WattTime v3 signal-index returns percentile, NOT gCO2/kWh — skip direct comparison
+      const isWattTimePercentile = disagreementSignals.length === 1 && disagreementSignals[0]?.source === 'watttime'
 
-      if (deviationPct > 30) {
-        confidencePenalty += 0.3
-        validationNotes = `High deviation (${deviationPct.toFixed(1)}%) from Ember baseline`
-      } else if (deviationPct > 15) {
-        confidencePenalty += 0.15
-        validationNotes = `Moderate deviation (${deviationPct.toFixed(1)}%) from Ember baseline`
+      if (!isWattTimePercentile) {
+        // Only compare when units match (gCO2/kWh vs gCO2/kWh)
+        const deviation = Math.abs(emberProfile.structuralCarbonBaseline - signal.carbonIntensity)
+        const deviationPct = (deviation / Math.max(emberProfile.structuralCarbonBaseline, 1)) * 100
+
+        if (deviationPct > 30) {
+          confidencePenalty += 0.3
+          validationNotes = `High deviation (${deviationPct.toFixed(1)}%) from Ember baseline`
+        } else if (deviationPct > 15) {
+          confidencePenalty += 0.15
+          validationNotes = `Moderate deviation (${deviationPct.toFixed(1)}%) from Ember baseline`
+        }
+      } else {
+        // For WattTime percentile: use Ember baseline as structural context only
+        validationNotes = `Ember baseline: ${emberProfile.structuralCarbonBaseline.toFixed(0)} gCO2/kWh (structural reference)`
       }
     }
 
@@ -380,26 +410,45 @@ export class ProviderRouter {
     }
   }
 
+  // Cache structural profiles for 1 hour (Ember data is monthly/yearly, no need to refetch per-request)
+  private structuralProfileCache = new Map<string, { profile: any | null; expiry: number }>()
+  private static STRUCTURAL_CACHE_TTL = 3600_000 // 1 hour
+
+  // Map cloud regions to Ember entity codes (country-level)
+  private static REGION_TO_EMBER_ENTITY: Record<string, string> = {
+    'us-east-1': 'USA', 'us-east-2': 'USA', 'us-west-1': 'USA', 'us-west-2': 'USA',
+    'us-central1': 'USA', 'us-east4': 'USA', 'us-west1': 'USA',
+    'eastus': 'USA', 'eastus2': 'USA', 'westus2': 'USA', 'centralus': 'USA', 'southcentralus': 'USA',
+    'eu-west-1': 'IRL', 'eu-west-2': 'GBR', 'eu-central-1': 'DEU',
+    'europe-west1': 'BEL',
+    'ap-southeast-1': 'SGP', 'ap-northeast-1': 'JPN', 'ap-south-1': 'IND',
+  }
+
   /**
    * Get structural profile from Ember (validation/context only)
-   * This is NOT used for routing decisions
+   * Uses EmberClient.deriveStructuralProfile which directly queries 5 Ember endpoints
+   * with correct field mappings. Cached for 1 hour (Ember data is monthly/yearly).
    */
-  async getStructuralProfile(region: string): Promise<RegionStructuralProfile | null> {
-    try {
-      const entityCode = region.toUpperCase()
-      const emberData = await this.fetchEmberStructuralData(entityCode)
+  async getStructuralProfile(region: string): Promise<any | null> {
+    const entityCode = ProviderRouter.REGION_TO_EMBER_ENTITY[region] ?? region.toUpperCase()
+    const cacheKey = `ember_structural_${entityCode}`
 
-      if (!emberData) {
+    // Check cache
+    const cached = this.structuralProfileCache.get(cacheKey)
+    if (cached && cached.expiry > Date.now()) {
+      return cached.profile
+    }
+
+    try {
+      // Use the EmberClient's deriveStructuralProfile which has correct API field mappings
+      const profile = await ember.deriveStructuralProfile(region, entityCode)
+
+      if (!profile || !profile.structuralCarbonBaseline) {
+        this.structuralProfileCache.set(cacheKey, { profile: null, expiry: Date.now() + ProviderRouter.STRUCTURAL_CACHE_TTL })
         return null
       }
 
-      const profile = EmberStructuralProfile.deriveStructuralProfile(emberData, region)
-
-      const validation = EmberStructuralProfile.validateProfile(profile)
-      if (!validation.isValid) {
-        console.warn('Ember structural profile warnings:', validation.warnings)
-      }
-
+      this.structuralProfileCache.set(cacheKey, { profile, expiry: Date.now() + ProviderRouter.STRUCTURAL_CACHE_TTL })
       return profile
     } catch (error) {
       console.warn(`Failed to get Ember structural profile for ${region}:`, error)
@@ -426,16 +475,16 @@ export class ProviderRouter {
     const emberData: EmberData = {
       carbonIntensity: carbonIntensityYearly.map((point) => ({
         year: point.date,
-        value: Number.isFinite(point.carbon_intensity) ? point.carbon_intensity : null
+        value: Number.isFinite(point.emissions_intensity_gco2_per_kwh) ? point.emissions_intensity_gco2_per_kwh : null
       })),
       demand: demandYearly.map((point) => ({
         year: point.date,
-        value: Number.isFinite(point.value) ? point.value : null
+        value: Number.isFinite(point.demand_twh) ? point.demand_twh : null
       })),
       capacity: capacityMonthly.map((point) => ({
         year: point.date,
-        fuelTech: point.technology ?? 'unknown',
-        value: Number.isFinite(point.capacity_mw) ? point.capacity_mw : null
+        fuelTech: point.series ?? 'unknown',
+        value: Number.isFinite(point.capacity_gw) ? point.capacity_gw : null
       }))
     }
 

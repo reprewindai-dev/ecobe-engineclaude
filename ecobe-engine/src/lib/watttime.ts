@@ -53,7 +53,7 @@ export class WattTimeClient {
   private tokenExpiry?: Date
 
   constructor() {
-    this.baseUrl = env.WATTTIME_BASE_URL || 'https://api.watttime.org/v3'
+    this.baseUrl = env.WATTTIME_BASE_URL || 'https://api.watttime.org'
     this.username = env.WATTTIME_USERNAME
     this.password = env.WATTTIME_PASSWORD
   }
@@ -71,9 +71,8 @@ export class WattTimeClient {
 
     try {
       const response = await wattTimeResilience.execute('authenticate', () =>
-        axios.post<WattTimeAuthResponse>(
+        axios.get<WattTimeAuthResponse>(
           `${this.baseUrl}/login`,
-          {},
           {
             auth: {
               username: this.username!,
@@ -121,11 +120,11 @@ export class WattTimeClient {
 
     try {
       const response = await wattTimeResilience.execute('getCurrentMOER', () =>
-        axios.get<MOERData>(
-          `${this.baseUrl}/signal-index`,
+        axios.get<{ data: Array<{ point_time: string; value: number }>; meta: { region: string; signal_type: string; units: string; data_point_period_seconds: number } }>(
+          `${this.baseUrl}/v3/signal-index`,
           {
             params: {
-              ba: balancingAuthority,
+              region: balancingAuthority,
               signal_type: 'co2_moer',
             },
             headers: {
@@ -136,12 +135,19 @@ export class WattTimeClient {
         )
       )
 
+      const dataPoint = response.data.data?.[0]
+      if (!dataPoint) {
+        return null
+      }
+
+      // v3 signal-index returns percentile (0-100), not raw lbs/MWh
+      // We normalize: percentile maps to approximate MOER for routing comparisons
       const result: WattTimeMOER = {
-        balancingAuthority: response.data.ba,
-        moer: response.data.moer,
-        moerPercent: response.data.percent,
-        timestamp: response.data.point_time,
-        frequency: response.data.freq,
+        balancingAuthority: response.data.meta.region,
+        moer: dataPoint.value, // percentile 0-100 (lower = cleaner)
+        moerPercent: dataPoint.value,
+        timestamp: dataPoint.point_time,
+        frequency: `${response.data.meta.data_point_period_seconds}s`,
       }
 
       await this.logSuccess()
@@ -165,7 +171,7 @@ export class WattTimeClient {
 
     try {
       const params: any = {
-        ba: balancingAuthority,
+        region: balancingAuthority,
         signal_type: 'co2_moer',
       }
 
@@ -177,8 +183,8 @@ export class WattTimeClient {
       }
 
       const response = await wattTimeResilience.execute('getMOERForecast', () =>
-        axios.get<{ data: MOERForecastData[] }>(
-          `${this.baseUrl}/forecast`,
+        axios.get<{ data: Array<{ point_time: string; value: number }>; meta: { region: string; signal_type: string; model: { date: string } } }>(
+          `${this.baseUrl}/v3/forecast`,
           {
             params,
             headers: {
@@ -189,11 +195,12 @@ export class WattTimeClient {
         )
       )
 
-      const forecasts = response.data.data.map((item) => ({
-        balancingAuthority: item.ba,
+      const modelVersion = response.data.meta?.model?.date ?? 'unknown'
+      const forecasts = (response.data.data || []).map((item) => ({
+        balancingAuthority: response.data.meta?.region ?? balancingAuthority,
         timestamp: item.point_time,
         moer: item.value,
-        version: item.version,
+        version: modelVersion,
       }))
 
       await this.logSuccess()

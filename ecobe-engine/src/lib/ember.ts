@@ -4,28 +4,42 @@ import { recordIntegrationFailure, recordIntegrationSuccess } from './integratio
 import { emberResilience } from './resilience'
 
 export interface EmberCarbonIntensityData {
+  entity: string
   entity_code: string
-  entity_name: string
+  is_aggregate_entity: boolean
   date: string
-  carbon_intensity: number
-  unit: string
+  emissions_intensity_gco2_per_kwh: number
 }
 
-export interface EmberElectricityData {
+export interface EmberDemandData {
+  entity: string
   entity_code: string
-  entity_name: string
+  is_aggregate_entity: boolean
   date: string
-  value: number
-  unit: string
-  metric: string
+  demand_twh: number
+  demand_mwh_per_capita?: number
+}
+
+export interface EmberGenerationData {
+  entity: string
+  entity_code: string
+  is_aggregate_entity: boolean
+  date: string
+  series: string
+  is_aggregate_series: boolean
+  generation_twh: number
+  share_of_generation_pct: number
 }
 
 export interface EmberCapacityData {
+  entity: string
   entity_code: string
-  entity_name: string
+  is_aggregate_entity: boolean
   date: string
-  technology: string
-  capacity_mw: number
+  series: string
+  is_aggregate_series: boolean
+  capacity_gw: number
+  capacity_w_per_capita?: number
 }
 
 export interface RegionStructuralProfile {
@@ -73,12 +87,16 @@ export class EmberClient {
   }
 
   private getHeaders() {
-    if (!this.apiKey) {
-      return {}
-    }
-    return {
-      'X-API-Key': this.apiKey,
-    }
+    // Ember uses query param auth, not headers — kept for future use
+    return {}
+  }
+
+  /**
+   * Ember authenticates via api_key query parameter (not header)
+   */
+  private getAuthParams(): Record<string, string> {
+    if (!this.apiKey) return {}
+    return { api_key: this.apiKey }
   }
 
   async getCarbonIntensityMonthly(entityCode: string, startDate?: string, endDate?: string): Promise<EmberCarbonIntensityData[]> {
@@ -99,7 +117,7 @@ export class EmberClient {
         axios.get<{ data: EmberCarbonIntensityData[] }>(
           `${this.baseUrl}/v1/carbon-intensity/monthly`,
           {
-            params,
+            params: { ...params, ...this.getAuthParams() },
             headers: this.getHeaders(),
             timeout: 15000,
           }
@@ -133,7 +151,7 @@ export class EmberClient {
         axios.get<{ data: EmberCarbonIntensityData[] }>(
           `${this.baseUrl}/v1/carbon-intensity/yearly`,
           {
-            params,
+            params: { ...params, ...this.getAuthParams() },
             headers: this.getHeaders(),
             timeout: 15000,
           }
@@ -149,7 +167,7 @@ export class EmberClient {
     }
   }
 
-  async getElectricityDemand(entityCode: string, resolution: 'monthly' | 'yearly', startDate?: string, endDate?: string): Promise<EmberElectricityData[]> {
+  async getElectricityDemand(entityCode: string, resolution: 'monthly' | 'yearly' = 'yearly', startDate?: string, endDate?: string): Promise<EmberDemandData[]> {
     if (!this.apiKey) {
       await this.logFailure('Missing Ember API key')
       return []
@@ -158,16 +176,15 @@ export class EmberClient {
     try {
       const params: any = {
         entity_code: entityCode,
-        temporal_resolution: resolution,
       }
       if (startDate) params.start_date = startDate
       if (endDate) params.end_date = endDate
 
       const response = await emberResilience.execute('getElectricityDemand', () =>
-        axios.get<{ data: EmberElectricityData[] }>(
+        axios.get<{ data: EmberDemandData[] }>(
           `${this.baseUrl}/v1/electricity-demand/${resolution}`,
           {
-            params,
+            params: { ...params, ...this.getAuthParams() },
             headers: this.getHeaders(),
             timeout: 15000,
           }
@@ -183,7 +200,7 @@ export class EmberClient {
     }
   }
 
-  async getElectricityGeneration(entityCode: string, resolution: 'monthly' | 'yearly', startDate?: string, endDate?: string): Promise<EmberElectricityData[]> {
+  async getElectricityGeneration(entityCode: string, resolution: 'monthly' | 'yearly' = 'yearly', startDate?: string, endDate?: string): Promise<EmberGenerationData[]> {
     if (!this.apiKey) {
       await this.logFailure('Missing Ember API key')
       return []
@@ -192,16 +209,15 @@ export class EmberClient {
     try {
       const params: any = {
         entity_code: entityCode,
-        temporal_resolution: resolution,
       }
       if (startDate) params.start_date = startDate
       if (endDate) params.end_date = endDate
 
       const response = await emberResilience.execute('getElectricityGeneration', () =>
-        axios.get<{ data: EmberElectricityData[] }>(
+        axios.get<{ data: EmberGenerationData[] }>(
           `${this.baseUrl}/v1/electricity-generation/${resolution}`,
           {
-            params,
+            params: { ...params, ...this.getAuthParams() },
             headers: this.getHeaders(),
             timeout: 15000,
           }
@@ -217,7 +233,7 @@ export class EmberClient {
     }
   }
 
-  async getInstalledCapacity(entityCode: string, startDate?: string, endDate?: string): Promise<EmberCapacityData[]> {
+  async getInstalledCapacity(entityCode: string, resolution: 'monthly' | 'yearly' = 'monthly', startDate?: string, endDate?: string): Promise<EmberCapacityData[]> {
     if (!this.apiKey) {
       await this.logFailure('Missing Ember API key')
       return []
@@ -226,16 +242,15 @@ export class EmberClient {
     try {
       const params: any = {
         entity_code: entityCode,
-        temporal_resolution: 'monthly',
       }
       if (startDate) params.start_date = startDate
       if (endDate) params.end_date = endDate
 
       const response = await emberResilience.execute('getInstalledCapacity', () =>
         axios.get<{ data: EmberCapacityData[] }>(
-          `${this.baseUrl}/v1/installed-capacity/monthly`,
+          `${this.baseUrl}/v1/installed-capacity/${resolution}`,
           {
-            params,
+            params: { ...params, ...this.getAuthParams() },
             headers: this.getHeaders(),
             timeout: 15000,
           }
@@ -251,110 +266,104 @@ export class EmberClient {
     }
   }
 
-  async deriveStructuralProfile(region: string, entityCode: string): Promise<RegionStructuralProfile> {
-    const endDate = new Date().toISOString().split('T')[0]
-    const startDate = new Date(Date.now() - 2 * 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  async deriveStructuralProfile(region: string, entityCode?: string): Promise<RegionStructuralProfile> {
+    // Default entityCode to region if not provided (e.g. 'USA')
+    const code = entityCode ?? region
 
     const [
       carbonIntensityMonthly,
       carbonIntensityYearly,
-      demandMonthly,
       demandYearly,
       generationYearly,
       capacity,
     ] = await Promise.all([
-      this.getCarbonIntensityMonthly(entityCode, startDate, endDate),
-      this.getCarbonIntensityYearly(entityCode, startDate, endDate),
-      this.getElectricityDemand(entityCode, 'monthly', startDate, endDate),
-      this.getElectricityDemand(entityCode, 'yearly', startDate, endDate),
-      this.getElectricityGeneration(entityCode, 'yearly', startDate, endDate),
-      this.getInstalledCapacity(entityCode, startDate, endDate),
+      this.getCarbonIntensityMonthly(code),
+      this.getCarbonIntensityYearly(code),
+      this.getElectricityDemand(code, 'yearly'),
+      this.getElectricityGeneration(code, 'yearly'),
+      this.getInstalledCapacity(code, 'monthly'),
     ])
 
-    // Calculate structural baseline (average of last year)
+    // Calculate structural baseline (average of last 12 months)
     const recentCarbon = carbonIntensityMonthly.slice(-12)
     const structuralCarbonBaseline = recentCarbon.length > 0
-      ? recentCarbon.reduce((sum, d) => sum + d.carbon_intensity, 0) / recentCarbon.length
+      ? recentCarbon.reduce((sum, d) => sum + d.emissions_intensity_gco2_per_kwh, 0) / recentCarbon.length
       : null
 
-    // Calculate carbon trend
+    // Calculate carbon trend (year-over-year)
     let carbonTrendDirection: 'up' | 'down' | 'flat' | null = null
     if (carbonIntensityYearly.length >= 2) {
-      const recent = carbonIntensityYearly[carbonIntensityYearly.length - 1].carbon_intensity
-      const previous = carbonIntensityYearly[carbonIntensityYearly.length - 2].carbon_intensity
+      const recent = carbonIntensityYearly[carbonIntensityYearly.length - 1].emissions_intensity_gco2_per_kwh
+      const previous = carbonIntensityYearly[carbonIntensityYearly.length - 2].emissions_intensity_gco2_per_kwh
       const change = (recent - previous) / previous
       carbonTrendDirection = change > 0.05 ? 'up' : change < -0.05 ? 'down' : 'flat'
     }
 
     // Calculate demand metrics
-    const latestDemand = demandYearly[demandYearly.length - 1]
-    const demandTrendTwh = latestDemand?.value ?? null
-    const demandPerCapita = null // Would need population data
+    const latestDemand = demandYearly.length > 0 ? demandYearly[demandYearly.length - 1] : null
+    const demandTrendTwh = latestDemand?.demand_twh ?? null
+    const demandPerCapita = latestDemand?.demand_mwh_per_capita ?? null
 
-    // Calculate generation mix
-    const latestGeneration = generationYearly.filter(g => g.date === latestDemand?.date)
+    // Calculate generation mix from most recent year
+    const latestYear = demandYearly.length > 0 ? demandYearly[demandYearly.length - 1].date : null
+    const latestGeneration = latestYear
+      ? generationYearly.filter(g => g.date === latestYear && !g.is_aggregate_series)
+      : []
     const generationMixProfile: Record<string, number> = {}
     let totalGeneration = 0
-    
+
     for (const gen of latestGeneration) {
-      if (gen.metric && gen.value) {
-        generationMixProfile[gen.metric] = gen.value
-        totalGeneration += gen.value
+      if (gen.series && gen.generation_twh) {
+        generationMixProfile[gen.series] = gen.generation_twh
+        totalGeneration += gen.generation_twh
       }
     }
 
     // Calculate fossil/renewable dependence
-    const fossilTypes = ['coal', 'gas', 'oil']
-    const renewableTypes = ['wind', 'solar', 'hydro', 'nuclear']
-    
+    const fossilTypes = ['coal', 'gas', 'oil', 'fossil']
+    const renewableTypes = ['wind', 'solar', 'hydro', 'nuclear', 'bioenergy', 'geothermal']
+
     let fossilGeneration = 0
     let renewableGeneration = 0
-    
+
     for (const [type, value] of Object.entries(generationMixProfile)) {
-      if (fossilTypes.some(f => type.toLowerCase().includes(f))) {
-        fossilGeneration += value
-      }
-      if (renewableTypes.some(r => type.toLowerCase().includes(r))) {
-        renewableGeneration += value
-      }
+      const lower = type.toLowerCase()
+      if (fossilTypes.some(f => lower.includes(f))) fossilGeneration += value
+      if (renewableTypes.some(r => lower.includes(r))) renewableGeneration += value
     }
 
     const fossilDependenceScore = totalGeneration > 0 ? fossilGeneration / totalGeneration : null
     const renewableDependenceScore = totalGeneration > 0 ? renewableGeneration / totalGeneration : null
 
-    // Calculate capacity metrics
-    const windCapacity = capacity.filter(c => c.technology?.toLowerCase().includes('wind'))
-    const solarCapacity = capacity.filter(c => c.technology?.toLowerCase().includes('solar'))
-    
-    const latestWindCapacity = windCapacity[windCapacity.length - 1]
-    const latestSolarCapacity = solarCapacity[solarCapacity.length - 1]
-    
-    const windCapacityGw = latestWindCapacity ? latestWindCapacity.capacity_mw / 1000 : null
-    const solarCapacityGw = latestSolarCapacity ? latestSolarCapacity.capacity_mw / 1000 : null
+    // Calculate capacity metrics (Ember returns capacity_gw directly)
+    const windCapacity = capacity.filter(c => c.series?.toLowerCase().includes('wind'))
+    const solarCapacity = capacity.filter(c => c.series?.toLowerCase().includes('solar'))
 
-    // Calculate capacity trends
-    let windCapacityTrend = null
-    let solarCapacityTrend = null
-    
-    if (windCapacity.length >= 2) {
-      const recent = windCapacity[windCapacity.length - 1].capacity_mw
-      const yearAgo = windCapacity[windCapacity.length - 13]?.capacity_mw
-      if (yearAgo) {
-        windCapacityTrend = (recent - yearAgo) / yearAgo
-      }
+    const latestWindCapacity = windCapacity.length > 0 ? windCapacity[windCapacity.length - 1] : null
+    const latestSolarCapacity = solarCapacity.length > 0 ? solarCapacity[solarCapacity.length - 1] : null
+
+    const windCapacityGw = latestWindCapacity?.capacity_gw ?? null
+    const solarCapacityGw = latestSolarCapacity?.capacity_gw ?? null
+
+    // Calculate capacity trends (YoY growth rate)
+    let windCapacityTrend: number | null = null
+    let solarCapacityTrend: number | null = null
+
+    if (windCapacity.length >= 13) {
+      const recent = windCapacity[windCapacity.length - 1].capacity_gw
+      const yearAgo = windCapacity[windCapacity.length - 13]?.capacity_gw
+      if (yearAgo && yearAgo > 0) windCapacityTrend = (recent - yearAgo) / yearAgo
     }
-    
-    if (solarCapacity.length >= 2) {
-      const recent = solarCapacity[solarCapacity.length - 1].capacity_mw
-      const yearAgo = solarCapacity[solarCapacity.length - 13]?.capacity_mw
-      if (yearAgo) {
-        solarCapacityTrend = (recent - yearAgo) / yearAgo
-      }
+
+    if (solarCapacity.length >= 13) {
+      const recent = solarCapacity[solarCapacity.length - 1].capacity_gw
+      const yearAgo = solarCapacity[solarCapacity.length - 13]?.capacity_gw
+      if (yearAgo && yearAgo > 0) solarCapacityTrend = (recent - yearAgo) / yearAgo
     }
 
     return {
       region,
-      entityCode,
+      entityCode: code,
       structuralCarbonBaseline,
       carbonTrendDirection,
       demandTrendTwh,
