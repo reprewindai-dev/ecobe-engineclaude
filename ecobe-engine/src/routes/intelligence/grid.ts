@@ -237,7 +237,7 @@ router.get('/region/:region', async (req, res) => {
         importCarbonLeakageScore: latestSnapshot.importCarbonLeakageScore,
         signalQuality: latestSnapshot.signalQuality
       },
-      history: history.map(snapshot => ({
+      history: history.map((snapshot: any) => ({
         timestamp: typeof snapshot.timestamp === 'string' ? snapshot.timestamp : snapshot.timestamp.toISOString(),
         demandRampPct: snapshot.demandChangePct,
         renewableRatio: snapshot.renewableRatio,
@@ -287,30 +287,30 @@ router.get('/hero-metrics', async (req, res) => {
       })
     ])
 
-    const carbonAvoidedToday = todayCommands.reduce((sum, cmd) => 
+    const carbonAvoidedToday = todayCommands.reduce((sum: number, cmd: any) =>
       sum + (cmd.estimatedSavingsKgCo2e || 0), 0
     )
 
-    const carbonAvoidedMonth = monthCommands.reduce((sum, cmd) => 
+    const carbonAvoidedMonth = monthCommands.reduce((sum: number, cmd: any) =>
       sum + (cmd.estimatedSavingsKgCo2e || 0), 0
     )
 
     // Calculate baseline vs optimized
-    const baselineEmissions = totalCommands.reduce((sum, cmd) => {
+    const baselineEmissions = totalCommands.reduce((sum: number, cmd: any) => {
       if (cmd.estimatedEmissionsKgCo2e && cmd.estimatedSavingsKgCo2e) {
         return sum + cmd.estimatedEmissionsKgCo2e + cmd.estimatedSavingsKgCo2e
       }
       return sum
     }, 0)
 
-    const optimizedEmissions = totalCommands.reduce((sum, cmd) => 
+    const optimizedEmissions = totalCommands.reduce((sum: number, cmd: any) =>
       sum + (cmd.estimatedEmissionsKgCo2e || 0), 0
     )
 
     const carbonReductionMultiplier = baselineEmissions > 0 ? baselineEmissions / optimizedEmissions : 1
 
     // Calculate confidence metrics
-    const highConfidenceCount = totalCommands.filter(cmd =>
+    const highConfidenceCount = totalCommands.filter((cmd: any) =>
       cmd.confidence && cmd.confidence >= 0.8
     ).length
 
@@ -440,14 +440,14 @@ router.get('/audit/:region', async (req, res) => {
     })
 
     const auditRecords = auditHistory
-      .map(event => {
+      .map((event: any) => {
         try {
           return JSON.parse(event.message || '{}')
         } catch {
           return null
         }
       })
-      .filter((record): record is any => record !== null)
+      .filter((record: any): record is any => record !== null)
 
     return res.json({
       region,
@@ -459,6 +459,36 @@ router.get('/audit/:region', async (req, res) => {
   } catch (error) {
     console.error('Audit trail error:', error)
     return res.status(500).json({ error: 'Failed to fetch audit trail' })
+  }
+})
+
+/**
+ * GET /api/v1/intelligence/grid/structural-profile/:region
+ * Get Ember structural profile for a region
+ */
+router.get('/structural-profile/:region', async (req, res) => {
+  try {
+    const { region } = req.params
+    const { providerRouter } = await import('../../lib/carbon/provider-router')
+
+    const profile = await providerRouter.getStructuralProfile(region)
+
+    if (!profile) {
+      return res.json({
+        region,
+        available: false,
+        message: 'No Ember structural data available for this region',
+      })
+    }
+
+    res.json({
+      region,
+      available: true,
+      profile,
+    })
+  } catch (error) {
+    console.error('Structural profile error:', error)
+    res.status(500).json({ error: 'Failed to get structural profile' })
   }
 })
 

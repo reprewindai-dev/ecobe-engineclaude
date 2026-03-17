@@ -37,9 +37,9 @@ export async function runIntelligenceAccuracyJob() {
     },
   })
 
-  const summaryMap = new Map<string, AccuracySummary>
+  const summaryMap = new Map<string, AccuracySummary>()
 
-  outcomes.forEach((outcome) => {
+  outcomes.forEach((outcome: any) => {
     const current = summaryMap.get(outcome.orgId) ?? {
       orgId: outcome.orgId,
       totalWorkloads: 0,
@@ -111,7 +111,7 @@ export async function runVectorCleanupJob() {
       break
     }
 
-    const ids = stale.map((item) => item.commandId)
+    const ids = stale.map((item: any) => item.commandId)
     await deleteWorkloadFingerprints(ids)
     await prisma.workloadEmbeddingIndex.deleteMany({ where: { commandId: { in: ids } } })
     totalRemoved += ids.length

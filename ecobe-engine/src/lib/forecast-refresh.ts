@@ -67,10 +67,10 @@ export async function getForecastRefreshSummary(
   }
 
   const runCount = runs.length
-  const successCount = runs.filter((r) => r.status === 'SUCCESS').length
+  const successCount = runs.filter((r: any) => r.status === 'SUCCESS').length
   const failureCount = runCount - successCount
-  const totalRecords = runs.reduce((sum, r) => sum + r.recordsIngested, 0)
-  const totalForecasts = runs.reduce((sum, r) => sum + r.forecastsGenerated, 0)
+  const totalRecords = runs.reduce((sum: number, r: any) => sum + r.recordsIngested, 0)
+  const totalForecasts = runs.reduce((sum: number, r: any) => sum + r.forecastsGenerated, 0)
   const lastRun = runs[0]
 
   return {

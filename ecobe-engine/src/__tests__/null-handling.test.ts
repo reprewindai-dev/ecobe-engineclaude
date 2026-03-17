@@ -67,7 +67,7 @@ describe('Null Handling in Grid Signals', () => {
       expect(features.renewableRatio).toBe(0.3)
       expect(features.carbonSpikeProbability).not.toBeNull()
       expect(features.curtailmentProbability).not.toBeNull()
-      expect(features.importCarbonLeakageScore).toBe(0) // No imports = no leakage
+      expect(features.importCarbonLeakageScore).toBeNull() // null interchange data → null (no data, not "no imports")
     })
 
     it('should handle negative interchange values correctly', () => {

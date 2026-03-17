@@ -344,6 +344,7 @@ describe('ProviderRouter', () => {
         // No confidence field
       })
       wattTime.getCurrentMOER.mockResolvedValue(null)
+      wattTime.getMOERForecast.mockResolvedValue([]) // Explicit: no forecast
 
       const signal = await router.getRoutingSignal('us-east-1', new Date())
 
@@ -360,11 +361,12 @@ describe('ProviderRouter', () => {
         // Minimal response
       })
       wattTime.getCurrentMOER.mockResolvedValue(null)
+      wattTime.getMOERForecast.mockResolvedValue([]) // Explicit: no forecast data
 
       const signal = await router.getRoutingSignal('us-east-1', new Date())
 
       expect(signal).toBeDefined()
-      expect(signal.carbonIntensity).toBe(250)
+      expect(signal.carbonIntensity).toBeCloseTo(250, 1) // Floating-point safe
     })
 
     it('should handle empty forecast arrays', async () => {

@@ -72,7 +72,7 @@ router.post('/retire', async (req, res) => {
       where: { id: { in: data.creditIds } },
     })
 
-    const totalOffsetCO2 = credits.reduce<number>((sum, c) => sum + c.amountCO2, 0)
+    const totalOffsetCO2 = credits.reduce((sum: number, c: any) => sum + c.amountCO2, 0)
 
     await prisma.emissionLog.create({
       data: {
@@ -127,12 +127,12 @@ router.get('/', async (req, res) => {
     })
 
     const totalActive = credits
-      .filter((c) => c.status === 'ACTIVE')
-      .reduce<number>((sum, c) => sum + c.amountCO2, 0)
+      .filter((c: any) => c.status === 'ACTIVE')
+      .reduce((sum: number, c: any) => sum + c.amountCO2, 0)
 
     const totalRetired = credits
-      .filter((c) => c.status === 'RETIRED')
-      .reduce<number>((sum, c) => sum + c.amountCO2, 0)
+      .filter((c: any) => c.status === 'RETIRED')
+      .reduce((sum: number, c: any) => sum + c.amountCO2, 0)
 
     res.json({
       credits,
@@ -140,7 +140,7 @@ router.get('/', async (req, res) => {
         totalCredits: credits.length,
         totalActiveCO2: totalActive,
         totalRetiredCO2: totalRetired,
-        totalPurchased: credits.reduce<number>((sum, c) => sum + c.priceUsd, 0),
+        totalPurchased: credits.reduce((sum: number, c: any) => sum + c.priceUsd, 0),
       },
     })
   } catch (error) {
@@ -162,7 +162,7 @@ router.get('/balance/:organizationId', async (req, res) => {
       },
     })
 
-    const availableCO2 = activeCredits.reduce<number>((sum, c) => sum + c.amountCO2, 0)
+    const availableCO2 = activeCredits.reduce((sum: number, c: any) => sum + c.amountCO2, 0)
 
     // Get total emissions
     const emissions = await prisma.emissionLog.findMany({
@@ -170,12 +170,12 @@ router.get('/balance/:organizationId', async (req, res) => {
     })
 
     const totalEmissions = emissions
-      .filter((e) => e.emissionCO2 > 0)
-      .reduce<number>((sum, e) => sum + e.emissionCO2, 0)
+      .filter((e: any) => e.emissionCO2 > 0)
+      .reduce((sum: number, e: any) => sum + e.emissionCO2, 0)
 
     const totalOffset = emissions
-      .filter((e) => e.offsetCO2 > 0)
-      .reduce<number>((sum, e) => sum + e.offsetCO2, 0)
+      .filter((e: any) => e.offsetCO2 > 0)
+      .reduce((sum: number, e: any) => sum + e.offsetCO2, 0)
 
     const netEmissions = totalEmissions - totalOffset
 
@@ -188,7 +188,7 @@ router.get('/balance/:organizationId', async (req, res) => {
       offsetPercentage: totalEmissions > 0 ? (totalOffset / totalEmissions) * 100 : 0,
       credits: {
         active: activeCredits.length,
-        totalValue: activeCredits.reduce<number>((sum, c) => sum + c.priceUsd, 0),
+        totalValue: activeCredits.reduce((sum: number, c: any) => sum + c.priceUsd, 0),
       },
     })
   } catch (error) {
@@ -212,12 +212,12 @@ router.post('/auto-offset', async (req, res) => {
     })
 
     const totalEmissions = emissions
-      .filter((e) => e.emissionCO2 > 0)
-      .reduce<number>((sum, e) => sum + e.emissionCO2, 0)
+      .filter((e: any) => e.emissionCO2 > 0)
+      .reduce((sum: number, e: any) => sum + e.emissionCO2, 0)
 
     const totalOffset = emissions
-      .filter((e) => e.offsetCO2 > 0)
-      .reduce<number>((sum, e) => sum + e.offsetCO2, 0)
+      .filter((e: any) => e.offsetCO2 > 0)
+      .reduce((sum: number, e: any) => sum + e.offsetCO2, 0)
 
     const targetOffset = (totalEmissions * targetOffsetPercentage) / 100
     const neededOffset = targetOffset - totalOffset
@@ -239,7 +239,7 @@ router.post('/auto-offset', async (req, res) => {
       orderBy: { purchasedAt: 'asc' }, // FIFO
     })
 
-    const availableCO2 = activeCredits.reduce<number>((sum, c) => sum + c.amountCO2, 0)
+    const availableCO2 = activeCredits.reduce((sum: number, c: any) => sum + c.amountCO2, 0)
 
     if (availableCO2 < neededOffset) {
       return res.status(400).json({

@@ -3,6 +3,7 @@ import { Client } from '@upstash/qstash'
 import { env } from '../config/env'
 import { redis } from '../lib/redis'
 import { recordIntegrationFailure, recordIntegrationSuccess } from '../lib/integration-metrics'
+import { setWorkerStatus } from '../routes/system'
 
 const JOB_CACHE_KEY = 'intelligence:qstash:schedules'
 const JOB_METADATA_KEY = 'intelligence:qstash:schedules:meta'
@@ -65,9 +66,15 @@ async function publishSchedule(job: IntelligenceJobDefinition, destination: stri
 export async function scheduleIntelligenceJobs() {
   if (!env.QSTASH_TOKEN || !env.ECOBE_ENGINE_URL) {
     console.warn('Skipping intelligence job scheduling; QStash token or ECOBE_ENGINE_URL missing')
+    setWorkerStatus('intelligenceJobs', {
+      running: false,
+      lastRun: new Date().toISOString(),
+      nextRun: null
+    })
     return
   }
 
+  const startTime = new Date()
   console.log(
     'QStash scheduling check',
     JSON.stringify({
@@ -76,6 +83,7 @@ export async function scheduleIntelligenceJobs() {
     })
   )
 
+  let scheduledCount = 0
   for (const job of jobDefinitions) {
     const destination = buildDestination(job.path)
     if (!destination) continue
@@ -104,10 +112,18 @@ export async function scheduleIntelligenceJobs() {
         )
         .exec()
       console.log(`✅ Scheduled ${job.name} via QStash (${job.cron})`)
+      scheduledCount++
     } catch (error) {
       console.error(`❌ Failed to schedule ${job.name}`, error)
     }
   }
+
+  // Update worker status
+  setWorkerStatus('intelligenceJobs', {
+    running: true,
+    lastRun: startTime.toISOString(),
+    nextRun: null
+  })
 }
 
 export async function getScheduledIntelligenceJobs() {

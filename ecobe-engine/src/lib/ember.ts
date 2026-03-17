@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { env } from '../config/env'
 import { recordIntegrationFailure, recordIntegrationSuccess } from './integration-metrics'
+import { emberResilience } from './resilience'
 
 export interface EmberCarbonIntensityData {
   entity_code: string
@@ -94,12 +95,15 @@ export class EmberClient {
       if (startDate) params.start_date = startDate
       if (endDate) params.end_date = endDate
 
-      const response = await axios.get<{ data: EmberCarbonIntensityData[] }>(
-        `${this.baseUrl}/v1/carbon-intensity/monthly`,
-        {
-          params,
-          headers: this.getHeaders(),
-        }
+      const response = await emberResilience.execute('getCarbonIntensityMonthly', () =>
+        axios.get<{ data: EmberCarbonIntensityData[] }>(
+          `${this.baseUrl}/v1/carbon-intensity/monthly`,
+          {
+            params,
+            headers: this.getHeaders(),
+            timeout: 15000,
+          }
+        )
       )
 
       await this.logSuccess()
@@ -125,12 +129,15 @@ export class EmberClient {
       if (startDate) params.start_date = startDate
       if (endDate) params.end_date = endDate
 
-      const response = await axios.get<{ data: EmberCarbonIntensityData[] }>(
-        `${this.baseUrl}/v1/carbon-intensity/yearly`,
-        {
-          params,
-          headers: this.getHeaders(),
-        }
+      const response = await emberResilience.execute('getCarbonIntensityYearly', () =>
+        axios.get<{ data: EmberCarbonIntensityData[] }>(
+          `${this.baseUrl}/v1/carbon-intensity/yearly`,
+          {
+            params,
+            headers: this.getHeaders(),
+            timeout: 15000,
+          }
+        )
       )
 
       await this.logSuccess()
@@ -156,12 +163,15 @@ export class EmberClient {
       if (startDate) params.start_date = startDate
       if (endDate) params.end_date = endDate
 
-      const response = await axios.get<{ data: EmberElectricityData[] }>(
-        `${this.baseUrl}/v1/electricity-demand/${resolution}`,
-        {
-          params,
-          headers: this.getHeaders(),
-        }
+      const response = await emberResilience.execute('getElectricityDemand', () =>
+        axios.get<{ data: EmberElectricityData[] }>(
+          `${this.baseUrl}/v1/electricity-demand/${resolution}`,
+          {
+            params,
+            headers: this.getHeaders(),
+            timeout: 15000,
+          }
+        )
       )
 
       await this.logSuccess()
@@ -187,12 +197,15 @@ export class EmberClient {
       if (startDate) params.start_date = startDate
       if (endDate) params.end_date = endDate
 
-      const response = await axios.get<{ data: EmberElectricityData[] }>(
-        `${this.baseUrl}/v1/electricity-generation/${resolution}`,
-        {
-          params,
-          headers: this.getHeaders(),
-        }
+      const response = await emberResilience.execute('getElectricityGeneration', () =>
+        axios.get<{ data: EmberElectricityData[] }>(
+          `${this.baseUrl}/v1/electricity-generation/${resolution}`,
+          {
+            params,
+            headers: this.getHeaders(),
+            timeout: 15000,
+          }
+        )
       )
 
       await this.logSuccess()
@@ -218,12 +231,15 @@ export class EmberClient {
       if (startDate) params.start_date = startDate
       if (endDate) params.end_date = endDate
 
-      const response = await axios.get<{ data: EmberCapacityData[] }>(
-        `${this.baseUrl}/v1/installed-capacity/monthly`,
-        {
-          params,
-          headers: this.getHeaders(),
-        }
+      const response = await emberResilience.execute('getInstalledCapacity', () =>
+        axios.get<{ data: EmberCapacityData[] }>(
+          `${this.baseUrl}/v1/installed-capacity/monthly`,
+          {
+            params,
+            headers: this.getHeaders(),
+            timeout: 15000,
+          }
+        )
       )
 
       await this.logSuccess()

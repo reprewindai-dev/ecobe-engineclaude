@@ -3,6 +3,11 @@ import { findSimilarWorkloads, WorkloadVectorMetadata } from './vector-store'
 import type { CarbonCommandPayload } from '../carbon-command'
 import { logIntelligenceEvent } from '../logger'
 import { incrementSimilarityQueryCount } from './metrics'
+import { redis } from '../redis'
+
+// Governance: Max 1 embedding + max 10 similarity lookups per command
+const MAX_SIMILARITY_LOOKUPS = 10
+const COMMAND_GUARD_TTL = 300 // 5 minutes
 
 export interface SimilarityInsight {
   similarWorkloadsFound: number
@@ -19,13 +24,33 @@ export interface SimilarityContext {
 }
 
 export async function analyzeSimilarWorkloads(payload: CarbonCommandPayload): Promise<SimilarityContext | null> {
+  // ── Governance: per-command dedup guard ─────────────────────────────────
+  // Ensures max 1 embedding + max 10 lookups per command ID.
+  // If this command was already analyzed, return null (cached result expected upstream).
+  // Use workload name + org as command dedup key (payload has no commandId at this stage)
+  const guardSeed = `${payload.orgId}:${payload.workload?.type ?? 'unknown'}:${Date.now().toString().slice(0, -4)}`
+  const commandGuardKey = `governance:similarity_guard:${guardSeed}`
+  const callCount = await redis.incr(commandGuardKey)
+  if (callCount === 1) {
+    await redis.expire(commandGuardKey, COMMAND_GUARD_TTL)
+  }
+  if (callCount > 1) {
+    logIntelligenceEvent('INTELLIGENCE_SIMILARITY_SEARCH', {
+      orgId: payload.orgId,
+      similarWorkloadsFound: 0,
+      recommendedRegion: null,
+      confidence: 0,
+    })
+    return null // Already analyzed this command — governance constraint
+  }
+
   const fingerprint = buildFingerprint(payload)
   const embedding = await generateWorkloadEmbedding(fingerprint)
   if (!embedding) {
     return null
   }
 
-  const neighbors = await findSimilarWorkloads(embedding, 10)
+  const neighbors = await findSimilarWorkloads(embedding, MAX_SIMILARITY_LOOKUPS)
   if (neighbors.length === 0) {
     return {
       fingerprint,

@@ -49,7 +49,30 @@ export async function getOrCreateUsageCounter(orgId: string, periodStart: Date =
 
 export function assertCommandQuota(org: Organization, usage: OrgUsageCounter) {
   if (usage.commandCount >= org.monthlyCommandLimit) {
-    throw new OrganizationError('QUOTA_EXCEEDED', 'Monthly command quota exceeded for this organization.')
+    // FREE tier: hard block, no overage allowed
+    if (org.planTier === 'FREE') {
+      throw new OrganizationError(
+        'QUOTA_EXCEEDED',
+        `Monthly command quota exceeded (${usage.commandCount}/${org.monthlyCommandLimit}). FREE tier does not allow overage. Upgrade to continue.`
+      )
+    }
+    // GROWTH tier: allow 10% grace buffer, then block
+    if (org.planTier === 'GROWTH') {
+      const graceLimit = Math.ceil(org.monthlyCommandLimit * 1.1)
+      if (usage.commandCount >= graceLimit) {
+        throw new OrganizationError(
+          'QUOTA_EXCEEDED',
+          `Monthly command quota exceeded with overage grace (${usage.commandCount}/${graceLimit}). Contact support or upgrade.`
+        )
+      }
+      // Within grace — allow but flag as overage
+      console.warn(`[governance] GROWTH org ${org.id} in overage zone: ${usage.commandCount}/${org.monthlyCommandLimit}`)
+    }
+    // ENTERPRISE tier: unlimited (monthlyCommandLimit is advisory), never hard-block
+    // Logged for awareness but not enforced
+    if (org.planTier === 'ENTERPRISE') {
+      console.info(`[governance] ENTERPRISE org ${org.id} advisory limit reached: ${usage.commandCount}/${org.monthlyCommandLimit}`)
+    }
   }
 }
 
@@ -62,26 +85,42 @@ export async function incrementOrgUsage(
     lastCommandAt?: Date
   }
 ) {
-  await prisma.orgUsageCounter.upsert({
-    where: {
-      orgId_periodStart: {
-        orgId,
-        periodStart,
-      },
-    },
-    update: {
-      commandCount: delta.commands ? { increment: delta.commands } : undefined,
-      estimatedEmissionsKg: delta.estimatedEmissionsKg ? { increment: delta.estimatedEmissionsKg } : undefined,
-      lastCommandAt: delta.lastCommandAt ?? new Date(),
-    },
-    create: {
-      orgId,
-      periodStart,
-      commandCount: delta.commands ?? 0,
-      estimatedEmissionsKg: delta.estimatedEmissionsKg ?? 0,
-      lastCommandAt: delta.lastCommandAt ?? new Date(),
-    },
-  })
+  // Governance-critical: usage increment must succeed for quota accuracy.
+  // Retry up to 3 times with exponential backoff.
+  const MAX_RETRIES = 3
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      await prisma.orgUsageCounter.upsert({
+        where: {
+          orgId_periodStart: {
+            orgId,
+            periodStart,
+          },
+        },
+        update: {
+          commandCount: delta.commands ? { increment: delta.commands } : undefined,
+          estimatedEmissionsKg: delta.estimatedEmissionsKg ? { increment: delta.estimatedEmissionsKg } : undefined,
+          lastCommandAt: delta.lastCommandAt ?? new Date(),
+        },
+        create: {
+          orgId,
+          periodStart,
+          commandCount: delta.commands ?? 0,
+          estimatedEmissionsKg: delta.estimatedEmissionsKg ?? 0,
+          lastCommandAt: delta.lastCommandAt ?? new Date(),
+        },
+      })
+      return // success
+    } catch (err) {
+      if (attempt === MAX_RETRIES) {
+        console.error(`[governance] CRITICAL: Usage increment failed after ${MAX_RETRIES} attempts for org ${orgId}:`, err instanceof Error ? err.message : String(err))
+        // Do NOT silently swallow — this means quota tracking drifts
+        throw err
+      }
+      const backoffMs = 100 * Math.pow(2, attempt - 1)
+      await new Promise(resolve => setTimeout(resolve, backoffMs))
+    }
+  }
 }
 
 export async function getAvailableCreditCoverage(orgId: string): Promise<number> {
@@ -89,7 +128,7 @@ export async function getAvailableCreditCoverage(orgId: string): Promise<number>
     where: { organizationId: orgId, status: 'ACTIVE' },
     select: { amountCO2: true },
   })
-  return credits.reduce((sum, credit) => sum + (credit.amountCO2 ?? 0), 0)
+  return credits.reduce((sum: number, credit: any) => sum + (credit.amountCO2 ?? 0), 0)
 }
 
 export async function ensureCreditCoverage(orgId: string, requiredAmount: number) {

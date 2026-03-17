@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { env } from '../../config/env'
 import { recordIntegrationFailure, recordIntegrationSuccess } from '../integration-metrics'
+import { eiaResilience } from '../resilience'
 import { EIABalanceData, EIAInterchangeData, EIASubregionData } from './types'
 
 export class EIA930Client {
@@ -59,9 +60,11 @@ export class EIA930Client {
         params.end = endTime.toISOString().slice(0, 10)
       }
 
-      const response = await axios.get<{ response: { data: EIABalanceData[] } }>(
-        `${this.baseUrl}/electricity/rto/region-data/data/`,
-        { params }
+      const response = await eiaResilience.execute('getBalance', () =>
+        axios.get<{ response: { data: EIABalanceData[] } }>(
+          `${this.baseUrl}/electricity/rto/region-data/data/`,
+          { params, timeout: 12000 }
+        )
       )
 
       await this.logSuccess()
@@ -103,9 +106,11 @@ export class EIA930Client {
         params.end = endTime.toISOString().slice(0, 10)
       }
 
-      const response = await axios.get<{ response: { data: EIAInterchangeData[] } }>(
-        `${this.baseUrl}/electricity/rto/interchange-data/data/`,
-        { params }
+      const response = await eiaResilience.execute('getInterchange', () =>
+        axios.get<{ response: { data: EIAInterchangeData[] } }>(
+          `${this.baseUrl}/electricity/rto/interchange-data/data/`,
+          { params, timeout: 12000 }
+        )
       )
 
       await this.logSuccess()
@@ -148,9 +153,11 @@ export class EIA930Client {
         params.end = endTime.toISOString().slice(0, 10)
       }
 
-      const response = await axios.get<{ response: { data: EIASubregionData[] } }>(
-        `${this.baseUrl}/electricity/rto/region-sub-ba-data/data/`,
-        { params }
+      const response = await eiaResilience.execute('getSubregion', () =>
+        axios.get<{ response: { data: EIASubregionData[] } }>(
+          `${this.baseUrl}/electricity/rto/region-sub-ba-data/data/`,
+          { params, timeout: 12000 }
+        )
       )
 
       await this.logSuccess()

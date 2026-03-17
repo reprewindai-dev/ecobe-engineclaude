@@ -2,6 +2,9 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { processCarbonCommand, CarbonCommandError } from '../lib/carbon-command'
 import { processCarbonOutcome, CarbonOutcomeError } from '../lib/carbon-outcome'
+import { prisma } from '../lib/db'
+import { OrganizationError } from '../lib/organizations'
+import { getLeasePolicy } from '../lib/governance'
 
 const router = Router()
 
@@ -120,6 +123,17 @@ router.post('/command', async (req, res) => {
       })
     }
 
+    if (error instanceof OrganizationError) {
+      const status = error.code === 'QUOTA_EXCEEDED' ? 429 : error.code === 'ORG_NOT_FOUND' ? 404 : 403
+      return res.status(status).json({
+        success: false,
+        error: {
+          code: error.code,
+          message: error.message,
+        },
+      })
+    }
+
     console.error('Carbon command error:', error)
     return res.status(500).json({
       success: false,
@@ -169,6 +183,122 @@ router.post('/outcome', async (req, res) => {
         message: 'Internal server error',
       },
     })
+  }
+})
+
+/**
+ * GET /carbon/command/:commandId/replay
+ * Replay a carbon-command decision for audit purposes.
+ * Returns the full decision with all governance fields.
+ */
+router.get('/command/:commandId/replay', async (req, res) => {
+  try {
+    const { commandId } = req.params
+
+    const command = await prisma.carbonCommand.findUnique({
+      where: { id: commandId },
+      include: {
+        trace: true,
+        outcomes: { take: 1, orderBy: { createdAt: 'desc' } },
+      },
+    })
+
+    if (!command) {
+      return res.status(404).json({ error: 'Command not found' })
+    }
+
+    // Parse trace data
+    let traceData: any = {}
+    if (command.trace?.traceJson) {
+      try {
+        traceData = typeof command.trace.traceJson === 'string'
+          ? JSON.parse(command.trace.traceJson as string)
+          : command.trace.traceJson
+      } catch { /* ignore parse errors */ }
+    }
+
+    // Parse metadata for additional governance fields
+    let metadata: any = {}
+    if (command.metadata) {
+      try {
+        metadata = typeof command.metadata === 'string'
+          ? JSON.parse(command.metadata)
+          : command.metadata
+      } catch { /* ignore */ }
+    }
+
+    // Reconstruct governance fields from persisted data
+    const confidence = command.confidence ?? 0.5
+    const qualityTier = confidence >= 0.8 ? 'high' : confidence >= 0.5 ? 'medium' : 'low'
+
+    const replay = {
+      replayedAt: new Date().toISOString(),
+      commandId: command.id,
+      decisionId: command.decisionId,
+      decisionFrameId: command.decisionId ?? command.id,
+      orgId: command.orgId,
+      createdAt: command.createdAt.toISOString(),
+
+      recommendation: {
+        region: command.selectedRegion,
+        startAt: command.selectedStartAt?.toISOString() ?? command.createdAt.toISOString(),
+        mode: command.executionMode,
+        expectedCarbonIntensity: command.expectedCarbonIntensity,
+        expectedLatencyMs: command.expectedLatencyMs,
+        estimatedEmissionsKgCo2e: command.estimatedEmissionsKgCo2e,
+        estimatedSavingsKgCo2e: command.estimatedSavingsKgCo2e,
+        confidence,
+      },
+
+      governance: {
+        qualityTier,
+        carbon_delta_g_per_kwh: metadata?.carbonDeltaGPerKwh ?? null,
+        forecast_stability: confidence >= 0.75 ? 'stable' : confidence >= 0.45 ? 'medium' : 'unstable',
+        provider_disagreement: {
+          flag: traceData?.provenance?.disagreementFlag ?? false,
+          pct: traceData?.provenance?.disagreementPct ?? 0,
+        },
+        source_used: traceData?.provenance?.sourceUsed ?? 'carbon_command',
+        validation_source: traceData?.provenance?.validationSource ?? null,
+        fallback_used: traceData?.provenance?.fallbackUsed ?? false,
+        estimatedFlag: metadata?.estimatedFlag ?? false,
+        syntheticFlag: metadata?.syntheticFlag ?? false,
+        balancingAuthority: (command as any).balancingAuthority ?? null,
+        demandRampPct: (command as any).demandRampPct ?? null,
+        carbonSpikeProbability: (command as any).carbonSpikeProbability ?? null,
+        curtailmentProbability: (command as any).curtailmentProbability ?? null,
+        importCarbonLeakageScore: (command as any).importCarbonLeakageScore ?? null,
+        // Lease fields reconstructed from quality tier and creation time
+        lease_policy: getLeasePolicy(qualityTier as 'high' | 'medium' | 'low'),
+        lease_expired: (() => {
+          const { leaseMinutes } = getLeasePolicy(qualityTier as 'high' | 'medium' | 'low')
+          const leaseEnd = new Date(command.createdAt.getTime() + leaseMinutes * 60 * 1000)
+          return new Date() > leaseEnd
+        })(),
+      },
+
+      summary: {
+        reason: command.summaryReason,
+        tradeoff: command.tradeoffSummary,
+      },
+
+      outcome: command.outcomes?.[0] ? {
+        actualRegion: command.outcomes[0].actualRegion,
+        actualStartAt: command.outcomes[0].actualStartAt?.toISOString(),
+        actualEndAt: command.outcomes[0].actualEndAt?.toISOString(),
+        actualCarbonIntensity: command.outcomes[0].actualCarbonIntensity,
+        actualEmissionsKgCo2e: command.outcomes[0].actualEmissionsKgCo2e,
+        regionMatch: command.outcomes[0].regionMatch,
+        predictionQuality: command.outcomes[0].predictionQuality,
+      } : null,
+
+      traceData,
+    }
+
+    return res.json(replay)
+  } catch (error) {
+    console.error('Carbon command replay error:', error)
+    return res.status(500).json({ error: 'Failed to replay command' })
   }
 })
 

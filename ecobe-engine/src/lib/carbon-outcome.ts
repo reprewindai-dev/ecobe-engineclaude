@@ -352,7 +352,7 @@ async function updateAccuracyMetrics(
 ) {
   const today = startOfDay(new Date())
 
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx: any) => {
     const existing = await tx.carbonCommandAccuracyDaily.findFirst({
       where: {
         date: today,
@@ -501,7 +501,7 @@ export async function processCarbonOutcome(payload: CarbonOutcomePayload): Promi
     ? measurementMap[payload.emissions.measurementSource]
     : CarbonMeasurementSource.ESTIMATED
 
-  const outcomeRecord = await prisma.$transaction(async (tx) => {
+  const outcomeRecord = await prisma.$transaction(async (tx: any) => {
     const outcome = await tx.carbonCommandOutcome.create({
       data: {
         commandId: command.id,

@@ -293,18 +293,20 @@ export class InterchangeAnalyzer {
       }
     }
 
-    // Calculate trends for each region
-    return Object.entries(regionTrends).map(([region, data]) => {
-      const trend = this.calculateLinearTrend(data.volumes)
-      const averageImportVolume = data.volumes.reduce((sum, v) => sum + v, 0) / data.volumes.length
+    // Calculate trends for each region — skip regions with no actual imports
+    return Object.entries(regionTrends)
+      .filter(([, data]) => data.volumes.length > 0)
+      .map(([region, data]) => {
+        const trend = this.calculateLinearTrend(data.volumes)
+        const averageImportVolume = data.volumes.reduce((sum, v) => sum + v, 0) / data.volumes.length
 
-      return {
-        region,
-        trend: trend.slope > 0.1 ? 'increasing' : trend.slope < -0.1 ? 'decreasing' : 'stable',
-        trendStrength: Math.abs(trend.slope),
-        averageImportVolume
-      }
-    })
+        return {
+          region,
+          trend: trend.slope > 0.1 ? 'increasing' : trend.slope < -0.1 ? 'decreasing' : 'stable',
+          trendStrength: Math.abs(trend.slope),
+          averageImportVolume
+        }
+      })
   }
 
   /**

@@ -3,8 +3,11 @@ import { redis } from './redis'
 import { electricityMaps } from './electricity-maps'
 import { providerRouter } from './carbon/provider-router'
 import { GridSignalCache } from './grid-signals/grid-signal-cache'
+import { GridSignalAudit } from './grid-signals/grid-signal-audit'
 import { wattTime } from './watttime'
 import { randomUUID } from 'crypto'
+import { classifyJob, recordLedgerEntry, storeProviderSnapshot } from './routing'
+import { generateLease, retryAsync } from './governance'
 
 export interface RoutingRequest {
   preferredRegions: string[]
@@ -202,11 +205,158 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
   // Calculate worst intensity for delta
   const worstIntensity = Math.max(...scored.map(r => r.carbonIntensity))
 
-  // Determine quality tier
-  const qualityTier = bestSignal?.confidence >= 0.8 ? 'high' : bestSignal?.confidence >= 0.5 ? 'medium' : 'low'
+  // Determine quality tier — use providerRouter.validateSignalQuality when available,
+  // otherwise fall back to confidence-based derivation
+  let qualityTier: 'high' | 'medium' | 'low' = 'low'
+  if (bestSignal) {
+    try {
+      const validation = await providerRouter.validateSignalQuality(bestSignal)
+      qualityTier = validation.qualityTier
+    } catch {
+      // Fallback: derive from confidence directly
+      qualityTier = bestSignal.confidence >= 0.8 ? 'high' : bestSignal.confidence >= 0.5 ? 'medium' : 'low'
+    }
+  }
 
-  // Derive forecast stability
-  const forecastStability = bestSignal ? deriveStability(bestSignal.confidence) : null
+  // Derive forecast stability with provider disagreement context
+  const forecastStability = bestSignal ? deriveStability(bestSignal.confidence, {
+    flag: bestSignal.provenance.disagreementFlag,
+    pct: bestSignal.provenance.disagreementPct
+  }) : null
+
+  const decisionFrameId = randomUUID()
+
+  // ── Governance: Generate decision lease (shared policy from governance.ts) ──
+  const lease = generateLease(qualityTier, decisionFrameId)
+  const { lease_id: leaseId, lease_expires_at: leaseExpiresAt, must_revalidate_after: mustRevalidateAfter, leaseMinutes } = lease
+
+  // ── Governance: Quality gate ───────────────────────────────────────────
+  // If quality is critically low AND fallback was used, flag in explanation
+  const governanceWarnings: string[] = []
+  if (qualityTier === 'low' && bestSignal?.provenance.fallbackUsed) {
+    governanceWarnings.push('LOW_QUALITY_FALLBACK: Decision based on static fallback data, not live provider signals.')
+  }
+  if (bestSignal?.provenance.disagreementFlag && (bestSignal.provenance.disagreementPct ?? 0) > 25) {
+    governanceWarnings.push(`HIGH_DISAGREEMENT: Provider signals diverge by ${bestSignal.provenance.disagreementPct?.toFixed(1)}%. Decision confidence reduced.`)
+  }
+  if (forecastStability === 'unstable') {
+    governanceWarnings.push('UNSTABLE_FORECAST: Grid conditions are volatile. Recommend shorter execution windows.')
+  }
+
+  // Record audit trail (with retry — governance-critical data)
+  if (bestSignal) {
+    retryAsync(() => providerRouter.recordSignalProvenance(bestSignal, decisionFrameId), 'signal-provenance')
+
+    // Record grid signal audit (with retry)
+    retryAsync(() => GridSignalAudit.recordRoutingDecision(
+      decisionFrameId,
+      best.region,
+      {
+        balancingAuthority: gridSnapshot?.balancingAuthority ?? null,
+        demandRampPct: gridSnapshot?.demandChangePct ?? null,
+        carbonSpikeProbability: gridSnapshot?.carbonSpikeProbability ?? null,
+        curtailmentProbability: gridSnapshot?.curtailmentProbability ?? null,
+        importCarbonLeakageScore: gridSnapshot?.importCarbonLeakageScore ?? null,
+        signalQuality: qualityTier as 'high' | 'medium' | 'low',
+        estimatedFlag: bestSignal.isForecast,
+        syntheticFlag: bestSignal.source === 'fallback'
+      },
+      {
+        sourceUsed: bestSignal.provenance.sourceUsed,
+        validationSource: bestSignal.provenance.contributingSources.length > 1 ? 'ember' : undefined,
+        referenceTime: bestSignal.provenance.referenceTime,
+        fetchedAt: bestSignal.provenance.fetchedAt,
+        fallbackUsed: bestSignal.provenance.fallbackUsed,
+        disagreementFlag: bestSignal.provenance.disagreementFlag,
+        disagreementPct: bestSignal.provenance.disagreementPct
+      }
+    ), 'grid-signal-audit')
+  }
+
+  // ── Carbon Ledger + Provider Snapshots (with retry) ─────────────────────
+  const classification = classifyJob({
+    executionMode: 'immediate',
+    latencySlaMs: best.latency,
+  })
+
+  // Record carbon ledger entry for audit-grade accounting (with retry)
+  retryAsync(() => recordLedgerEntry({
+    orgId: 'system', // Overridden by carbon-command when called with orgId
+    decisionFrameId,
+    classification,
+    energyEstimateKwh: 0.05, // Default estimate; carbon-command overrides
+    baselineRegion: scored[scored.length - 1]?.region ?? best.region,
+    scoringResult: {
+      candidates: [],
+      selected: {
+        candidateId: 'best',
+        region: best.region,
+        startTs: new Date(),
+        carbonEstimateGPerKwh: best.carbonIntensity,
+        latencyEstimateMs: best.latency,
+        queueDelayEstimateSec: null,
+        costEstimateUsd: null,
+        confidenceScore: bestSignal?.confidence ?? null,
+        retryRiskScore: null,
+        balancingAuthority: gridSnapshot?.balancingAuthority ?? null,
+        demandRampPct: gridSnapshot?.demandChangePct ?? null,
+        carbonSpikeProbability: gridSnapshot?.carbonSpikeProbability ?? null,
+        curtailmentProbability: gridSnapshot?.curtailmentProbability ?? null,
+        importCarbonLeakageScore: gridSnapshot?.importCarbonLeakageScore ?? null,
+        estimatedFlag: bestSignal?.isForecast ?? false,
+        syntheticFlag: bestSignal?.source === 'fallback',
+        carbonScore: null, latencyScore: null, costScore: null,
+        queueScore: null, uncertaintyScore: null, rankScore: best.score,
+        isFeasible: true, rejectionReason: null,
+      },
+      fallback: scored[1] ? {
+        candidateId: 'fallback',
+        region: scored[1].region,
+        startTs: new Date(),
+        carbonEstimateGPerKwh: scored[1].carbonIntensity,
+        latencyEstimateMs: scored[1].latency,
+        queueDelayEstimateSec: null, costEstimateUsd: null,
+        confidenceScore: null, retryRiskScore: null,
+        balancingAuthority: null, demandRampPct: null,
+        carbonSpikeProbability: null, curtailmentProbability: null,
+        importCarbonLeakageScore: null,
+        estimatedFlag: false, syntheticFlag: false,
+        carbonScore: null, latencyScore: null, costScore: null,
+        queueScore: null, uncertaintyScore: null, rankScore: scored[1].score,
+        isFeasible: true, rejectionReason: null,
+      } : null,
+      baselineCandidate: scored[scored.length - 1] ? {
+        candidateId: 'baseline',
+        region: scored[scored.length - 1].region,
+        startTs: new Date(),
+        carbonEstimateGPerKwh: worstIntensity,
+        latencyEstimateMs: null, queueDelayEstimateSec: null,
+        costEstimateUsd: null, confidenceScore: null, retryRiskScore: null,
+        balancingAuthority: null, demandRampPct: null,
+        carbonSpikeProbability: null, curtailmentProbability: null,
+        importCarbonLeakageScore: null,
+        estimatedFlag: false, syntheticFlag: false,
+        carbonScore: null, latencyScore: null, costScore: null,
+        queueScore: null, uncertaintyScore: null, rankScore: null,
+        isFeasible: true, rejectionReason: null,
+      } : null,
+      totalEvaluated: scored.length,
+      totalFeasible: filtered.length,
+    },
+  }), 'carbon-ledger')
+
+  // Store provider snapshot for audit trail (with retry)
+  if (bestSignal) {
+    retryAsync(() => storeProviderSnapshot({
+      provider: bestSignal.provenance.sourceUsed ?? 'unknown',
+      zone: best.region,
+      signalType: 'intensity',
+      signalValue: best.carbonIntensity,
+      observedAt: new Date(bestSignal.provenance.fetchedAt),
+      freshnessSec: Math.floor((Date.now() - new Date(bestSignal.provenance.fetchedAt).getTime()) / 1000),
+      confidence: bestSignal.confidence,
+    }), 'provider-snapshot')
+  }
 
   return {
     selectedRegion: best.region,
@@ -226,12 +376,20 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     curtailmentProbability: gridSnapshot?.curtailmentProbability ?? null,
     importCarbonLeakageScore: gridSnapshot?.importCarbonLeakageScore ?? null,
     source_used: bestSignal?.provenance.sourceUsed ?? null,
-    validation_source: bestSignal?.provenance.contributingSources.length ?? 0 > 1 ? 'ember' : null,
+    validation_source: (bestSignal?.provenance.contributingSources.length ?? 0) > 1 ? 'ember' : null,
     fallback_used: bestSignal?.provenance.fallbackUsed ?? null,
     estimatedFlag: bestSignal?.isForecast ?? null,
-    syntheticFlag: bestSignal?.source === 'fallback' ?? null,
+    syntheticFlag: bestSignal?.source === 'fallback' || null,
     predicted_clean_window: cleanWindows?.[0] ?? null,
-    decisionFrameId: randomUUID(),
+    decisionFrameId: decisionFrameId,
+    // Governance: Lease fields
+    lease_id: leaseId,
+    lease_expires_at: leaseExpiresAt,
+    must_revalidate_after: mustRevalidateAfter,
+    // Governance: Warnings and explanation
+    explanation: governanceWarnings.length > 0
+      ? governanceWarnings.join(' | ')
+      : `Routed to ${best.region} with ${qualityTier} confidence. Lease valid for ${leaseMinutes}m.`,
     alternatives: scored.slice(1, 3).map((r) => ({
       region: r.region,
       carbonIntensity: r.carbonIntensity,
@@ -258,8 +416,18 @@ async function getCleanWindowSafe(region: string) {
   }
 }
 
-function deriveStability(confidence: number): 'stable' | 'medium' | 'unstable' {
-  if (confidence >= 0.8) return 'stable'
-  if (confidence >= 0.5) return 'medium'
+// retryAsync imported from ./governance (single source of truth)
+
+function deriveStability(confidence: number, providerDisagreement?: { flag: boolean; pct: number | null }): 'stable' | 'medium' | 'unstable' {
+  let score = confidence * 100 // Start with confidence as base
+
+  // Penalize for provider disagreement
+  if (providerDisagreement?.flag) {
+    const pct = providerDisagreement.pct ?? 15
+    score -= pct * 0.5
+  }
+
+  if (score >= 75) return 'stable'
+  if (score >= 45) return 'medium'
   return 'unstable'
 }

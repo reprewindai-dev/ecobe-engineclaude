@@ -5,6 +5,7 @@ import { electricityMaps } from '../lib/electricity-maps'
 import { forecastCarbonIntensity } from '../lib/carbon-forecasting'
 import { env } from '../config/env'
 import { redis } from '../lib/redis'
+import { setWorkerStatus } from '../routes/system'
 import {
   DEFAULT_FORECAST_HOURS,
   DEFAULT_FORECAST_LOOKBACK_HOURS,
@@ -71,43 +72,60 @@ async function recordRefresh(region: string, payload: {
 }
 
 export async function runForecastRefresh() {
-  const regions = await prisma.region.findMany({ where: { enabled: true }, select: { code: true } })
-  let totalRecords = 0
-  let totalForecasts = 0
-  let failed = false
-  let failureMessage: string | undefined
+  const runStart = new Date()
+  try {
+    const regions = await prisma.region.findMany({ where: { enabled: true }, select: { code: true } })
+    let totalRecords = 0
+    let totalForecasts = 0
+    let failed = false
+    let failureMessage: string | undefined
 
-  for (const region of regions) {
-    try {
-      const result = await ingestRegionHistory(region.code)
-      totalRecords += result.recordsIngested
-      totalForecasts += result.forecastsGenerated
-      await recordRefresh(region.code, {
-        recordsIngested: result.recordsIngested,
-        forecastsGenerated: result.forecastsGenerated,
-        status: 'SUCCESS',
-      })
-    } catch (error: any) {
-      failed = true
-      failureMessage = error?.message ?? 'Unknown forecast refresh error'
-      console.error(`Forecast refresh failed for ${region.code}:`, error)
-      await recordRefresh(region.code, {
-        recordsIngested: 0,
-        forecastsGenerated: 0,
-        status: 'FAILURE',
-        message: failureMessage,
-      })
+    for (const region of regions) {
+      try {
+        const result = await ingestRegionHistory(region.code)
+        totalRecords += result.recordsIngested
+        totalForecasts += result.forecastsGenerated
+        await recordRefresh(region.code, {
+          recordsIngested: result.recordsIngested,
+          forecastsGenerated: result.forecastsGenerated,
+          status: 'SUCCESS',
+        })
+      } catch (error: any) {
+        failed = true
+        failureMessage = error?.message ?? 'Unknown forecast refresh error'
+        console.error(`Forecast refresh failed for ${region.code}:`, error)
+        await recordRefresh(region.code, {
+          recordsIngested: 0,
+          forecastsGenerated: 0,
+          status: 'FAILURE',
+          message: failureMessage,
+        })
+      }
     }
-  }
 
-  await redis.hset(FORECAST_REFRESH_STATE_KEY, {
-    timestamp: new Date().toISOString(),
-    totalRegions: regions.length.toString(),
-    totalRecords: totalRecords.toString(),
-    totalForecasts: totalForecasts.toString(),
-    status: failed ? 'FAILURE' : 'SUCCESS',
-    message: failureMessage ?? '',
-  })
+    await redis.hset(FORECAST_REFRESH_STATE_KEY, {
+      timestamp: new Date().toISOString(),
+      totalRegions: regions.length.toString(),
+      totalRecords: totalRecords.toString(),
+      totalForecasts: totalForecasts.toString(),
+      status: failed ? 'FAILURE' : 'SUCCESS',
+      message: failureMessage ?? '',
+    })
+
+    // Update worker status
+    setWorkerStatus('forecastPoller', {
+      running: true,
+      lastRun: runStart.toISOString(),
+      nextRun: null
+    })
+  } catch (error) {
+    console.error('Fatal error in forecast refresh:', error)
+    setWorkerStatus('forecastPoller', {
+      running: false,
+      lastRun: new Date().toISOString(),
+      nextRun: null
+    })
+  }
 }
 
 export function startForecastWorker() {
@@ -115,6 +133,12 @@ export function startForecastWorker() {
     console.log('⏭️  Forecast refresh worker disabled')
     return
   }
+
+  setWorkerStatus('forecastPoller', {
+    running: true,
+    lastRun: null,
+    nextRun: null
+  })
 
   cron.schedule(env.FORECAST_REFRESH_CRON, () => {
     runForecastRefresh().catch((error) => {

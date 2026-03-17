@@ -5,6 +5,7 @@ export type IntegrationSource =
   | 'WATTTIME'
   | 'EMBER'
   | 'EIA_930'
+  | 'GRIDSTATUS'
   | 'OPENAI'
   | 'UPSTASH_VECTOR'
   | 'DEKES_API'
@@ -112,8 +113,8 @@ async function updateLatencyP95(source: IntegrationSource) {
   }
 
   const sorted = samples
-    .map((sample) => sample.durationMs ?? 0)
-    .sort((a, b) => a - b)
+    .map((sample: any) => sample.durationMs ?? 0)
+    .sort((a: number, b: number) => a - b)
   const index = Math.floor(0.95 * (sorted.length - 1))
   const value = sorted[index]
 

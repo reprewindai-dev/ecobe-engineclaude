@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { env } from '../config/env'
 import { recordIntegrationFailure, recordIntegrationSuccess } from './integration-metrics'
+import { wattTimeResilience } from './resilience'
 
 interface WattTimeAuthResponse {
   token: string
@@ -69,23 +70,26 @@ export class WattTimeClient {
     }
 
     try {
-      const response = await axios.post<WattTimeAuthResponse>(
-        `${this.baseUrl}/login`,
-        {},
-        {
-          auth: {
-            username: this.username,
-            password: this.password,
-          },
-        }
+      const response = await wattTimeResilience.execute('authenticate', () =>
+        axios.post<WattTimeAuthResponse>(
+          `${this.baseUrl}/login`,
+          {},
+          {
+            auth: {
+              username: this.username!,
+              password: this.password!,
+            },
+            timeout: 8000,
+          }
+        )
       )
 
       this.token = response.data.token
-      // Token expires in 30 minutes
-      this.tokenExpiry = new Date(Date.now() + 30 * 60 * 1000)
-      
+      // Token expires in 25 minutes (reduced from 30 to avoid edge cases)
+      this.tokenExpiry = new Date(Date.now() + 25 * 60 * 1000)
+
       await this.logSuccess()
-      return this.token
+      return this.token ?? null
     } catch (error: any) {
       console.error('WattTime authentication failed:', error.message)
       await this.logFailure(error.message ?? 'Authentication failed')
@@ -116,17 +120,20 @@ export class WattTimeClient {
     }
 
     try {
-      const response = await axios.get<MOERData>(
-        `${this.baseUrl}/signal-index`,
-        {
-          params: {
-            ba: balancingAuthority,
-            signal_type: 'co2_moer',
-          },
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
+      const response = await wattTimeResilience.execute('getCurrentMOER', () =>
+        axios.get<MOERData>(
+          `${this.baseUrl}/signal-index`,
+          {
+            params: {
+              ba: balancingAuthority,
+              signal_type: 'co2_moer',
+            },
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            timeout: 8000,
+          }
+        )
       )
 
       const result: WattTimeMOER = {
@@ -169,14 +176,17 @@ export class WattTimeClient {
         params.end = endTime.toISOString()
       }
 
-      const response = await axios.get<{ data: MOERForecastData[] }>(
-        `${this.baseUrl}/forecast`,
-        {
-          params,
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
+      const response = await wattTimeResilience.execute('getMOERForecast', () =>
+        axios.get<{ data: MOERForecastData[] }>(
+          `${this.baseUrl}/forecast`,
+          {
+            params,
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            timeout: 8000,
+          }
+        )
       )
 
       const forecasts = response.data.data.map((item) => ({

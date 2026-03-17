@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { forecastCarbonIntensity, findOptimalWindow } from '../lib/carbon-forecasting'
+import { getAccuracyMetrics } from '../lib/forecast-accuracy'
 
 const router = Router()
 
@@ -45,6 +46,34 @@ router.get('/:region/optimal-window', async (req, res) => {
       return res.status(400).json({ error: 'Invalid request', details: error.errors })
     }
     console.error('Optimal window route error:', error)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+const accuracyQuerySchema = z.object({
+  region: z.string().optional(),
+  days: z.coerce.number().int().min(1).max(365).default(30),
+})
+
+/**
+ * GET /accuracy
+ * Get forecast accuracy metrics over time
+ */
+router.get('/accuracy', async (req, res) => {
+  try {
+    const { region, days } = accuracyQuerySchema.parse(req.query)
+
+    const metrics = await getAccuracyMetrics(region, days)
+    return res.json({
+      timestamp: new Date().toISOString(),
+      window: { days, region: region || 'all' },
+      metrics,
+    })
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Invalid request', details: error.errors })
+    }
+    console.error('Accuracy metrics error:', error)
     return res.status(500).json({ error: 'Internal server error' })
   }
 })

@@ -14,6 +14,7 @@ import { prisma } from '../lib/db'
 import { electricityMaps } from '../lib/electricity-maps'
 import { getIntegrationMetric, computeIntegrationSuccessRate } from '../lib/integration-metrics'
 import { getForecastRefreshSummary, getLastForecastRefreshState } from '../lib/forecast-refresh'
+import { getProviderFreshness, getCapacityOverview } from '../lib/routing'
 
 const router = Router()
 
@@ -312,12 +313,13 @@ router.get('/metrics', async (req, res) => {
       ])
 
     const totalDecisions = decisions.length
-    const totalRequests = decisions.reduce<number>(
-      (sum: number, d: DecisionMetricsRow) => sum + (d.requestCount ?? 0),
+    const typedDecisions = decisions as DecisionMetricsRow[]
+    const totalRequests = typedDecisions.reduce(
+      (sum: number, d) => sum + (d.requestCount ?? 0),
       0
     )
 
-    const co2SavedG = decisions.reduce<number>((sum: number, d: DecisionMetricsRow) => {
+    const co2SavedG = typedDecisions.reduce((sum: number, d) => {
       const base = d.co2BaselineG ?? 0
       const chosen = d.co2ChosenG ?? 0
       const delta = base - chosen
@@ -326,7 +328,7 @@ router.get('/metrics', async (req, res) => {
 
     const greenRouteRate =
       totalDecisions > 0
-        ? decisions.reduce<number>((sum: number, d: DecisionMetricsRow) => {
+        ? typedDecisions.reduce((sum: number, d) => {
             const base = d.co2BaselineG ?? 0
             const chosen = d.co2ChosenG ?? 0
             return sum + (base > chosen ? 1 : 0)
@@ -336,15 +338,15 @@ router.get('/metrics', async (req, res) => {
     const fallbackRate =
       totalDecisions > 0
         ?
-          decisions.reduce<number>(
-            (sum: number, d: DecisionMetricsRow) => sum + (d.fallbackUsed ? 1 : 0),
+          typedDecisions.reduce(
+            (sum: number, d) => sum + (d.fallbackUsed ? 1 : 0),
             0
           ) / totalDecisions
         : 0
 
     const topChosenRegion = topChosenRegionAgg[0]?.chosenRegion ?? null
 
-    const deltas = decisions
+    const deltas = typedDecisions
       .map((d: DecisionMetricsRow) => {
         if (d.latencyActualMs === null || d.latencyActualMs === undefined) return null
         if (d.latencyEstimateMs === null || d.latencyEstimateMs === undefined) return null
@@ -355,7 +357,7 @@ router.get('/metrics', async (req, res) => {
 
     const p95LatencyDeltaMs = percentile(deltas, 0.95)
 
-    const dataFreshnessMaxSeconds = decisions.reduce<number | null>((max: number | null, d: DecisionMetricsRow) => {
+    const dataFreshnessMaxSeconds = typedDecisions.reduce((max: number | null, d: DecisionMetricsRow) => {
       const v = d.dataFreshnessSeconds
       if (v === null || v === undefined) return max
       if (max === null) return v
@@ -472,7 +474,7 @@ router.get('/accuracy', async (req, res) => {
       })
     }
 
-    const commandIds = commands.map((cmd) => cmd.id)
+    const commandIds = commands.map((cmd: any) => cmd.id)
     const outcomes = await prisma.carbonCommandOutcome.findMany({
       where: {
         commandId: { in: commandIds },
@@ -498,10 +500,10 @@ router.get('/accuracy', async (req, res) => {
 
     if (region) {
       const regionCommandIds = new Set(
-        outcomes.filter((o) => o.actualRegion === region).map((o) => o.commandId)
+        outcomes.filter((o: any) => o.actualRegion === region).map((o: any) => o.commandId)
       )
-      filteredOutcomes = outcomes.filter((o) => o.actualRegion === region)
-      filteredCommands = commands.filter((cmd) => regionCommandIds.has(cmd.id))
+      filteredOutcomes = outcomes.filter((o: any) => o.actualRegion === region)
+      filteredCommands = commands.filter((cmd: any) => regionCommandIds.has(cmd.id))
     }
 
     if (filteredCommands.length === 0) {
@@ -615,7 +617,7 @@ router.get('/accuracy', async (req, res) => {
       return regionStats.get(key)!
     }
 
-    filteredCommands.forEach((command) => {
+    filteredCommands.forEach((command: any) => {
       commandMeta.set(command.id, {
         createdAt: command.createdAt,
         workloadType: command.workloadType ?? null,
@@ -636,7 +638,7 @@ router.get('/accuracy', async (req, res) => {
     const costVarianceValues: (number | null)[] = []
     let verifiedSavingsTotal = 0
 
-    filteredOutcomes.forEach((outcome) => {
+    filteredOutcomes.forEach((outcome: any) => {
       const command = commandMeta.get(outcome.commandId)
       if (!command) return
 
@@ -693,7 +695,7 @@ router.get('/accuracy', async (req, res) => {
     })
 
     const totalEstimatedSavings = filteredCommands.reduce(
-      (sum, cmd) => sum + (cmd.estimatedSavingsKgCo2e ?? 0),
+      (sum: number, cmd: any) => sum + (cmd.estimatedSavingsKgCo2e ?? 0),
       0
     )
 
@@ -706,9 +708,9 @@ router.get('/accuracy', async (req, res) => {
       avgLatencyVariancePct: safeAvg(latencyVarianceValues),
       avgCostVariancePct: safeAvg(costVarianceValues),
       predictionQuality: {
-        high: filteredOutcomes.filter((o) => o.predictionQuality === 'HIGH').length,
-        medium: filteredOutcomes.filter((o) => o.predictionQuality === 'MEDIUM').length,
-        low: filteredOutcomes.filter((o) => o.predictionQuality === 'LOW').length,
+        high: filteredOutcomes.filter((o: any) => o.predictionQuality === 'HIGH').length,
+        medium: filteredOutcomes.filter((o: any) => o.predictionQuality === 'MEDIUM').length,
+        low: filteredOutcomes.filter((o: any) => o.predictionQuality === 'LOW').length,
       },
       totalEstimatedSavingsKgCo2e: Number(totalEstimatedSavings.toFixed(3)),
       totalVerifiedSavingsKgCo2e: Number(verifiedSavingsTotal.toFixed(3)),
@@ -917,6 +919,487 @@ router.get('/regions', async (_req, res) => {
   } catch (error) {
     console.error('Dashboard regions error:', error)
     return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+const savingsQuerySchema = z.object({
+  range: z.enum(['7d', '30d', '90d']).default('30d'),
+})
+
+router.get('/savings', async (req, res) => {
+  try {
+    const { range } = savingsQuerySchema.parse(req.query)
+    const days = range === '7d' ? 7 : range === '90d' ? 90 : 30
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+
+    const decisions = await prisma.dashboardRoutingDecision.findMany({
+      where: { createdAt: { gte: since } },
+      select: {
+        co2BaselineG: true,
+        co2ChosenG: true,
+        estimatedKwh: true,
+        createdAt: true,
+      },
+    })
+
+    const totalBaseline = decisions.reduce((sum: number, d: any) => sum + (d.co2BaselineG ?? 0), 0)
+    const totalChosen = decisions.reduce((sum: number, d: any) => sum + (d.co2ChosenG ?? 0), 0)
+    const totalAvoided = totalBaseline - totalChosen
+    const totalKwh = decisions.reduce((sum: number, d: any) => sum + (d.estimatedKwh ?? 0), 0)
+
+    // Group by day for trend
+    const dailyMap = new Map<string, { baseline: number; chosen: number; count: number }>()
+    for (const d of decisions) {
+      const day = d.createdAt.toISOString().split('T')[0]
+      const existing = dailyMap.get(day) || { baseline: 0, chosen: 0, count: 0 }
+      existing.baseline += d.co2BaselineG ?? 0
+      existing.chosen += d.co2ChosenG ?? 0
+      existing.count++
+      dailyMap.set(day, existing)
+    }
+
+    const dailyTrend = Array.from(dailyMap.entries())
+      .map(([date, data]) => ({
+        date,
+        baselineG: Math.round(data.baseline),
+        chosenG: Math.round(data.chosen),
+        avoidedG: Math.round(data.baseline - data.chosen),
+        decisions: data.count,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date))
+
+    res.json({
+      timeRange: range,
+      totalBaselineG: Math.round(totalBaseline),
+      totalChosenG: Math.round(totalChosen),
+      totalAvoidedG: Math.round(totalAvoided),
+      reductionPct:
+        totalBaseline > 0
+          ? Math.round((totalAvoided / totalBaseline) * 100 * 10) / 10
+          : 0,
+      totalKwh: Math.round(totalKwh * 1000) / 1000,
+      totalDecisions: decisions.length,
+      carbonReductionMultiplier:
+        totalChosen > 0
+          ? Math.round((totalBaseline / totalChosen) * 100) / 100
+          : null,
+      dailyTrend,
+    })
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Invalid request', details: error.errors })
+    }
+    console.error('Dashboard savings error:', error)
+    res.status(500).json({ error: 'Failed to compute savings' })
+  }
+})
+
+router.get('/methodology/providers', async (_req, res) => {
+  res.json({
+    providers: [
+      {
+        name: 'WattTime',
+        role: 'marginal_amplifier',
+        signalType: 'MOER (Marginal Operating Emission Rate)',
+        refreshRate: 'every 5 minutes',
+        coverage: 'North America (balancing authorities)',
+        confidence: 0.9,
+        doctrinePosition: 'SECONDARY - marginal signal never used alone',
+      },
+      {
+        name: 'Electricity Maps',
+        role: 'primary_live_signal',
+        signalType: 'Flow-traced carbon intensity',
+        refreshRate: 'every 15-60 minutes',
+        coverage: 'Global (200+ zones)',
+        confidence: 0.7,
+        doctrinePosition: 'PRIMARY - authoritative realtime intensity',
+      },
+      {
+        name: 'Ember',
+        role: 'validation_baseline',
+        signalType: 'Structural carbon baseline (yearly/monthly)',
+        refreshRate: 'monthly/yearly',
+        coverage: 'Global (country-level)',
+        confidence: 0.5,
+        doctrinePosition: 'VALIDATION ONLY - never used for routing',
+      },
+      {
+        name: 'EIA-930',
+        role: 'predictive_telemetry',
+        signalType: 'Grid balance, interchange, subregion demand',
+        refreshRate: 'every 15 minutes',
+        coverage: 'US balancing authorities',
+        confidence: 0.75,
+        doctrinePosition: 'TELEMETRY - derived features for spike/curtailment detection',
+      },
+    ],
+    doctrine: {
+      principle: 'Lowest defensible signal, not lowest raw signal',
+      averaging: 'No provider averaging - confidence-weighted blending only',
+      fallback: 'Static 450 gCO2/kWh when all providers unavailable',
+      auditability: 'Every decision records full provenance chain',
+    },
+  })
+})
+
+router.post('/demo-seed', async (req, res) => {
+  try {
+    const regions = ['US-CAL-CISO', 'FR', 'DE', 'US-NEISO', 'JP-TK', 'SG']
+    const now = new Date()
+    const decisions = []
+
+    for (let i = 0; i < 100; i++) {
+      const ts = new Date(now.getTime() - i * 15 * 60000) // every 15 min for ~25 hours
+      const baselineRegion = regions[Math.floor(Math.random() * regions.length)]
+      const chosenRegion = regions[Math.floor(Math.random() * regions.length)]
+      const baselineIntensity = 250 + Math.floor(Math.random() * 300)
+      const chosenIntensity = 80 + Math.floor(Math.random() * 200)
+      const kwh = 0.1 + Math.random() * 0.5
+
+      decisions.push({
+        ts,
+        workloadName: ['ml-training', 'data-pipeline', 'video-encode', 'batch-process', 'api-inference'][Math.floor(Math.random() * 5)],
+        opName: ['train-model', 'etl-job', 'transcode', 'batch-run', 'inference'][Math.floor(Math.random() * 5)],
+        baselineRegion,
+        chosenRegion,
+        zoneBaseline: baselineRegion,
+        zoneChosen: chosenRegion,
+        carbonIntensityBaselineGPerKwh: baselineIntensity,
+        carbonIntensityChosenGPerKwh: chosenIntensity,
+        estimatedKwh: Math.round(kwh * 1000) / 1000,
+        co2BaselineG: Math.round(baselineIntensity * kwh),
+        co2ChosenG: Math.round(chosenIntensity * kwh),
+        requestCount: 1,
+        reason: 'carbon-optimization',
+        meta: { source: 'demo-seed', iteration: i }
+      })
+    }
+
+    // Batch insert
+    let created = 0
+    for (const d of decisions) {
+      try {
+        await prisma.dashboardRoutingDecision.create({ data: d as any })
+        created++
+      } catch (e) {
+        // Skip duplicates
+      }
+    }
+
+    res.json({
+      success: true,
+      created,
+      message: `Seeded ${created} demo routing decisions across ${regions.length} regions`
+    })
+  } catch (error) {
+    console.error('Demo seed error:', error)
+    res.status(500).json({ error: 'Failed to seed demo data' })
+  }
+})
+
+/**
+ * GET /api/v1/dashboard/carbon-ledger-summary
+ * Unified carbon ledger KPIs for the dashboard hero panel.
+ * Combines CarbonLedgerEntry aggregates with provider freshness and capacity status.
+ */
+router.get('/carbon-ledger-summary', async (req, res) => {
+  try {
+    const days = parseInt(req.query.days as string) || 30
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    // Parallel queries
+    const [allEntries, todayEntries, providerHealth, capacityStatus] = await Promise.all([
+      prisma.carbonLedgerEntry.findMany({
+        where: { createdAt: { gte: since } },
+        select: {
+          carbonSavedG: true,
+          verifiedSavingsG: true,
+          baselineCarbonG: true,
+          chosenCarbonG: true,
+          confidenceScore: true,
+          qualityTier: true,
+          jobClass: true,
+          chosenRegion: true,
+          createdAt: true,
+          fallbackUsed: true,
+          estimatedFlag: true,
+          syntheticFlag: true,
+          disagreementFlag: true,
+          disagreementPct: true,
+          carbonSpikeProbability: true,
+          curtailmentProbability: true,
+        },
+      }),
+      prisma.carbonLedgerEntry.findMany({
+        where: { createdAt: { gte: today } },
+        select: {
+          carbonSavedG: true,
+          verifiedSavingsG: true,
+          baselineCarbonG: true,
+          chosenCarbonG: true,
+        },
+      }),
+      getProviderFreshness().catch(() => []),
+      getCapacityOverview(24).catch(() => []),
+    ])
+
+    // Period totals
+    const totalSavedG = allEntries.reduce((s: number, e: any) => s + e.carbonSavedG, 0)
+    const totalVerifiedG = allEntries.reduce((s: number, e: any) => s + (e.verifiedSavingsG ?? 0), 0)
+    const totalBaselineG = allEntries.reduce((s: number, e: any) => s + e.baselineCarbonG, 0)
+    const totalChosenG = allEntries.reduce((s: number, e: any) => s + e.chosenCarbonG, 0)
+
+    // Today totals
+    const todaySavedG = todayEntries.reduce((s: number, e: any) => s + e.carbonSavedG, 0)
+    const todayBaselineG = todayEntries.reduce((s: number, e: any) => s + e.baselineCarbonG, 0)
+
+    // High confidence %
+    const highConfidence = allEntries.filter((e: any) => (e.confidenceScore ?? 0) >= 0.7).length
+    const highConfidencePct = allEntries.length > 0
+      ? Math.round((highConfidence / allEntries.length) * 100 * 10) / 10
+      : 0
+
+    // Provider disagreement rate
+    const disagreements = allEntries.filter((e: any) => e.disagreementFlag === true).length
+    const disagreementRatePct = allEntries.length > 0
+      ? Math.round((disagreements / allEntries.length) * 100 * 10) / 10
+      : 0
+
+    // Quality tier distribution
+    const qualityTiers = { high: 0, medium: 0, low: 0 }
+    for (const e of allEntries) {
+      const tier = (e as any).qualityTier as string | null
+      if (tier === 'high') qualityTiers.high++
+      else if (tier === 'medium') qualityTiers.medium++
+      else qualityTiers.low++
+    }
+
+    // Job class breakdown
+    const jobClassMap = new Map<string, { count: number; savedG: number }>()
+    for (const e of allEntries) {
+      const jc = (e as any).jobClass as string
+      const existing = jobClassMap.get(jc) || { count: 0, savedG: 0 }
+      existing.count++
+      existing.savedG += (e as any).carbonSavedG
+      jobClassMap.set(jc, existing)
+    }
+
+    // Region breakdown (top 10)
+    const regionMap = new Map<string, { count: number; savedG: number }>()
+    for (const e of allEntries) {
+      const r = (e as any).chosenRegion as string
+      const existing = regionMap.get(r) || { count: 0, savedG: 0 }
+      existing.count++
+      existing.savedG += (e as any).carbonSavedG
+      regionMap.set(r, existing)
+    }
+
+    // Daily trend
+    const dailyMap = new Map<string, { savedG: number; jobs: number; spikeFlags: number; curtailmentFlags: number }>()
+    for (const e of allEntries) {
+      const date = (e as any).createdAt.toISOString().split('T')[0]
+      const ex = dailyMap.get(date) || { savedG: 0, jobs: 0, spikeFlags: 0, curtailmentFlags: 0 }
+      ex.savedG += (e as any).carbonSavedG
+      ex.jobs++
+      if (((e as any).carbonSpikeProbability ?? 0) > 0.5) ex.spikeFlags++
+      if (((e as any).curtailmentProbability ?? 0) > 0.5) ex.curtailmentFlags++
+      dailyMap.set(date, ex)
+    }
+
+    return res.json({
+      period: `${days}d`,
+      totalJobsRouted: allEntries.length,
+
+      // Hero KPIs
+      carbonReductionMultiplier: totalChosenG > 0
+        ? Math.round((totalBaselineG / totalChosenG) * 100) / 100
+        : null,
+      carbonAvoidedTodayG: Math.round(todaySavedG),
+      carbonAvoidedTodayKg: Math.round(todaySavedG / 1000 * 100) / 100,
+      carbonAvoidedPeriodG: Math.round(totalSavedG),
+      carbonAvoidedPeriodKg: Math.round(totalSavedG / 1000 * 100) / 100,
+      carbonAvoidedPeriodTons: Math.round(totalSavedG / 1_000_000 * 1000) / 1000,
+      verifiedSavingsG: Math.round(totalVerifiedG),
+      averageReductionPct: totalBaselineG > 0
+        ? Math.round((totalSavedG / totalBaselineG) * 100 * 10) / 10
+        : 0,
+
+      // Trust & Confidence KPIs
+      highConfidenceDecisionPct: highConfidencePct,
+      providerDisagreementRatePct: disagreementRatePct,
+      qualityTierDistribution: qualityTiers,
+
+      // Job Class Breakdown
+      jobClassBreakdown: Array.from(jobClassMap.entries())
+        .map(([jobClass, data]) => ({ jobClass, ...data, savedG: Math.round(data.savedG) }))
+        .sort((a, b) => b.savedG - a.savedG),
+
+      // Top regions
+      topRegions: Array.from(regionMap.entries())
+        .map(([region, data]) => ({ region, ...data, savedG: Math.round(data.savedG) }))
+        .sort((a, b) => b.savedG - a.savedG)
+        .slice(0, 10),
+
+      // Daily trend
+      dailyTrend: Array.from(dailyMap.entries())
+        .map(([date, d]) => ({
+          date,
+          savedG: Math.round(d.savedG),
+          jobs: d.jobs,
+          carbonSpikeFlags: d.spikeFlags,
+          curtailmentFlags: d.curtailmentFlags,
+        }))
+        .sort((a, b) => a.date.localeCompare(b.date)),
+
+      // Provider health
+      providerHealth,
+
+      // Capacity status
+      capacityOverview: capacityStatus,
+    })
+  } catch (error: any) {
+    console.error('Carbon ledger summary error:', error)
+    res.status(500).json({ error: 'Failed to compute carbon ledger summary' })
+  }
+})
+
+/**
+ * GET /api/v1/dashboard/carbon-ledger-decisions
+ * Recent carbon ledger entries for the live decision stream panel.
+ */
+router.get('/carbon-ledger-decisions', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200)
+
+    const entries = await prisma.carbonLedgerEntry.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        orgId: true,
+        decisionFrameId: true,
+        jobClass: true,
+        workloadType: true,
+        baselineRegion: true,
+        chosenRegion: true,
+        baselineCarbonGPerKwh: true,
+        chosenCarbonGPerKwh: true,
+        energyEstimateKwh: true,
+        carbonSavedG: true,
+        confidenceScore: true,
+        qualityTier: true,
+        sourceUsed: true,
+        fallbackUsed: true,
+        estimatedFlag: true,
+        syntheticFlag: true,
+        rankScore: true,
+        candidatesEvaluated: true,
+        feasibleCandidates: true,
+        createdAt: true,
+      },
+    })
+
+    return res.json({
+      count: entries.length,
+      decisions: entries.map((e: any) => ({
+        ...e,
+        createdAt: e.createdAt.toISOString(),
+      })),
+    })
+  } catch (error: any) {
+    console.error('Carbon ledger decisions error:', error)
+    res.status(500).json({ error: 'Failed to fetch carbon ledger decisions' })
+  }
+})
+
+/**
+ * GET /api/v1/dashboard/provider-trust
+ * Provider trust panel — freshness + signal provenance.
+ */
+router.get('/provider-trust', async (_req, res) => {
+  try {
+    const [freshness, recentSnapshots] = await Promise.all([
+      getProviderFreshness(),
+      prisma.providerSnapshot.findMany({
+        orderBy: { observedAt: 'desc' },
+        take: 100,
+        select: {
+          provider: true,
+          zone: true,
+          signalType: true,
+          signalValue: true,
+          confidence: true,
+          freshnessSec: true,
+          observedAt: true,
+        },
+      }),
+    ])
+
+    // Group snapshots by provider
+    const providerMap = new Map<string, any[]>()
+    for (const snap of recentSnapshots) {
+      const existing = providerMap.get(snap.provider) || []
+      existing.push({
+        zone: snap.zone,
+        signalType: snap.signalType,
+        value: snap.signalValue,
+        confidence: snap.confidence,
+        freshnessSec: snap.freshnessSec,
+        observedAt: snap.observedAt?.toISOString() ?? null,
+      })
+      providerMap.set(snap.provider, existing)
+    }
+
+    return res.json({
+      freshness,
+      providers: Object.fromEntries(providerMap),
+    })
+  } catch (error: any) {
+    console.error('Provider trust error:', error)
+    res.status(500).json({ error: 'Failed to fetch provider trust data' })
+  }
+})
+
+/**
+ * GET /api/v1/dashboard/capacity-status
+ * Capacity status panel for all regions.
+ */
+router.get('/capacity-status', async (req, res) => {
+  try {
+    const hoursAhead = parseInt(req.query.hours as string) || 24
+    const overview = await getCapacityOverview(hoursAhead)
+
+    return res.json({
+      hoursAhead,
+      regions: overview,
+      generatedAt: new Date().toISOString(),
+    })
+  } catch (error: any) {
+    console.error('Capacity status error:', error)
+    res.status(500).json({ error: 'Failed to fetch capacity status' })
+  }
+})
+
+router.get('/forecast-accuracy', async (req, res) => {
+  try {
+    const region = req.query.region as string | undefined
+    const days = parseInt(req.query.days as string) || 30
+
+    const { getAccuracyMetrics } = await import('../lib/forecast-accuracy')
+    const metrics = await getAccuracyMetrics(region, days)
+
+    res.json({
+      timeRange: `${days}d`,
+      region: region || 'all',
+      ...metrics,
+      target: { maxVariancePct: 12, description: 'Carbon forecast variance <= 12% vs realized intensity' },
+    })
+  } catch (error) {
+    console.error('Forecast accuracy error:', error)
+    res.status(500).json({ error: 'Failed to compute forecast accuracy' })
   }
 })
 

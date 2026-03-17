@@ -2,6 +2,14 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { routeGreen } from '../lib/green-routing'
 import { prisma } from '../lib/db'
+import {
+  requireActiveOrganization,
+  getOrCreateUsageCounter,
+  assertCommandQuota,
+  usagePeriod,
+  incrementOrgUsage,
+  OrganizationError,
+} from '../lib/organizations'
 
 const router = Router()
 
@@ -12,18 +20,45 @@ const routingRequestSchema = z.object({
   carbonWeight: z.number().min(0).max(1).optional(),
   latencyWeight: z.number().min(0).max(1).optional(),
   costWeight: z.number().min(0).max(1).optional(),
+  orgId: z.string().optional(), // Governance: when present, enforces quota
 })
 
 router.post('/green', async (req, res) => {
   try {
     const data = routingRequestSchema.parse(req.body)
 
-    const result = await routeGreen(data)
+    // ── Governance: Budget enforcement ──────────────────────────────────
+    // When orgId is provided, enforce command quota before routing.
+    // This ensures green-routing has the same budget governance as carbon-command.
+    if (data.orgId) {
+      const org = await requireActiveOrganization(data.orgId)
+      const periodStart = usagePeriod()
+      const usage = await getOrCreateUsageCounter(org.id, periodStart)
+      assertCommandQuota(org, usage)
 
+      // Increment usage after routing succeeds (fire-and-forget with retry in incrementOrgUsage)
+      const result = await routeGreen(data)
+
+      void incrementOrgUsage(org.id, periodStart, {
+        commands: 1,
+        lastCommandAt: new Date(),
+      }).catch((err) => {
+        console.error(`[governance] Usage increment failed for green-routing org ${org.id}:`, err)
+      })
+
+      return res.json(result)
+    }
+
+    // No orgId: route without budget enforcement (public/system calls)
+    const result = await routeGreen(data)
     res.json(result)
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid request', details: error.errors })
+    }
+    if (error instanceof OrganizationError) {
+      const statusCode = error.code === 'QUOTA_EXCEEDED' ? 429 : error.code === 'ORG_NOT_FOUND' ? 404 : 403
+      return res.status(statusCode).json({ error: error.message, code: error.code })
     }
     console.error('Green routing error:', error)
     res.status(500).json({ error: 'Internal server error' })

@@ -87,7 +87,9 @@ export class ProviderRouter {
       }
 
       const blended = this.blendSignals(weightedSignals)
-      const validation = await this.validateWithEmber(blended, region, timestamp)
+      // Pass raw provider signals for accurate disagreement — do NOT re-fetch
+      const rawSignals = weightedSignals.map(s => s.provider)
+      const validation = await this.validateWithEmber(blended, region, timestamp, rawSignals)
 
       return {
         carbonIntensity: blended.carbonIntensity,
@@ -108,7 +110,7 @@ export class ProviderRouter {
     }
 
     if (wattTimeSignal) {
-      const validation = await this.validateWithEmber(wattTimeSignal, region, timestamp)
+      const validation = await this.validateWithEmber(wattTimeSignal, region, timestamp, [wattTimeSignal])
 
       return {
         carbonIntensity: wattTimeSignal.carbonIntensity,
@@ -201,7 +203,7 @@ export class ProviderRouter {
           isForecast: false,
           source: 'electricity_maps',
           timestamp: (intensity as any).date || new Date().toISOString(),
-          estimatedFlag: !(intensity as any).estimated,
+          estimatedFlag: (intensity as any).estimated ?? false,
           syntheticFlag: false,
           confidence: 0.7,
           metadata: {
@@ -263,45 +265,51 @@ export class ProviderRouter {
   }
 
   /**
-   * Validate blended signal against Ember baseline to adjust confidence
+   * Validate blended signal against Ember baseline to adjust confidence.
+   * When rawSignals are provided, uses those for disagreement calculation
+   * instead of re-fetching (avoids comparing blended vs raw which deflates disagreement).
    */
   private async validateWithEmber(
     signal: ProviderSignal | { carbonIntensity: number; isForecast: boolean; provenanceSource: string },
     region: string,
-    timestamp: Date
+    timestamp: Date,
+    rawSignals?: ProviderSignal[]
   ): Promise<{
     adjustedConfidence: number
     disagreement: ProviderDisagreement
     validationNotes?: string
   }> {
-    const signals: ProviderSignal[] = []
+    // Use raw provider signals for disagreement (when available)
+    // This avoids the bug of comparing a blended signal against a re-fetched provider
+    let disagreementSignals: ProviderSignal[]
 
-    if ('source' in signal) {
-      signals.push(signal)
+    if (rawSignals && rawSignals.length > 0) {
+      disagreementSignals = rawSignals
     } else {
-      signals.push({
-        carbonIntensity: signal.carbonIntensity,
-        isForecast: signal.isForecast,
-        source: 'electricity_maps',
-        timestamp: timestamp.toISOString(),
-        estimatedFlag: false,
-        syntheticFlag: false
-      })
+      // Fallback: construct from the signal itself
+      disagreementSignals = []
+      if ('source' in signal) {
+        disagreementSignals.push(signal)
+      } else {
+        disagreementSignals.push({
+          carbonIntensity: signal.carbonIntensity,
+          isForecast: signal.isForecast,
+          source: 'electricity_maps',
+          timestamp: timestamp.toISOString(),
+          estimatedFlag: false,
+          syntheticFlag: false
+        })
+      }
     }
 
-    const wattTimeValidation = await this.getWattTimeSignal(region, timestamp)
-    if (wattTimeValidation) {
-      signals.push(wattTimeValidation)
-    }
-
-    const disagreement = this.calculateDisagreement(signals)
+    const disagreement = this.calculateDisagreement(disagreementSignals)
 
     let validationNotes: string | undefined
     let confidencePenalty = 0
 
     const emberProfile = await this.getStructuralProfile(region)
     if (emberProfile?.structuralCarbonBaseline) {
-      const deviation = Math.abs(emberProfile.structuralCarbonBaseline - signals[0].carbonIntensity)
+      const deviation = Math.abs(emberProfile.structuralCarbonBaseline - signal.carbonIntensity)
       const deviationPct = (deviation / Math.max(emberProfile.structuralCarbonBaseline, 1)) * 100
 
       if (deviationPct > 30) {

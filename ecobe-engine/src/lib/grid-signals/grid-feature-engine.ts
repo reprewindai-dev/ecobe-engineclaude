@@ -101,8 +101,14 @@ export class GridFeatureEngine {
   private static calculateImportCarbonLeakageScore(snapshot: GridSignalSnapshot): number | null {
     const { netInterchangeMwh } = snapshot
 
-    if (netInterchangeMwh === null || netInterchangeMwh <= 0) {
-      return 0 // No imports = no leakage
+    // Governance: null means "no data" — must propagate null, not 0
+    if (netInterchangeMwh === null) {
+      return null
+    }
+
+    // Non-null but no imports (zero or negative = exports) → zero leakage
+    if (netInterchangeMwh <= 0) {
+      return 0
     }
 
     let score = 0

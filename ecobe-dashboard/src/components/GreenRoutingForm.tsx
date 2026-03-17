@@ -366,6 +366,56 @@ export function GreenRoutingForm() {
                   </div>
                 )}
 
+                {/* Data quality badges */}
+                {(r.estimatedFlag || r.syntheticFlag) && (
+                  <div className="flex gap-2">
+                    {r.estimatedFlag && (
+                      <span className="px-2 py-1 bg-blue-500/10 border border-blue-500/20 rounded text-xs text-blue-400 font-medium">
+                        Estimated
+                      </span>
+                    )}
+                    {r.syntheticFlag && (
+                      <span className="px-2 py-1 bg-purple-500/10 border border-purple-500/20 rounded text-xs text-purple-400 font-medium">
+                        Synthetic
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Grid intelligence details */}
+                <div className="grid grid-cols-2 gap-2">
+                  {r.balancingAuthority && (
+                    <div className="bg-slate-800/50 rounded-lg p-2">
+                      <p className="text-xs text-slate-400">BA</p>
+                      <p className="text-sm font-mono text-slate-200">{r.balancingAuthority}</p>
+                    </div>
+                  )}
+                  {r.demandRampPct != null && (
+                    <div className="bg-slate-800/50 rounded-lg p-2">
+                      <p className="text-xs text-slate-400">Demand Ramp</p>
+                      <p className="text-sm font-mono text-slate-200">{r.demandRampPct.toFixed(1)}%</p>
+                    </div>
+                  )}
+                  {r.carbonSpikeProbability != null && (
+                    <div className="bg-slate-800/50 rounded-lg p-2">
+                      <p className="text-xs text-slate-400">Carbon Spike Risk</p>
+                      <p className="text-sm font-mono text-slate-200">{(r.carbonSpikeProbability * 100).toFixed(0)}%</p>
+                    </div>
+                  )}
+                  {r.curtailmentProbability != null && (
+                    <div className="bg-slate-800/50 rounded-lg p-2">
+                      <p className="text-xs text-slate-400">Curtailment</p>
+                      <p className="text-sm font-mono text-slate-200">{(r.curtailmentProbability * 100).toFixed(0)}%</p>
+                    </div>
+                  )}
+                  {r.importCarbonLeakageScore != null && (
+                    <div className="bg-slate-800/50 rounded-lg p-2 col-span-2">
+                      <p className="text-xs text-slate-400">Import Carbon Leakage</p>
+                      <p className="text-sm font-mono text-slate-200">{r.importCarbonLeakageScore.toFixed(2)}</p>
+                    </div>
+                  )}
+                </div>
+
                 {/* Explanation */}
                 {r.explanation && (
                   <div className="bg-slate-800/30 rounded-lg p-3 border-l-2 border-emerald-500/40">

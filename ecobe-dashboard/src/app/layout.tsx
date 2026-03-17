@@ -35,7 +35,7 @@ export default function RootLayout({
                     </div>
                   </div>
                   <nav className="flex items-center space-x-4">
-                    <Link href="/" className="text-sm text-slate-300 hover:text-white transition">
+                    <Link href="/console" className="text-sm text-slate-300 hover:text-white transition">
                       Console
                     </Link>
                     <a

@@ -52,6 +52,32 @@ export interface EIASubregionData {
   'value-units': string
 }
 
+/**
+ * GridStatus.io fuel mix hourly data — real per-fuel-type generation in MW
+ * Replaces heuristic subregion name matching with measured fuel breakdown
+ */
+export interface GridStatusFuelMixData {
+  interval_start_utc: string
+  interval_end_utc: string
+  respondent: string
+  respondent_name: string
+  coal: number | null
+  hydro: number | null
+  natural_gas: number | null
+  nuclear: number | null
+  other: number | null
+  petroleum: number | null
+  solar: number | null
+  wind: number | null
+  battery_storage: number | null
+  pumped_storage: number | null
+  solar_with_integrated_battery_storage: number | null
+  unknown_energy_storage: number | null
+  geothermal: number | null
+  other_energy_storage: number | null
+  wind_with_integrated_battery_storage: number | null
+}
+
 export interface GridFeatures {
   demandRampPct: number | null
   fossilRatio: number | null

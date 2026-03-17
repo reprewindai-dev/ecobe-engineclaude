@@ -9,6 +9,7 @@ const envSchema = z.object({
 
   // Required
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
+  DIRECT_DATABASE_URL: z.string().optional(), // Direct Neon URL for migrations (bypasses Accelerate)
   REDIS_URL: z.string().min(1, 'REDIS_URL is required'),
 
   // Optional
@@ -23,12 +24,15 @@ const envSchema = z.object({
   
   // Ember
   EMBER_API_KEY: z.string().optional(),
-  EMBER_BASE_URL: z.string().default('https://api.ember-climate.org'),
+  EMBER_BASE_URL: z.string().default('https://api.ember-energy.org'),
   
   // EIA
   EIA_API_KEY: z.string().optional(),
   EIA_BASE_URL: z.string().default('https://api.eia.gov'),
   WATTTIME_API_KEY: z.string().optional(),
+
+  // GridStatus.io (curated EIA-930 data with real fuel mix)
+  GRIDSTATUS_API_KEY: z.string().optional(),
 
   // Grid Signal Cache
   GRID_SIGNAL_CACHE_TTL: z.string().default('900'),
@@ -66,6 +70,11 @@ const envSchema = z.object({
   // External integrations
   ECOBE_ENGINE_URL: z.string().optional(),
   ECOBE_ENGINE_API_KEY: z.string().optional(),
+
+  // DEKES SaaS integration
+  DEKES_API_KEY: z.string().optional(),
+  DEKES_WEBHOOK_URL: z.string().optional(), // e.g. https://dekes.example.com/api/ecobe/handoff-status
+  DEKES_WEBHOOK_SECRET: z.string().optional(),
 
   // Authentication
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters').optional(),

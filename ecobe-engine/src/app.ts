@@ -14,6 +14,10 @@ import carbonRoutes from './routes/carbon-command'
 import organizationsRoutes from './routes/organizations'
 import intelligenceRoutes from './routes/intelligence'
 import gridIntelligenceRoutes from './routes/intelligence/grid'
+import integrationsRoutes from './routes/integrations'
+import systemRoutes from './routes/system'
+import dekesHandoffRoutes from './routes/dekes-handoff'
+import carbonLedgerRoutes from './routes/carbon-ledger'
 
 function rawBodySaver(_req: express.Request, _res: express.Response, buf: Buffer) {
   if (buf?.length) {
@@ -271,6 +275,12 @@ function attachApiRoutes(app: express.Express) {
   app.use('/api/v1/organizations', organizationsRoutes)
   app.use('/api/v1/intelligence', intelligenceRoutes)
   app.use('/api/v1/intelligence/grid', gridIntelligenceRoutes)
+  app.use('/api/v1/integrations', integrationsRoutes)
+  app.use('/api/v1/system', systemRoutes)
+  // DEKES SaaS integration endpoints (prospects, tenants, demos, handoffs, route, workloads)
+  app.use('/api/v1', dekesHandoffRoutes)
+  // Carbon Ledger — audit-grade accounting + reporting
+  app.use('/api/v1/carbon-ledger', carbonLedgerRoutes)
 }
 
 function attachFallbackHandlers(app: express.Express) {

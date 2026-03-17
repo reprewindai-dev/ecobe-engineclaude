@@ -150,38 +150,68 @@ export const ecobeApi = {
 
   // ── Dashboard ────────────────────────────────────────────────────────────────
   async getDashboardMetrics(window: '24h' | '7d' = '24h'): Promise<DashboardMetrics> {
-    const { data } = await api.get('/dashboard/metrics', { params: { window } })
-    return data
+    try {
+      const { data } = await api.get('/dashboard/metrics', { params: { window } })
+      return data
+    } catch (error) {
+      console.error('Failed to fetch dashboard metrics:', error)
+      throw error
+    }
   },
 
   async getDashboardSavings(window: '24h' | '7d' | '30d' = '24h'): Promise<DashboardSavings> {
-    const { data } = await api.get('/dashboard/savings', { params: { window } })
-    return data
+    try {
+      const { data } = await api.get('/dashboard/savings', { params: { window } })
+      return data
+    } catch (error) {
+      console.error('Failed to fetch dashboard savings:', error)
+      throw error
+    }
   },
 
   async getDecisions(limit = 100): Promise<{ decisions: DashboardDecision[] }> {
-    const { data } = await api.get('/dashboard/decisions', { params: { limit } })
-    return data
+    try {
+      const { data } = await api.get('/dashboard/decisions', { params: { limit } })
+      return data
+    } catch (error) {
+      console.error('Failed to fetch decisions:', error)
+      throw error
+    }
   },
 
   async getRegionMapping(): Promise<{ mappings: RegionMapping[] }> {
-    const { data } = await api.get('/dashboard/region-mapping')
-    return data
+    try {
+      const { data } = await api.get('/dashboard/region-mapping')
+      return data
+    } catch (error) {
+      console.error('Failed to fetch region mapping:', error)
+      throw error
+    }
   },
 
   async getWhatIfIntensities(
     zones: string[]
   ): Promise<{ intensities: Array<{ zone: string; carbonIntensity: number }> }> {
-    const { data } = await api.post('/dashboard/what-if/intensities', { zones })
-    return data
+    try {
+      const { data } = await api.post('/dashboard/what-if/intensities', { zones })
+      return data
+    } catch (error) {
+      console.error('Failed to fetch what-if intensities:', error)
+      throw error
+    }
   },
 
   // ── Forecasting ──────────────────────────────────────────────────────────────
   async getRegionForecast(region: string, hoursAhead = 72): Promise<RegionForecast> {
-    const { data } = await api.get(`/forecasting/${region}/forecasts`, {
-      params: { hoursAhead },
-    })
-    return data
+    try {
+      const { data } = await api.get(`/forecasting/${region}/forecasts`, {
+        params: { hoursAhead },
+      })
+      return data
+    } catch (error) {
+      console.error('Failed to fetch region forecast:', error)
+      throw error
+    }
   },
 
   async getOptimalWindow(
@@ -189,16 +219,26 @@ export const ecobeApi = {
     durationHours = 4,
     lookAheadHours = 48
   ): Promise<OptimalWindow> {
-    const { data } = await api.get(`/forecasting/${region}/optimal-window`, {
-      params: { durationHours, lookAheadHours },
-    })
-    return data
+    try {
+      const { data } = await api.get(`/forecasting/${region}/optimal-window`, {
+        params: { durationHours, lookAheadHours },
+      })
+      return data
+    } catch (error) {
+      console.error('Failed to fetch optimal window:', error)
+      throw error
+    }
   },
 
   // ── Provider Health ───────────────────────────────────────────────────────────
   async getProviderHealth(): Promise<MethodologyProviders> {
-    const { data } = await api.get('/methodology/providers')
-    return data
+    try {
+      const { data } = await api.get('/methodology/providers')
+      return data
+    } catch (error) {
+      console.error('Failed to fetch provider health:', error)
+      throw error
+    }
   },
 
   // ── DEKES ─────────────────────────────────────────────────────────────────────
@@ -241,43 +281,73 @@ export const ecobeApi = {
 
   // ── Grid Intelligence ───────────────────────────────────────────────────────────
   async getGridHeroMetrics(): Promise<GridHeroMetrics> {
-    const { data } = await api.get('/intelligence/grid/hero-metrics')
-    return data
+    try {
+      const { data } = await api.get('/intelligence/grid/hero-metrics')
+      return data
+    } catch (error) {
+      console.error('Failed to fetch grid hero metrics:', error)
+      throw error
+    }
   },
 
   async getGridSummary(regions?: string[]): Promise<GridSignalSummary> {
-    const { data } = await api.get('/intelligence/grid/summary', {
-      params: regions ? { regions } : undefined,
-    })
-    return data
+    try {
+      const { data } = await api.get('/intelligence/grid/summary', {
+        params: regions ? { regions } : undefined,
+      })
+      return data
+    } catch (error) {
+      console.error('Failed to fetch grid summary:', error)
+      throw error
+    }
   },
 
   async getGridOpportunities(regions?: string[]): Promise<GridOpportunities> {
-    const { data } = await api.get('/intelligence/grid/opportunities', {
-      params: regions ? { regions } : undefined,
-    })
-    return data
+    try {
+      const { data } = await api.get('/intelligence/grid/opportunities', {
+        params: regions ? { regions } : undefined,
+      })
+      return data
+    } catch (error) {
+      console.error('Failed to fetch grid opportunities:', error)
+      throw error
+    }
   },
 
   async getGridRegionDetail(region: string, hours = 24): Promise<any> {
-    const { data } = await api.get(`/intelligence/grid/region/${encodeURIComponent(region)}`, {
-      params: { hours },
-    })
-    return data
+    try {
+      const { data } = await api.get(`/intelligence/grid/region/${encodeURIComponent(region)}`, {
+        params: { hours },
+      })
+      return data
+    } catch (error) {
+      console.error('Failed to fetch grid region detail:', error)
+      throw error
+    }
   },
 
   async getGridImportLeakage(regions?: string[]): Promise<GridImportLeakage> {
-    const { data } = await api.get('/intelligence/grid/import-leakage', {
-      params: regions ? { regions } : undefined,
-    })
-    return data
+    try {
+      const { data } = await api.get('/intelligence/grid/import-leakage', {
+        params: regions ? { regions } : undefined,
+      })
+      return data
+    } catch (error) {
+      console.error('Failed to fetch grid import leakage:', error)
+      throw error
+    }
   },
 
   async getGridAudit(region: string, hours = 24): Promise<any> {
-    const { data } = await api.get(`/intelligence/grid/audit/${encodeURIComponent(region)}`, {
-      params: { hours },
-    })
-    return data
+    try {
+      const { data } = await api.get(`/intelligence/grid/audit/${encodeURIComponent(region)}`, {
+        params: { hours },
+      })
+      return data
+    } catch (error) {
+      console.error('Failed to fetch grid audit:', error)
+      throw error
+    }
   },
 
   // ── DEKES Integration ─────────────────────────────────────────────────────────

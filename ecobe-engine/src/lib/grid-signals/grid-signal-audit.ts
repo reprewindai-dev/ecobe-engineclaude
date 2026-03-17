@@ -139,14 +139,14 @@ export class GridSignalAudit {
       })
 
       return events
-        .map(event => {
+        .map((event: any) => {
           try {
             return JSON.parse(event.message || '{}') as GridSignalAuditRecord
           } catch {
             return null
           }
         })
-        .filter((record): record is GridSignalAuditRecord => record !== null)
+        .filter((record: any): record is GridSignalAuditRecord => record !== null)
 
     } catch (error) {
       console.error('Failed to get region audit history:', error)
@@ -355,14 +355,14 @@ export class GridSignalAudit {
       })
 
       return events
-        .map(event => {
+        .map((event: any) => {
           try {
             return JSON.parse(event.message || '{}')
           } catch {
             return null
           }
         })
-        .filter((record): record is any => record !== null)
+        .filter((record: any): record is any => record !== null)
 
     } catch (error) {
       console.error('Failed to get data quality issues:', error)

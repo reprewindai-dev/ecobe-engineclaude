@@ -195,6 +195,16 @@ export function DecisionReplay() {
             <span className={`text-xs px-2 py-1 rounded-full font-medium ${getQualityTierBadge(data.qualityTier)}`}>
               Quality: {data.qualityTier.toUpperCase()}
             </span>
+            {data.estimatedFlag && (
+              <span className="text-xs px-2 py-1 rounded-full font-medium bg-blue-500/10 border border-blue-500/20 text-blue-400">
+                Estimated
+              </span>
+            )}
+            {data.syntheticFlag && (
+              <span className="text-xs px-2 py-1 rounded-full font-medium bg-purple-500/10 border border-purple-500/20 text-purple-400">
+                Synthetic
+              </span>
+            )}
           </div>
 
           {/* Explanation */}

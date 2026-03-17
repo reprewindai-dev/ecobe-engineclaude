@@ -1,11 +1,15 @@
 import * as cron from 'node-cron'
 import { eia930 } from '../lib/grid-signals/eia-client'
+import { gridStatus } from '../lib/grid-signals/gridstatus-client'
 import { BalanceParser } from '../lib/grid-signals/balance-parser'
 import { InterchangeParser } from '../lib/grid-signals/interchange-parser'
 import { SubregionParser } from '../lib/grid-signals/subregion-parser'
+import { FuelMixParser } from '../lib/grid-signals/fuel-mix-parser'
 import { GridFeatureEngine } from '../lib/grid-signals/grid-feature-engine'
 import { GridSignalCache } from '../lib/grid-signals/grid-signal-cache'
 import { GridSignalAudit } from '../lib/grid-signals/grid-signal-audit'
+import { getUsBalancingAuthorities } from '../lib/grid-signals/region-mapping'
+import { setWorkerStatus } from '../routes/system'
 import { prisma } from '../lib/db'
 
 interface RegionConfig {
@@ -14,20 +18,37 @@ interface RegionConfig {
   eiaRespondent: string
 }
 
-// Default region configurations for major US balancing authorities
-const DEFAULT_REGIONS: RegionConfig[] = [
-  { region: 'PJM', balancingAuthority: 'PJM', eiaRespondent: 'PJM' },
-  { region: 'ERCOT', balancingAuthority: 'ERCOT', eiaRespondent: 'ERCOT' },
-  { region: 'CAISO', balancingAuthority: 'CISO', eiaRespondent: 'CISO' },
-  { region: 'MISO', balancingAuthority: 'MISO', eiaRespondent: 'MISO' },
-  { region: 'NYISO', balancingAuthority: 'NYISO', eiaRespondent: 'NYISO' },
-  { region: 'ISO-NE', balancingAuthority: 'ISNE', eiaRespondent: 'ISNE' },
-  { region: 'SPP', balancingAuthority: 'SPP', eiaRespondent: 'SPP' },
-]
+// Default region configurations — now sourced from region-mapping.ts
+// with fallback to hardcoded list if mapping returns empty
+const DEFAULT_REGIONS: RegionConfig[] = (() => {
+  const mapped = getUsBalancingAuthorities()
+  if (mapped.length > 0) return mapped
+
+  // Fallback: original hardcoded list
+  return [
+    { region: 'PJM', balancingAuthority: 'PJM', eiaRespondent: 'PJM' },
+    { region: 'ERCOT', balancingAuthority: 'ERCO', eiaRespondent: 'ERCO' },
+    { region: 'CAISO', balancingAuthority: 'CISO', eiaRespondent: 'CISO' },
+    { region: 'MISO', balancingAuthority: 'MISO', eiaRespondent: 'MISO' },
+    { region: 'NYISO', balancingAuthority: 'NYISO', eiaRespondent: 'NYISO' },
+    { region: 'ISO-NE', balancingAuthority: 'ISNE', eiaRespondent: 'ISNE' },
+    { region: 'SPP', balancingAuthority: 'SPP', eiaRespondent: 'SPP' },
+  ]
+})()
 
 export class EIAIngestionWorker {
   private isRunning = false
   private ingestionTask?: cron.ScheduledTask
+  private useGridStatus: boolean
+
+  constructor() {
+    this.useGridStatus = gridStatus.isAvailable
+    if (this.useGridStatus) {
+      console.log('EIA ingestion: GridStatus.io adapter active (real fuel mix data)')
+    } else {
+      console.log('EIA ingestion: Using direct EIA API (fuel mix via subregion heuristic)')
+    }
+  }
 
   /**
    * Start the EIA-930 ingestion worker
@@ -40,6 +61,12 @@ export class EIAIngestionWorker {
 
     console.log('Starting EIA-930 ingestion worker...')
     this.isRunning = true
+
+    setWorkerStatus('eiaIngestion', {
+      running: true,
+      lastRun: null,
+      nextRun: null
+    })
 
     // Run initial ingestion
     await this.runIngestion()
@@ -79,8 +106,8 @@ export class EIAIngestionWorker {
    * Run the ingestion process
    */
   private async runIngestion(): Promise<void> {
-    const startTime = new Date()
-    console.log(`Starting EIA-930 ingestion at ${startTime.toISOString()}`)
+    const runStart = new Date()
+    console.log(`Starting EIA-930 ingestion at ${runStart.toISOString()} [source: ${this.useGridStatus ? 'GridStatus.io' : 'EIA Direct'}]`)
 
     try {
       // Get time window for ingestion (last 48 hours)
@@ -106,8 +133,19 @@ export class EIAIngestionWorker {
 
       console.log(`EIA-930 ingestion completed: ${successCount} successful, ${failureCount} failed`)
 
+      // Update worker status
+      setWorkerStatus('eiaIngestion', {
+        running: true,
+        lastRun: runStart.toISOString(),
+        nextRun: null
+      })
     } catch (error) {
       console.error('EIA-930 ingestion failed:', error)
+      setWorkerStatus('eiaIngestion', {
+        running: false,
+        lastRun: new Date().toISOString(),
+        nextRun: null
+      })
       throw error
     }
   }
@@ -124,8 +162,85 @@ export class EIAIngestionWorker {
     rawRecordsStored: number
     featuresCalculated: number
   }> {
-    console.log(`Ingesting EIA-930 data for ${config.region} (${config.balancingAuthority})`)
+    console.log(`Ingesting EIA-930 data for ${config.region} (${config.balancingAuthority}) [${this.useGridStatus ? 'GridStatus' : 'EIA'}]`)
 
+    if (this.useGridStatus) {
+      return this.ingestFromGridStatus(config, startTime, endTime)
+    } else {
+      return this.ingestFromDirectEia(config, startTime, endTime)
+    }
+  }
+
+  /**
+   * GridStatus.io ingestion path — preferred when API key is available
+   * Uses real fuel mix data instead of subregion heuristics
+   */
+  private async ingestFromGridStatus(
+    config: RegionConfig,
+    startTime: Date,
+    endTime: Date
+  ): Promise<{ snapshotsProcessed: number; rawRecordsStored: number; featuresCalculated: number }> {
+    // Fetch all three datasets in parallel
+    const [balanceData, interchangeData, fuelMixData] = await Promise.all([
+      gridStatus.getBalance(config.eiaRespondent, startTime, endTime),
+      gridStatus.getInterchange(config.eiaRespondent, startTime, endTime),
+      gridStatus.getFuelMix(config.eiaRespondent, startTime, endTime),
+    ])
+
+    // Store raw balance/interchange data for audit
+    await this.storeRawData(config, balanceData, interchangeData, [])
+
+    // Parse balance data (GridStatus regional → EIABalanceData already mapped by adapter)
+    const balanceSnapshots = BalanceParser.parseBalanceData(
+      balanceData,
+      config.region,
+      config.balancingAuthority
+    )
+    const balanceWithChanges = BalanceParser.calculateDemandChanges(balanceSnapshots)
+
+    // Parse interchange data
+    const interchangeSnapshots = InterchangeParser.parseInterchangeData(
+      interchangeData,
+      config.region,
+      config.balancingAuthority
+    )
+
+    // Parse REAL fuel mix data (replaces heuristic subregion parser)
+    const fuelMixSnapshots = FuelMixParser.parseFuelMixData(
+      fuelMixData,
+      config.region,
+      config.balancingAuthority
+    )
+
+    // Merge: balance + interchange + real fuel mix
+    let merged = InterchangeParser.mergeIntoSnapshots(balanceWithChanges, interchangeSnapshots)
+    merged = FuelMixParser.mergeIntoSnapshots(merged, fuelMixSnapshots)
+
+    // Calculate derived features
+    const snapshotsWithFeatures = GridFeatureEngine.updateSnapshotsWithFeatures(merged)
+    const finalSnapshots = GridFeatureEngine.updateSignalQuality(snapshotsWithFeatures)
+
+    // Store, cache, audit
+    await this.storeProcessedSnapshots(finalSnapshots)
+    await this.cacheSnapshots(config.region, finalSnapshots)
+    await this.recordAuditTrail(finalSnapshots, 'GRIDSTATUS_EIA930')
+
+    return {
+      snapshotsProcessed: finalSnapshots.length,
+      rawRecordsStored: balanceData.length + interchangeData.length + fuelMixData.length,
+      featuresCalculated: finalSnapshots.length,
+    }
+  }
+
+  /**
+   * Direct EIA API ingestion path — fallback when GridStatus not available
+   * Uses subregion heuristic for fuel mix (less accurate)
+   */
+  private async ingestFromDirectEia(
+    config: RegionConfig,
+    startTime: Date,
+    endTime: Date
+  ): Promise<{ snapshotsProcessed: number; rawRecordsStored: number; featuresCalculated: number }> {
     // Fetch raw data from EIA API
     const [balanceData, interchangeData, subregionData] = await Promise.all([
       eia930.getBalance(config.eiaRespondent, startTime, endTime),
@@ -142,18 +257,15 @@ export class EIAIngestionWorker {
       config.region,
       config.balancingAuthority
     )
-
-    // Calculate demand changes
     const balanceWithChanges = BalanceParser.calculateDemandChanges(balanceSnapshots)
 
-    // Parse interchange data
     const interchangeSnapshots = InterchangeParser.parseInterchangeData(
       interchangeData,
       config.region,
       config.balancingAuthority
     )
 
-    // Parse subregion data
+    // Heuristic subregion parser (less accurate than GridStatus fuel mix)
     const subregionSnapshots = SubregionParser.parseSubregionData(
       subregionData,
       config.region,
@@ -169,18 +281,12 @@ export class EIAIngestionWorker {
 
     // Calculate derived features
     const snapshotsWithFeatures = GridFeatureEngine.updateSnapshotsWithFeatures(mergedSnapshots)
-
-    // Update signal quality
     const finalSnapshots = GridFeatureEngine.updateSignalQuality(snapshotsWithFeatures)
 
     // Store processed snapshots
     await this.storeProcessedSnapshots(finalSnapshots)
-
-    // Cache latest data for fast access
     await this.cacheSnapshots(config.region, finalSnapshots)
-
-    // Record audit trail
-    await this.recordAuditTrail(finalSnapshots)
+    await this.recordAuditTrail(finalSnapshots, 'EIA_930')
 
     return {
       snapshotsProcessed: finalSnapshots.length,
@@ -234,7 +340,7 @@ export class EIAIngestionWorker {
       })
     }
 
-    // Store subregion data
+    // Store subregion data (only from direct EIA path)
     if (subregionData.length > 0) {
       await prisma.eia930SubregionRaw.createMany({
         data: subregionData.map(record => ({
@@ -257,7 +363,7 @@ export class EIAIngestionWorker {
   }
 
   /**
-   * Merge snapshots from different data sources
+   * Merge snapshots from different data sources (direct EIA path only)
    */
   private mergeSnapshots(
     balanceSnapshots: any[],
@@ -355,12 +461,12 @@ export class EIAIngestionWorker {
   /**
    * Record audit trail for all snapshots
    */
-  private async recordAuditTrail(snapshots: any[]): Promise<void> {
+  private async recordAuditTrail(snapshots: any[], source: string = 'EIA_930'): Promise<void> {
     for (const snapshot of snapshots) {
       await GridSignalAudit.recordSignalProcessing(
         snapshot,
         {
-          sourceUsed: 'EIA_930',
+          sourceUsed: source,
           referenceTime: snapshot.timestamp,
           fetchedAt: new Date().toISOString(),
           fallbackUsed: false,
@@ -399,11 +505,15 @@ export class EIAIngestionWorker {
    */
   getStatus(): {
     isRunning: boolean
+    dataSource: 'gridstatus' | 'eia_direct'
+    regions: string[]
     schedule?: string
     lastRun?: Date
   } {
     return {
       isRunning: this.isRunning,
+      dataSource: this.useGridStatus ? 'gridstatus' : 'eia_direct',
+      regions: DEFAULT_REGIONS.map(r => r.region),
       schedule: (this.ingestionTask as any)?.getOptions?.()?.scheduled || '0 */15 * * * *',
     }
   }

@@ -7,7 +7,7 @@ FROM base AS deps
 WORKDIR /app/ecobe-engine
 COPY package.json ./package.json
 COPY package-lock.json* ./package-lock.json
-RUN npm ci
+RUN npm install --legacy-peer-deps
 
 # Build the application with Prisma client generation
 FROM base AS builder

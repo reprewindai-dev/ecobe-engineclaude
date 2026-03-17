@@ -94,7 +94,7 @@ export async function forecastCarbonIntensity(
     const dayOfWeek = forecastTime.getDay()
 
     // Find similar historical periods (same hour, similar day of week)
-    const similarPeriods = historicalData.filter((d) => {
+    const similarPeriods = historicalData.filter((d: any) => {
       const dHour = d.timestamp.getHours()
       const dDay = d.timestamp.getDay()
       return Math.abs(dHour - hour) <= 1 && Math.abs(dDay - dayOfWeek) <= 1
@@ -106,7 +106,7 @@ export async function forecastCarbonIntensity(
     let totalWeight = 0
     let weightedSum = 0
 
-    similarPeriods.forEach((d, idx) => {
+    similarPeriods.forEach((d: any, idx: number) => {
       const weight = 1 / (idx + 1)  // More recent = higher weight
       weightedSum += d.carbonIntensity * weight
       totalWeight += weight
@@ -116,16 +116,16 @@ export async function forecastCarbonIntensity(
 
     // Calculate confidence based on data variance
     const variance =
-      similarPeriods.reduce((sum, d) => sum + Math.pow(d.carbonIntensity - predictedIntensity, 2), 0) /
+      similarPeriods.reduce((sum: number, d: any) => sum + Math.pow(d.carbonIntensity - predictedIntensity, 2), 0) /
       similarPeriods.length
     const stdDev = Math.sqrt(variance)
     const confidence = Math.max(0.5, Math.min(0.95, predictedIntensity === 0 ? 0.5 : 1 - stdDev / predictedIntensity))
 
     // Determine trend
     const recentAvg =
-      similarPeriods.slice(0, 3).reduce((sum, d) => sum + d.carbonIntensity, 0) / 3
+      similarPeriods.slice(0, 3).reduce((sum: number, d: any) => sum + d.carbonIntensity, 0) / 3
     const olderAvg =
-      similarPeriods.slice(-3).reduce((sum, d) => sum + d.carbonIntensity, 0) / 3
+      similarPeriods.slice(-3).reduce((sum: number, d: any) => sum + d.carbonIntensity, 0) / 3
     const trend =
       recentAvg > olderAvg * 1.05
         ? 'increasing'

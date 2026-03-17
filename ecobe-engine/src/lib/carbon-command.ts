@@ -21,9 +21,10 @@ import {
   ensureCreditCoverage,
   incrementOrgUsage,
 } from './organizations'
-import { providerRouter } from './carbon/provider-router'
+import { providerRouter, type RoutingSignal } from './carbon/provider-router'
 import { GridSignalCache } from './grid-signals/grid-signal-cache'
 import { GridSignalAudit } from './grid-signals/grid-signal-audit'
+import { generateLease, retryAsync } from './governance'
 
 export type Priority = 'low' | 'medium' | 'high'
 export type ExecutionMode = 'immediate' | 'scheduled' | 'advisory'
@@ -107,7 +108,19 @@ interface CandidateContext {
   estimatedFlag?: boolean | null
   syntheticFlag?: boolean | null
   signalQuality?: 'high' | 'medium' | 'low'
-  
+
+  // Provenance from the routing signal — for audit trail integrity
+  routingProvenance?: {
+    sourceUsed: string
+    contributingSources: string[]
+    referenceTime: string
+    fetchedAt: string
+    fallbackUsed: boolean
+    disagreementFlag: boolean
+    disagreementPct: number
+    validationNotes?: string
+  }
+
   scores?: CandidateScores
 }
 
@@ -122,6 +135,7 @@ interface CandidateScores {
 export interface CarbonCommandRecommendation {
   commandId: string
   decisionId: string
+  decisionFrameId: string
   recommendation: {
     region: string
     startAt: string
@@ -146,7 +160,33 @@ export interface CarbonCommandRecommendation {
     selectedCandidateId: string
     rejectedReasons: Array<{ candidateId: string; reason: string }>
   }
+  // ── Governance fields (locked routing contract) ──────────────────────
+  governance: {
+    qualityTier: 'high' | 'medium' | 'low'
+    carbon_delta_g_per_kwh: number | null
+    forecast_stability: 'stable' | 'medium' | 'unstable' | null
+    provider_disagreement: { flag: boolean; pct: number | null }
+    source_used: string | null
+    validation_source: string | null
+    fallback_used: boolean | null
+    estimatedFlag: boolean | null
+    syntheticFlag: boolean | null
+    balancingAuthority: string | null
+    demandRampPct: number | null
+    carbonSpikeProbability: number | null
+    curtailmentProbability: number | null
+    importCarbonLeakageScore: number | null
+    predicted_clean_window: object | null
+    // Governance lease
+    lease_id: string
+    lease_expires_at: string
+    must_revalidate_after: string
+    // Governance explanation / warnings
+    explanation: string
+  }
 }
+
+// retryAsync imported from ./governance (single source of truth)
 
 const toDate = (value?: string): Date | undefined => {
   if (!value) return undefined
@@ -223,10 +263,13 @@ async function getForecastedCarbonIntensity(region: string, hoursAhead: number):
   return nearest?.predictedIntensity ?? forecasts[forecasts.length - 1].predictedIntensity
 }
 
-async function resolveCarbonIntensity(region: string, startAt: Date): Promise<number> {
+async function resolveCarbonIntensity(region: string, startAt: Date): Promise<{ carbonIntensity: number; provenance: RoutingSignal['provenance'] }> {
   // Use provider router with WattTime as primary source
   const routingSignal = await providerRouter.getRoutingSignal(region, startAt)
-  return routingSignal.carbonIntensity
+  return {
+    carbonIntensity: routingSignal.carbonIntensity,
+    provenance: routingSignal.provenance,
+  }
 }
 
 function estimateEnergyKwh(workload: CarbonCommandWorkload): number {
@@ -487,7 +530,7 @@ async function persistDecision(
   analytics: DecisionAnalytics,
   similarityInsight: SimilarityInsight | null
 ) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx: any) => {
     const command = await tx.carbonCommand.create({
       data: {
         orgId: payload.orgId,
@@ -517,7 +560,9 @@ async function persistDecision(
         carbonSpikeProbability: selection.best.carbonSpikeProbability,
         curtailmentProbability: selection.best.curtailmentProbability,
         importCarbonLeakageScore: selection.best.importCarbonLeakageScore,
-        
+        estimatedFlag: selection.best.estimatedFlag,
+        syntheticFlag: selection.best.syntheticFlag,
+
         summaryReason: summary.reason,
         tradeoffSummary: summary.tradeoff,
         decisionId: crypto.randomUUID(),
@@ -609,7 +654,7 @@ export async function processCarbonCommand(payload: CarbonCommandPayload): Promi
     },
   })
   const regionMetaEntries = regionRecords.map(
-    (region): [string, { code: string; typicalLatencyMs: number | null; costPerKwh: number | null }] => [
+    (region: any): [string, { code: string; typicalLatencyMs: number | null; costPerKwh: number | null }] => [
       region.code,
       {
         code: region.code,
@@ -638,8 +683,11 @@ export async function processCarbonCommand(payload: CarbonCommandPayload): Promi
       let rejectionReason: string | undefined
 
       let carbonIntensity: number | undefined
+      let routingProvenance: CandidateContext['routingProvenance']
       try {
-        carbonIntensity = await resolveCarbonIntensity(region, startAt)
+        const resolved = await resolveCarbonIntensity(region, startAt)
+        carbonIntensity = resolved.carbonIntensity
+        routingProvenance = resolved.provenance
       } catch (error) {
         eligible = false
         rejectionReason = 'Carbon intensity unavailable'
@@ -666,6 +714,7 @@ export async function processCarbonCommand(payload: CarbonCommandPayload): Promi
         latencyFit,
         eligible,
         rejectionReason,
+        routingProvenance,
       }
 
       // Enrich with grid signal intelligence (GUARANTEED for dashboard)
@@ -706,9 +755,37 @@ export async function processCarbonCommand(payload: CarbonCommandPayload): Promi
     similarityContext?.insight ?? null
   )
 
-  void indexWorkloadEmbedding(commandRecord, payload).catch((error) => {
-    console.warn('Failed to index workload embedding for command', commandRecord.id, error)
-  })
+  // Enrich trace with grid signal provenance (with retry — governance-critical)
+  if (best && best.carbonIntensity !== undefined) {
+    retryAsync(() => GridSignalAudit.recordRoutingDecision(
+      commandRecord.id,
+      best.region,
+      {
+        balancingAuthority: best.balancingAuthority ?? null,
+        demandRampPct: best.demandRampPct ?? null,
+        carbonSpikeProbability: best.carbonSpikeProbability ?? null,
+        curtailmentProbability: best.curtailmentProbability ?? null,
+        importCarbonLeakageScore: best.importCarbonLeakageScore ?? null,
+        signalQuality: best.signalQuality ?? 'medium',
+        estimatedFlag: best.estimatedFlag ?? false,
+        syntheticFlag: best.syntheticFlag ?? false
+      },
+      {
+        sourceUsed: best.routingProvenance?.sourceUsed ?? 'unknown',
+        referenceTime: best.routingProvenance?.referenceTime ?? best.startAt.toISOString(),
+        fetchedAt: best.routingProvenance?.fetchedAt ?? new Date().toISOString(),
+        fallbackUsed: best.routingProvenance?.fallbackUsed ?? false,
+        disagreementFlag: best.routingProvenance?.disagreementFlag ?? false,
+        disagreementPct: best.routingProvenance?.disagreementPct ?? 0
+      }
+    ), 'carbon-command-audit')
+  }
+
+  // Governance: All audit trail writes use retryAsync (governance-grade retry)
+  retryAsync(
+    () => indexWorkloadEmbedding(commandRecord, payload),
+    'workload-embedding'
+  )
 
   if (similarityContext?.embedding) {
     const metadata = {
@@ -722,42 +799,74 @@ export async function processCarbonCommand(payload: CarbonCommandPayload): Promi
       success: true,
     }
 
-    void storeWorkloadFingerprint({
-      workloadId: commandRecord.id,
-      embedding: similarityContext.embedding,
-      metadata,
-    }).catch((error) => {
-      console.warn('Failed to persist workload fingerprint', commandRecord.id, error)
-    })
+    retryAsync(
+      () => storeWorkloadFingerprint({
+        workloadId: commandRecord.id,
+        embedding: similarityContext.embedding,
+        metadata,
+      }),
+      'workload-fingerprint'
+    )
   }
 
-  void incrementOrgUsage(org.id, periodStart, {
-    commands: 1,
-    estimatedEmissionsKg: analytics.estimatedEmissionsKgCo2e,
-    lastCommandAt: new Date(),
-  }).catch((error) => {
-    console.warn('Failed to increment org usage for command', commandRecord.id, error)
-  })
+  retryAsync(
+    () => incrementOrgUsage(org.id, periodStart, {
+      commands: 1,
+      estimatedEmissionsKg: analytics.estimatedEmissionsKgCo2e,
+      lastCommandAt: new Date(),
+    }),
+    'org-usage'
+  )
 
-  void (async () => {
-    try {
-      const baseScores: Record<string, number> = {
-        carbon: best.scores?.carbon ?? 0,
-        latency: best.scores?.latency ?? 0,
-        cost: best.scores?.cost ?? 0,
-        deadline: best.scores?.deadline ?? 0,
-        total: best.scores?.total ?? 0,
-      }
-      const adaptiveContext = await buildAdaptiveRun(commandRecord, payload, baseScores)
-      await logAdaptiveRun(adaptiveContext)
-    } catch (error) {
-      console.warn('Failed to log adaptive run for command', commandRecord.id, error)
+  retryAsync(async () => {
+    const baseScores: Record<string, number> = {
+      carbon: best.scores?.carbon ?? 0,
+      latency: best.scores?.latency ?? 0,
+      cost: best.scores?.cost ?? 0,
+      deadline: best.scores?.deadline ?? 0,
+      total: best.scores?.total ?? 0,
     }
-  })()
+    const adaptiveContext = await buildAdaptiveRun(commandRecord, payload, baseScores)
+    await logAdaptiveRun(adaptiveContext)
+  }, 'adaptive-run')
+
+  // ── Governance: Quality tier + lease generation ───────────────────────
+  const confidence = commandRecord.confidence ?? 0.8
+  const qualityTier: 'high' | 'medium' | 'low' =
+    confidence >= 0.8 ? 'high' : confidence >= 0.5 ? 'medium' : 'low'
+
+  const decisionFrameId = commandRecord.decisionId ?? commandRecord.id
+  // Governance: Lease from shared policy (single source of truth)
+  const lease = generateLease(qualityTier, decisionFrameId)
+  const { lease_id: leaseId, lease_expires_at: leaseExpiresAt, must_revalidate_after: mustRevalidateAfter, leaseMinutes } = lease
+
+  // Carbon delta: best vs worst candidate
+  const worstIntensity = scoredCandidates.length > 1
+    ? Math.max(...scoredCandidates.map(c => c.carbonIntensity ?? 0))
+    : null
+  const carbonDelta = worstIntensity !== null && best.carbonIntensity !== undefined
+    ? worstIntensity - best.carbonIntensity : null
+
+  // Forecast stability
+  const forecastStability: 'stable' | 'medium' | 'unstable' | null =
+    confidence >= 0.75 ? 'stable' : confidence >= 0.45 ? 'medium' : 'unstable'
+
+  // Governance warnings
+  const governanceWarnings: string[] = []
+  if (qualityTier === 'low') {
+    governanceWarnings.push('LOW_QUALITY: Decision confidence below 0.5. Consider revalidation.')
+  }
+  if (best.estimatedFlag) {
+    governanceWarnings.push('ESTIMATED_DATA: Signal uses estimated/forecast data, not real-time.')
+  }
+  if (best.syntheticFlag) {
+    governanceWarnings.push('SYNTHETIC_DATA: Signal includes synthetic fallback data.')
+  }
 
   const response: CarbonCommandRecommendation = {
     commandId: commandRecord.id,
     decisionId: commandRecord.decisionId ?? commandRecord.id,
+    decisionFrameId,
     recommendation: {
       region: best.region,
       startAt: best.startAt.toISOString(),
@@ -767,7 +876,7 @@ export async function processCarbonCommand(payload: CarbonCommandPayload): Promi
       expectedCostIndex: best.costIndex,
       estimatedEmissionsKgCo2e: commandRecord.estimatedEmissionsKgCo2e ?? 0,
       estimatedSavingsKgCo2e: commandRecord.estimatedSavingsKgCo2e ?? 0,
-      confidence: commandRecord.confidence ?? 0.8,
+      confidence,
       fallbackRegion: fallback?.region,
     },
     summary: {
@@ -781,6 +890,32 @@ export async function processCarbonCommand(payload: CarbonCommandPayload): Promi
       candidatesEvaluated: scoredCandidates.length,
       selectedCandidateId: best.candidateId,
       rejectedReasons: rejectionReasons,
+    },
+    governance: {
+      qualityTier,
+      carbon_delta_g_per_kwh: carbonDelta,
+      forecast_stability: forecastStability,
+      provider_disagreement: {
+        flag: best.routingProvenance?.disagreementFlag ?? false,
+        pct: best.routingProvenance?.disagreementPct ?? 0,
+      },
+      source_used: best.routingProvenance?.sourceUsed ?? 'unknown',
+      validation_source: best.routingProvenance?.validationNotes ?? null,
+      fallback_used: best.routingProvenance?.fallbackUsed ?? (best.syntheticFlag ?? false),
+      estimatedFlag: best.estimatedFlag ?? null,
+      syntheticFlag: best.syntheticFlag ?? null,
+      balancingAuthority: best.balancingAuthority ?? null,
+      demandRampPct: best.demandRampPct ?? null,
+      carbonSpikeProbability: best.carbonSpikeProbability ?? null,
+      curtailmentProbability: best.curtailmentProbability ?? null,
+      importCarbonLeakageScore: best.importCarbonLeakageScore ?? null,
+      predicted_clean_window: null,
+      lease_id: leaseId,
+      lease_expires_at: leaseExpiresAt,
+      must_revalidate_after: mustRevalidateAfter,
+      explanation: governanceWarnings.length > 0
+        ? governanceWarnings.join(' | ')
+        : `Routed to ${best.region} with ${qualityTier} confidence. Lease valid for ${leaseMinutes}m.`,
     },
   }
 

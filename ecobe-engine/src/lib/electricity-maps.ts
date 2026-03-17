@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { env } from '../config/env'
 import { recordIntegrationFailure, recordIntegrationSuccess } from './integration-metrics'
+import { electricityMapsResilience } from './resilience'
 
 interface LatestCarbonIntensityResponse {
   zone: string
@@ -77,10 +78,13 @@ export class ElectricityMapsClient {
     }
 
     try {
-      const response = await axios.get<LatestCarbonIntensityResponse>(`${this.baseUrl}/v3/carbon-intensity/latest`, {
-        params: { zone },
-        headers: { 'auth-token': this.apiKey },
-      })
+      const response = await electricityMapsResilience.execute('getCarbonIntensity', () =>
+        axios.get<LatestCarbonIntensityResponse>(`${this.baseUrl}/v3/carbon-intensity/latest`, {
+          params: { zone },
+          headers: { 'auth-token': this.apiKey },
+          timeout: 8000,
+        })
+      )
 
       const result = {
         zone: response.data.zone,
@@ -109,14 +113,17 @@ export class ElectricityMapsClient {
     }
 
     try {
-      const response = await axios.get<HistoryResponse>(`${this.baseUrl}/v3/carbon-intensity/history`, {
-        params: {
-          zone,
-          start: start.toISOString(),
-          end: end.toISOString(),
-        },
-        headers: { 'auth-token': this.apiKey },
-      })
+      const response = await electricityMapsResilience.execute('getCarbonIntensityHistory', () =>
+        axios.get<HistoryResponse>(`${this.baseUrl}/v3/carbon-intensity/history`, {
+          params: {
+            zone,
+            start: start.toISOString(),
+            end: end.toISOString(),
+          },
+          headers: { 'auth-token': this.apiKey },
+          timeout: 8000,
+        })
+      )
 
       const history = response.data.history.map((item) => ({
         zone: item.zone,
@@ -141,10 +148,13 @@ export class ElectricityMapsClient {
     }
 
     try {
-      const response = await axios.get<ForecastResponse>(`${this.baseUrl}/v3/carbon-intensity/forecast`, {
-        params: { zone },
-        headers: { 'auth-token': this.apiKey },
-      })
+      const response = await electricityMapsResilience.execute('getForecast', () =>
+        axios.get<ForecastResponse>(`${this.baseUrl}/v3/carbon-intensity/forecast`, {
+          params: { zone },
+          headers: { 'auth-token': this.apiKey },
+          timeout: 8000,
+        })
+      )
 
       const forecast = response.data.forecast.map((item) => ({
         zone: item.zone,
