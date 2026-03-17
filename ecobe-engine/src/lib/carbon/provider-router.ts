@@ -1,9 +1,12 @@
 import { wattTime } from '../watttime'
 import { electricityMaps } from '../electricity-maps'
 import { ember } from '../ember'
+import { gbCarbonIntensity } from '../gb-carbon-intensity'
 import { GridSignalCache } from '../grid-signals/grid-signal-cache'
 import { GridSignalAudit } from '../grid-signals/grid-signal-audit'
 import { getRegionMapping } from '../grid-signals/region-mapping'
+import { FuelMixParser } from '../grid-signals/fuel-mix-parser'
+import { gridStatus } from '../grid-signals/gridstatus-client'
 import { EmberStructuralProfile, type EmberData, type RegionStructuralProfile } from '../ember/structural-profile'
 
 interface WeightedSignal {
@@ -31,7 +34,7 @@ export interface ProviderDisagreement {
 
 export interface RoutingSignal {
   carbonIntensity: number
-  source: 'watttime' | 'electricity_maps' | 'ember' | 'fallback'
+  source: 'watttime' | 'electricity_maps' | 'ember' | 'gb_carbon_intensity' | 'gridstatus_fuel_mix' | 'fallback'
   isForecast: boolean
   confidence: number
   provenance: {
@@ -111,16 +114,52 @@ export class ProviderRouter {
     }
 
     if (wattTimeSignal) {
+      // Try to enrich WattTime percentile with real gCO2/kWh from GridStatus fuel mix
+      const fuelMixCI = await this.getGridStatusFuelMixCI(region)
+      const contributingSources: string[] = ['watttime']
+      let enrichmentNote = ''
+
+      if (fuelMixCI !== null) {
+        contributingSources.push('gridstatus_fuel_mix')
+        enrichmentNote = `; GridStatus fuel-mix CI: ${fuelMixCI.toFixed(0)} gCO2/kWh`
+      }
+
       const validation = await this.validateWithEmber(wattTimeSignal, region, timestamp, [wattTimeSignal])
 
       return {
         carbonIntensity: wattTimeSignal.carbonIntensity,
+        // Include fuel-mix CI as metadata for dashboard consumption
+        ...(fuelMixCI !== null ? { fuelMixCarbonIntensity: fuelMixCI } : {}),
         source: 'watttime',
         isForecast: wattTimeSignal.isForecast,
         confidence: validation.adjustedConfidence,
         provenance: {
           sourceUsed: wattTimeSignal.metadata?.signalType === 'forecast_moer' ? 'WATTTIME_MOER_FORECAST' : 'WATTTIME_MOER',
-          contributingSources: ['watttime'],
+          contributingSources,
+          referenceTime,
+          fetchedAt,
+          fallbackUsed: true,
+          disagreementFlag: validation.disagreement.level !== 'none',
+          disagreementPct: validation.disagreement.disagreementPct,
+          validationNotes: (validation.validationNotes || '') + enrichmentNote || undefined
+        }
+      }
+    }
+
+    // Tier 3: GB Carbon Intensity API (free, no auth, 96h forecast)
+    // Covers: eu-west-2 (London) and any GB-mapped region
+    const gbSignal = await this.getGBCarbonIntensitySignal(region)
+    if (gbSignal) {
+      const validation = await this.validateWithEmber(gbSignal, region, timestamp, [gbSignal])
+
+      return {
+        carbonIntensity: gbSignal.carbonIntensity,
+        source: 'fallback' as any, // GB Carbon Intensity is a free supplemental source
+        isForecast: gbSignal.isForecast,
+        confidence: validation.adjustedConfidence,
+        provenance: {
+          sourceUsed: 'GB_CARBON_INTENSITY_API',
+          contributingSources: ['gb_carbon_intensity'],
           referenceTime,
           fetchedAt,
           fallbackUsed: true,
@@ -131,6 +170,29 @@ export class ProviderRouter {
       }
     }
 
+    // Tier 4: GridStatus fuel-mix derived CI (US regions only)
+    // Real gCO2/kWh computed from actual hourly fuel generation data
+    const fuelMixCI = await this.getGridStatusFuelMixCI(region)
+    if (fuelMixCI !== null) {
+      return {
+        carbonIntensity: fuelMixCI,
+        source: 'fallback' as any,
+        isForecast: false,
+        confidence: 0.55, // Decent — real fuel mix data, but computed not measured
+        provenance: {
+          sourceUsed: 'GRIDSTATUS_FUEL_MIX_DERIVED',
+          contributingSources: ['gridstatus_fuel_mix'],
+          referenceTime,
+          fetchedAt,
+          fallbackUsed: true,
+          disagreementFlag: false,
+          disagreementPct: 0,
+          validationNotes: `Derived from real hourly fuel mix via GridStatus EIA-930`
+        }
+      }
+    }
+
+    // Tier 5: Static fallback (last resort)
     return {
       carbonIntensity: 450,
       source: 'fallback',
@@ -144,7 +206,7 @@ export class ProviderRouter {
         fallbackUsed: true,
         disagreementFlag: false,
         disagreementPct: 0,
-        validationNotes: 'Primary and marginal providers unavailable'
+        validationNotes: 'All providers unavailable for this region'
       }
     }
   }
@@ -240,6 +302,95 @@ export class ProviderRouter {
     return null
   }
 
+  // Cloud regions that map to Great Britain grid
+  private static GB_REGIONS = new Set([
+    'eu-west-2',       // AWS London
+    'europe-west2',    // GCP London
+    'uksouth',         // Azure UK South
+    'uknorth',         // Azure UK North
+  ])
+
+  /**
+   * Get GB Carbon Intensity signal (free, no auth, real gCO2/kWh + 96h forecast)
+   * Covers: eu-west-2 (London) and other GB-mapped cloud regions
+   */
+  private async getGBCarbonIntensitySignal(region: string): Promise<ProviderSignal | null> {
+    if (!ProviderRouter.GB_REGIONS.has(region)) return null
+
+    try {
+      const current = await gbCarbonIntensity.getCurrentIntensity()
+      if (current && current.intensity.forecast) {
+        return {
+          carbonIntensity: current.intensity.actual ?? current.intensity.forecast,
+          isForecast: current.intensity.actual === null,
+          source: 'gb_carbon_intensity' as any,
+          timestamp: current.from,
+          estimatedFlag: current.intensity.actual === null,
+          syntheticFlag: false,
+          confidence: current.intensity.actual !== null ? 0.85 : 0.75,
+          metadata: {
+            signalType: 'gb_national_intensity',
+            index: current.intensity.index,
+            forecastAvailable: true,
+          }
+        }
+      }
+    } catch (error) {
+      console.warn(`GB Carbon Intensity signal failed for ${region}:`, error)
+    }
+
+    return null
+  }
+
+  // Cloud regions with GridStatus EIA-930 fuel mix coverage (US only)
+  private static GRIDSTATUS_BA_MAP: Record<string, string> = {
+    'us-east-1': 'PJM', 'us-east-2': 'PJM',
+    'us-west-1': 'CISO', 'us-west-2': 'BPAT',
+    'us-central1': 'MISO',
+    'us-east4': 'PJM', 'us-west1': 'BPAT',
+    'eastus': 'PJM', 'eastus2': 'PJM',
+    'westus2': 'BPAT', 'centralus': 'MISO',
+    'southcentralus': 'ERCO',
+  }
+
+  // Cache fuel-mix CI for 15 minutes (matches ingestion cadence)
+  private fuelMixCICache = new Map<string, { ci: number; expiry: number }>()
+
+  /**
+   * Get carbon intensity derived from real GridStatus EIA-930 fuel mix data
+   * Returns gCO2/kWh computed from actual hourly generation by fuel type
+   */
+  private async getGridStatusFuelMixCI(region: string): Promise<number | null> {
+    const ba = ProviderRouter.GRIDSTATUS_BA_MAP[region]
+    if (!ba) return null
+
+    // Check cache
+    const cached = this.fuelMixCICache.get(ba)
+    if (cached && cached.expiry > Date.now()) return cached.ci
+
+    try {
+      if (!gridStatus.isAvailable) return null
+
+      const now = new Date()
+      const start = new Date(now.getTime() - 6 * 60 * 60 * 1000) // Last 6 hours
+      const fuelMix = await gridStatus.getFuelMix(ba, start, now)
+
+      if (fuelMix.length === 0) return null
+
+      // Use most recent data point — FuelMixParser computes weighted avg from IPCC factors
+      const mostRecent = fuelMix[fuelMix.length - 1]
+      const ci = FuelMixParser.estimateCarbonIntensity(mostRecent)
+      if (ci === null || !Number.isFinite(ci)) return null
+
+      // Cache for 15 minutes
+      this.fuelMixCICache.set(ba, { ci, expiry: Date.now() + 15 * 60 * 1000 })
+      return ci
+    } catch (error) {
+      console.warn(`GridStatus fuel-mix CI failed for ${region}/${ba}:`, error)
+      return null
+    }
+  }
+
   /**
    * Blend provider signals using confidence weights
    */
@@ -332,9 +483,19 @@ export class ProviderRouter {
       // Determine if the signal is in gCO2/kWh or is a WattTime percentile (0-100)
       // WattTime v3 signal-index returns percentile, NOT gCO2/kWh — skip direct comparison
       const isWattTimePercentile = disagreementSignals.length === 1 && disagreementSignals[0]?.source === 'watttime'
+      // GB Carbon Intensity is authoritative real-time — its deviation from yearly baseline is expected
+      const isAuthoritativeRealtime = disagreementSignals.some(s =>
+        s.source === 'gb_carbon_intensity' || s.source === 'electricity_maps'
+      )
 
-      if (!isWattTimePercentile) {
-        // Only compare when units match (gCO2/kWh vs gCO2/kWh)
+      if (isWattTimePercentile) {
+        // WattTime percentile (0-100) cannot be compared to gCO2/kWh baseline
+        validationNotes = `Ember baseline: ${emberProfile.structuralCarbonBaseline.toFixed(0)} gCO2/kWh (structural reference)`
+      } else if (isAuthoritativeRealtime) {
+        // Real-time measured intensity — note the baseline for context but don't penalize
+        validationNotes = `Ember baseline: ${emberProfile.structuralCarbonBaseline.toFixed(0)} gCO2/kWh; real-time measured: ${signal.carbonIntensity} gCO2/kWh`
+      } else {
+        // Derived/computed sources — apply deviation penalty
         const deviation = Math.abs(emberProfile.structuralCarbonBaseline - signal.carbonIntensity)
         const deviationPct = (deviation / Math.max(emberProfile.structuralCarbonBaseline, 1)) * 100
 
@@ -345,9 +506,6 @@ export class ProviderRouter {
           confidencePenalty += 0.15
           validationNotes = `Moderate deviation (${deviationPct.toFixed(1)}%) from Ember baseline`
         }
-      } else {
-        // For WattTime percentile: use Ember baseline as structural context only
-        validationNotes = `Ember baseline: ${emberProfile.structuralCarbonBaseline.toFixed(0)} gCO2/kWh (structural reference)`
       }
     }
 
