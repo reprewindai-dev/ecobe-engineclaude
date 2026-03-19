@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 node_modules/
 dist/
 .DS_Store
@@ -17,6 +16,12 @@ ecobe-engine/.env
 /ecobe-engine/dist/
 /ecobe-engine/node_modules/
 
+# Dashboard build artifacts
+/ecobe-dashboard/node_modules
+/ecobe-dashboard/.next
+/ecobe-dashboard/tsconfig.tsbuildinfo
+/ecobe-dashboard/.env
+
 # Other repos cloned into this workspace (should not be committed here)
 /dekes-saas/
 /ecobe-dashboardclaude/
@@ -25,19 +30,9 @@ ecobe-engine/.env
 # Windsurf
 .windsurf/
 ecobe-engine/.windsurf/
-=======
-# dependencies
-/ecobe-dashboard/node_modules
 
-# next.js
-/ecobe-dashboard/.next
-
-# build outputs
-/ecobe-dashboard/tsconfig.tsbuildinfo
-
-# env
-/ecobe-dashboard/.env
+# Claude local settings (contains machine-specific permissions)
+.claude/settings.local.json
 
 # logs
 *.log
->>>>>>> a8c7cfc7f04fa8c8228c043ae76b00cf3d920552
