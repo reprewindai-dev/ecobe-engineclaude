@@ -22,7 +22,8 @@ export async function warmCacheOnStartup(): Promise<void> {
             region,
             status: 'ok' as const,
             carbonIntensity: signal.carbonIntensity,
-            confidence: signal.confidence
+            confidence: signal.confidence,
+            source: signal.provenance.sourceUsed,
           }
         } catch (error) {
           return {
@@ -42,7 +43,7 @@ export async function warmCacheOnStartup(): Promise<void> {
       if (result.status === 'fulfilled') {
         const value = result.value as any
         if (value.status === 'ok') {
-          console.log(`   ✓ ${value.region}: ${value.carbonIntensity} gCO2/kWh (confidence: ${(value.confidence * 100).toFixed(0)}%)`)
+          console.log(`   ✓ ${value.region}: ${value.carbonIntensity} gCO2/kWh (confidence: ${(value.confidence * 100).toFixed(0)}%, source: ${value.source})`)
         } else {
           console.log(`   ✗ ${value.region}: ${value.error}`)
         }

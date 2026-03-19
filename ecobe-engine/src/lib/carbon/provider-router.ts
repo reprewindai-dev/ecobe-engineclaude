@@ -316,7 +316,9 @@ export class ProviderRouter {
   private async getWattTimeSignal(region: string, timestamp: Date): Promise<ProviderSignal | null> {
     try {
       // Map cloud region to WattTime v3 sub-regional name
-      const wattTimeRegion = ProviderRouter.WATTTIME_REGION_MAP[region] ?? region
+      // ONLY try US regions — WattTime free plan covers US only (CAISO_NORTH full access)
+      const wattTimeRegion = ProviderRouter.WATTTIME_REGION_MAP[region]
+      if (!wattTimeRegion) return null // No mapping = not a US region, skip entirely
 
       // Try current MOER first
       const currentMoer = await wattTime.getCurrentMOER(wattTimeRegion)
