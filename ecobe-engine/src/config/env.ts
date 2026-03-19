@@ -34,6 +34,9 @@ const envSchema = z.object({
   // GridStatus.io (curated EIA-930 data with real fuel mix)
   GRIDSTATUS_API_KEY: z.string().optional(),
 
+  // Finland Fingrid (free, 3-min realtime carbon intensity)
+  FINGRID_API_KEY: z.string().optional(),
+
   // Grid Signal Cache
   GRID_SIGNAL_CACHE_TTL: z.string().default('900'),
   GRID_FEATURE_CACHE_TTL: z.string().default('3600'),
