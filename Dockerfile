@@ -14,6 +14,7 @@ FROM base AS builder
 WORKDIR /app/ecobe-engine
 ARG BUILDTIME_DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=public"
 ENV DATABASE_URL=${BUILDTIME_DATABASE_URL}
+ENV DIRECT_DATABASE_URL=${BUILDTIME_DATABASE_URL}
 COPY --from=deps /app/ecobe-engine/node_modules ./node_modules
 COPY ecobe-engine/ ./
 RUN npx prisma generate
