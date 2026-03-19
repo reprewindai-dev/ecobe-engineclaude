@@ -14,7 +14,7 @@ const envSchema = z.object({
 
   // Optional
   ELECTRICITY_MAPS_API_KEY: z.string().optional(),
-  ELECTRICITY_MAPS_BASE_URL: z.string().default('https://api.electricitymap.org'),
+  ELECTRICITY_MAPS_BASE_URL: z.string().default('https://api.electricitymaps.com'),
   DEFAULT_MAX_CARBON_G_PER_KWH: z.string().default('400'),
   
   // WattTime
