@@ -14,6 +14,8 @@ const GridSummarySchema = z.object({
   regions: z.array(z.object({
     region: z.string(),
     balancingAuthority: z.string().nullable(),
+    carbonIntensity: z.number().nullable(),
+    source: z.string().nullable(),
     demandRampPct: z.number().nullable(),
     renewableRatio: z.number().nullable(),
     fossilRatio: z.number().nullable(),
@@ -79,18 +81,23 @@ const HeroMetricsSchema = z.object({
   providerDisagreementRatePct: z.number()
 })
 
+// Default cloud regions that the dashboard and cache warmer use
+const CLOUD_REGIONS = ['us-east-1', 'us-west-2', 'eu-west-1', 'eu-central-1', 'ap-southeast-1', 'ap-northeast-1']
+
 /**
  * GET /api/v1/intelligence/grid/summary
- * Get grid intelligence summary for all regions
+ * Get grid intelligence summary for all regions.
+ * Tries EIA GridSignalSnapshot first; falls back to live provider-router signals
+ * so the dashboard always has data even without EIA ingestion.
  */
 router.get('/summary', async (req, res) => {
   try {
     const regions = req.query.regions as string[] | undefined
-    const targetRegions = regions || ['PJM', 'ERCOT', 'CAISO', 'MISO', 'NYISO', 'ISO-NE', 'SPP']
+    const targetRegions = regions || CLOUD_REGIONS
 
     const summaryData = await Promise.all(
       targetRegions.map(async (region) => {
-        // Try cache first
+        // Try EIA snapshots first (cache then DB)
         const cached = await GridSignalCache.getCachedSnapshots(region)
         const snapshots = cached || await prisma.gridSignalSnapshot.findMany({
           where: { region },
@@ -98,22 +105,47 @@ router.get('/summary', async (req, res) => {
           take: 1
         })
 
-        if (snapshots.length === 0) {
-          return null
+        if (snapshots.length > 0) {
+          const latest = snapshots[0]
+          return {
+            region: latest.region,
+            balancingAuthority: latest.balancingAuthority,
+            carbonIntensity: null as number | null,
+            source: 'eia-930' as string | null,
+            demandRampPct: latest.demandChangePct,
+            renewableRatio: latest.renewableRatio,
+            fossilRatio: latest.fossilRatio,
+            carbonSpikeProbability: latest.carbonSpikeProbability,
+            curtailmentProbability: latest.curtailmentProbability,
+            importCarbonLeakageScore: latest.importCarbonLeakageScore,
+            signalQuality: latest.signalQuality as 'high' | 'medium' | 'low'
+          }
         }
 
-        const latest = snapshots[0]
-        return {
-          region: latest.region,
-          balancingAuthority: latest.balancingAuthority,
-          demandRampPct: latest.demandChangePct,
-          renewableRatio: latest.renewableRatio,
-          fossilRatio: latest.fossilRatio,
-          carbonSpikeProbability: latest.carbonSpikeProbability,
-          curtailmentProbability: latest.curtailmentProbability,
-          importCarbonLeakageScore: latest.importCarbonLeakageScore,
-          signalQuality: latest.signalQuality
+        // Fallback: get live routing signal from provider-router (uses cache-warmed data)
+        try {
+          const { providerRouter } = await import('../../lib/carbon/provider-router')
+          const signal = await providerRouter.getRoutingSignal(region, new Date())
+          if (signal) {
+            return {
+              region,
+              balancingAuthority: null,
+              carbonIntensity: signal.carbonIntensity,
+              source: signal.provenance.sourceUsed,
+              demandRampPct: null,
+              renewableRatio: null,
+              fossilRatio: null,
+              carbonSpikeProbability: null,
+              curtailmentProbability: null,
+              importCarbonLeakageScore: null,
+              signalQuality: (signal.confidence >= 0.7 ? 'high' : signal.confidence >= 0.4 ? 'medium' : 'low') as 'high' | 'medium' | 'low'
+            }
+          }
+        } catch (err) {
+          console.warn(`Grid summary: provider-router fallback failed for ${region}:`, err)
         }
+
+        return null
       })
     )
 

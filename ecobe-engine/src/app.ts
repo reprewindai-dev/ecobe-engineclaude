@@ -1,4 +1,5 @@
 import express from 'express'
+import cors from 'cors'
 
 import { env } from './config/env'
 import { prisma } from './lib/db'
@@ -299,6 +300,12 @@ export function createApp() {
   const app = express()
 
   app.set('trust proxy', 1)
+  app.use(cors({
+    origin: true, // reflect request origin (allows any origin with credentials)
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  }))
   app.use(express.json({ limit: '1mb', verify: rawBodySaver }))
   app.use(express.urlencoded({ extended: true, limit: '1mb', verify: rawBodySaver }))
 

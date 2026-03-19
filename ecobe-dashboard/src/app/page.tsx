@@ -81,13 +81,15 @@ export default function LandingPage() {
         const summary = await ecobeApi.getGridSummary()
         if (cancelled) return
         if (summary?.regions?.length) {
-          const mapped: RegionDisplay[] = summary.regions.map((r) => ({
+          const mapped: RegionDisplay[] = summary.regions.map((r: any) => ({
             id: r.region,
             name: REGION_NAMES[r.region] || r.region,
             carbon: Math.round(
-              (r.fossilRatio != null && r.renewableRatio != null)
-                ? (r.fossilRatio * 800) // approximate gCO2/kWh from fossil ratio
-                : 200
+              r.carbonIntensity != null
+                ? r.carbonIntensity
+                : (r.fossilRatio != null && r.renewableRatio != null)
+                  ? (r.fossilRatio * 800)
+                  : 200
             ),
             demand: r.demandRampPct != null ? `${Math.abs(r.demandRampPct).toFixed(0)}%` : '--',
             renewable: r.renewableRatio != null ? `${Math.round(r.renewableRatio * 100)}%` : '--',
