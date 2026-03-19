@@ -40,9 +40,9 @@ COPY --from=builder /app/ecobe-engine/node_modules/.prisma ./node_modules/.prism
 RUN chown -R ecobe:nodejs /app
 USER ecobe
 
-EXPOSE 3000
+EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD node -e "const http = require('http'); const req = http.get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }); req.on('error', () => process.exit(1)); req.setTimeout(5000, () => process.exit(1));"
+  CMD node -e "const http = require('http'); const req = http.get('http://localhost:8080/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }); req.on('error', () => process.exit(1)); req.setTimeout(5000, () => process.exit(1));"
 
 CMD ["sh", "-c", "npx prisma migrate deploy || echo 'Migration failed, continuing...'; node dist/server.js"]
