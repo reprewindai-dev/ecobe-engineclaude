@@ -273,12 +273,46 @@ export class ProviderRouter {
     return null
   }
 
+  // Cloud regions → Electricity Maps zone codes
+  // See: https://app.electricitymaps.com/zone/ for valid zone IDs
+  private static EMAPS_ZONE_MAP: Record<string, string> = {
+    // AWS
+    'us-east-1': 'US-MIDA-PJM',    // N. Virginia → PJM
+    'us-east-2': 'US-MIDA-PJM',    // Ohio → PJM
+    'us-west-1': 'US-CAL-CISO',    // N. California → CAISO
+    'us-west-2': 'US-NW-BPAT',     // Oregon → BPA
+    'eu-west-1': 'IE',             // Ireland
+    'eu-west-2': 'GB',             // London
+    'eu-central-1': 'DE',          // Frankfurt
+    'ap-southeast-1': 'SG',        // Singapore
+    'ap-northeast-1': 'JP-TK',     // Tokyo
+    'ap-south-1': 'IN-WE',         // Mumbai
+    'ca-central-1': 'CA-ON',       // Canada Central
+    'sa-east-1': 'BR-CS',          // São Paulo
+    // GCP
+    'us-central1': 'US-MIDW-MISO', // Iowa → MISO
+    'us-east4': 'US-MIDA-PJM',     // N. Virginia → PJM
+    'us-west1': 'US-NW-BPAT',      // Oregon → BPA
+    'europe-west1': 'BE',          // Belgium
+    'europe-west2': 'GB',          // London
+    // Azure
+    'eastus': 'US-MIDA-PJM',       // Virginia → PJM
+    'eastus2': 'US-MIDA-PJM',      // Virginia → PJM
+    'westus2': 'US-NW-BPAT',       // Washington → BPA
+    'centralus': 'US-MIDW-MISO',   // Iowa → MISO
+    'southcentralus': 'US-TEX-ERCO', // Texas → ERCOT
+    'uksouth': 'GB',               // UK South
+    'northeurope': 'IE',           // Ireland
+    'westeurope': 'NL',            // Netherlands
+  }
+
   /**
    * Get Electricity Maps signal (validation/intelligence only)
    */
   private async getElectricityMapsSignal(region: string, timestamp: Date): Promise<ProviderSignal | null> {
     try {
-      const intensity = await electricityMaps.getCarbonIntensity(region)
+      const zone = ProviderRouter.EMAPS_ZONE_MAP[region] ?? region
+      const intensity = await electricityMaps.getCarbonIntensity(zone)
       if (intensity) {
         return {
           carbonIntensity: intensity.carbonIntensity,
