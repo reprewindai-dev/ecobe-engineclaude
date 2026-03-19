@@ -34,6 +34,7 @@ COPY --from=builder /app/ecobe-engine/dist ./dist
 COPY --from=builder /app/ecobe-engine/node_modules ./node_modules
 COPY --from=builder /app/ecobe-engine/package.json ./package.json
 COPY --from=builder /app/ecobe-engine/prisma ./prisma
+COPY --from=builder /app/ecobe-engine/prisma.config.ts ./prisma.config.ts
 COPY --from=builder /app/ecobe-engine/node_modules/.prisma ./node_modules/.prisma
 
 RUN chown -R ecobe:nodejs /app
@@ -44,4 +45,4 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD node -e "const http = require('http'); const req = http.get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }); req.on('error', () => process.exit(1)); req.setTimeout(5000, () => process.exit(1));"
 
-CMD ["node", "dist/server.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/server.js"]
