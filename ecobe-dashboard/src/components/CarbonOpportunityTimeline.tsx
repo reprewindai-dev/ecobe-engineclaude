@@ -76,7 +76,7 @@ export function CarbonOpportunityTimeline() {
   const timelineData = (() => {
     if (!forecasts.data || forecasts.data.length === 0) return []
     const allTimes = new Set<string>()
-    forecasts.data.forEach((f) => f.forecasts.forEach((p) => allTimes.add(p.forecastTime)))
+    forecasts.data.forEach((f) => (f.forecasts ?? []).forEach((p) => allTimes.add(p.forecastTime)))
     const sortedTimes = Array.from(allTimes).sort()
     return sortedTimes.map((time) => {
       const point: Record<string, unknown> = {
@@ -84,7 +84,7 @@ export function CarbonOpportunityTimeline() {
         rawTime: time,
       }
       forecasts.data!.forEach((f) => {
-        const match = f.forecasts.find((p) => p.forecastTime === time)
+        const match = (f.forecasts ?? []).find((p) => p.forecastTime === time)
         if (match) point[f.region] = match.predictedIntensity
       })
       return point
