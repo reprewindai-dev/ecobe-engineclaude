@@ -1,13 +1,14 @@
+import type { Server } from 'http'
+
 import { env } from './config/env'
+import { createApp } from './app'
 import { prisma } from './lib/db'
 import { redis } from './lib/redis'
-import { createApp } from './app'
-import { startForecastWorker } from './workers/forecast-poller'
-import { scheduleIntelligenceJobs } from './workers/intelligence-scheduler'
+import { warmCacheOnStartup } from './lib/cache-warmer'
 import { startEIAIngestionWorker } from './workers/eia-ingestion'
 import { startForecastVerificationWorker } from './workers/forecast-verification'
-import { warmCacheOnStartup } from './lib/cache-warmer'
-import type { Server } from 'http'
+import { startForecastWorker } from './workers/forecast-poller'
+import { scheduleIntelligenceJobs } from './workers/intelligence-scheduler'
 
 const app = createApp()
 let server: Server | null = null
@@ -18,15 +19,13 @@ async function gracefulShutdown(signal: string) {
   isShuttingDown = true
   console.log(`\n${signal} received. Starting graceful shutdown...`)
 
-  const SHUTDOWN_TIMEOUT = 15000 // 15 seconds
   const shutdownTimer = setTimeout(() => {
     console.error('Shutdown timed out after 15s. Forcing exit.')
     process.exit(1)
-  }, SHUTDOWN_TIMEOUT)
+  }, 15000)
   shutdownTimer.unref()
 
   try {
-    // Stop accepting new connections
     if (server) {
       await new Promise<void>((resolve) => {
         server!.close(() => {
@@ -43,7 +42,7 @@ async function gracefulShutdown(signal: string) {
     await redis.quit().catch(() => undefined)
 
     clearTimeout(shutdownTimer)
-    console.log('✅ Graceful shutdown complete.')
+    console.log('Graceful shutdown complete.')
     process.exit(0)
   } catch (error) {
     clearTimeout(shutdownTimer)
@@ -52,73 +51,77 @@ async function gracefulShutdown(signal: string) {
   }
 }
 
+function startBackgroundWorkers() {
+  if (!env.ENGINE_BACKGROUND_WORKERS_ENABLED) {
+    console.log('  Background workers: disabled')
+    return
+  }
+
+  console.log('  Background workers: enabled')
+
+  try {
+    startForecastWorker()
+  } catch (error) {
+    console.error('Forecast poller worker failed to start:', error)
+  }
+
+  startEIAIngestionWorker().catch((error) => {
+    console.error('EIA ingestion worker failed to start:', error)
+  })
+
+  scheduleIntelligenceJobs().catch((error) => {
+    console.error('Intelligence job scheduling failed to start:', error)
+  })
+
+  try {
+    startForecastVerificationWorker()
+  } catch (error) {
+    console.error('Forecast verification worker failed to start:', error)
+  }
+
+  warmCacheOnStartup().catch((error) => {
+    console.error('Cache warming failed:', error)
+  })
+}
+
 async function start() {
   try {
-    // Test database connection
     await prisma.$connect()
-    console.log('✅ Database connected')
+    console.log('Database connected')
 
-    // Test Redis connection
     try {
       await redis.ping()
-      console.log('✅ Redis connected')
+      console.log('Redis connected')
     } catch (error) {
       console.error('Redis error:', error)
-      console.warn('⚠️  Redis unavailable at startup; continuing without Redis')
+      console.warn('Redis unavailable at startup; continuing without Redis')
     }
 
     server = app.listen(env.PORT, () => {
-      console.log(`🌱 ECOBE Engine running on port ${env.PORT}`)
-      console.log(`   Environment: ${env.NODE_ENV}`)
-      console.log(`   Health: http://localhost:${env.PORT}/health`)
-      console.log(`   Status: http://localhost:${env.PORT}/api/v1/system/status`)
-      console.log(`   API: http://localhost:${env.PORT}/api/v1`)
+      console.log(`ECOBE Engine running on port ${env.PORT}`)
+      console.log(`  Environment: ${env.NODE_ENV}`)
+      console.log(`  Health: http://localhost:${env.PORT}/health`)
+      console.log(`  Internal Health: http://localhost:${env.PORT}/internal/v1/health`)
+      console.log(`  Routing API: http://localhost:${env.PORT}/internal/v1/routing-decisions`)
 
-      // Start workers after server is listening
-      try {
-        startForecastWorker()
-      } catch (error) {
-        console.error('Forecast poller worker failed to start:', error)
-      }
-
-      startEIAIngestionWorker().catch((error) => {
-        console.error('EIA ingestion worker failed to start:', error)
-      })
-
-      scheduleIntelligenceJobs().catch((error) => {
-        console.error('Intelligence job scheduling failed to start:', error)
-      })
-
-      try {
-        startForecastVerificationWorker()
-      } catch (error) {
-        console.error('Forecast verification worker failed to start:', error)
-      }
-
-      // Warm cache after workers start
-      warmCacheOnStartup().catch((err) => {
-        console.error('Cache warming failed:', err)
-        // Don't exit - cache warming is non-critical
-      })
+      startBackgroundWorkers()
     })
   } catch (error) {
-    console.error('❌ Failed to start server:', error)
+    console.error('Failed to start server:', error)
     process.exit(1)
   }
 }
 
-// Handle shutdown signals
 process.on('SIGINT', () => gracefulShutdown('SIGINT'))
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
 
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught exception:', err)
-  gracefulShutdown('uncaughtException')
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception:', error)
+  void gracefulShutdown('uncaughtException')
 })
 
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled rejection:', reason)
-  // Log but don't exit immediately - let graceful shutdown handle it if needed
 })
 
 start()
