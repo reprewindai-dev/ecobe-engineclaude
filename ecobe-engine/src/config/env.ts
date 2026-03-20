@@ -69,6 +69,8 @@ const envSchema = z.object({
   // UI (debug)
   UI_ENABLED: z.string().optional(),
   UI_TOKEN: z.string().optional(),
+  LEGACY_PUBLIC_API_ENABLED: z.string().optional(),
+  ECOBE_INTERNAL_API_KEY: z.string().optional(),
 
   // External integrations
   ECOBE_ENGINE_URL: z.string().optional(),
@@ -105,7 +107,11 @@ export const env = {
   UI_ENABLED:
     parsed.data.UI_ENABLED !== undefined
       ? parsed.data.UI_ENABLED === 'true'
-      : parsed.data.NODE_ENV !== 'production',
+      : false,
+  LEGACY_PUBLIC_API_ENABLED:
+    parsed.data.LEGACY_PUBLIC_API_ENABLED !== undefined
+      ? parsed.data.LEGACY_PUBLIC_API_ENABLED === 'true'
+      : false,
   FORECAST_REFRESH_ENABLED:
     parsed.data.FORECAST_REFRESH_ENABLED !== undefined
       ? parsed.data.FORECAST_REFRESH_ENABLED === 'true'
