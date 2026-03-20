@@ -8,6 +8,7 @@ import { DecisionStream } from '@/components/DecisionStream'
 import { CarbonSavingsDashboard } from '@/components/CarbonSavingsDashboard'
 import { CarbonBudgetPanel } from '@/components/CarbonBudgetPanel'
 import { ProviderHealthMonitor } from '@/components/ProviderHealthMonitor'
+import { CIRoutingMonitor } from '@/components/CIRoutingMonitor'
 import { PolicyEnforcementPanel } from '@/components/PolicyEnforcementPanel'
 import { CarbonOpportunityMap } from '@/components/CarbonOpportunityMap'
 import { ForecastAccuracyTracker } from '@/components/ForecastAccuracyTracker'
@@ -91,8 +92,11 @@ export default function DashboardPage() {
           {/* Layer 6 — Governance */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <ProviderHealthMonitor />
-            <PolicyEnforcementPanel />
+            <CIRoutingMonitor />
           </div>
+          
+          {/* Layer 7 — Policy */}
+          <PolicyEnforcementPanel />
         </div>
       )}
 

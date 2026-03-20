@@ -1033,12 +1033,44 @@ router.get('/methodology/providers', async (_req, res) => {
         confidence: 0.75,
         doctrinePosition: 'TELEMETRY - derived features for spike/curtailment detection',
       },
+      {
+        name: 'GB Carbon Intensity',
+        role: 'eu_primary_signal',
+        signalType: 'National Grid carbon intensity (real-time + forecast)',
+        refreshRate: 'every 30 minutes',
+        coverage: 'Great Britain',
+        confidence: 0.85,
+        doctrinePosition: 'PRIMARY - authoritative for GB regions',
+      },
+      {
+        name: 'DK Carbon',
+        role: 'eu_primary_signal',
+        signalType: 'Energi Data Service CO2 intensity (real-time + forecast)',
+        refreshRate: 'every hour',
+        coverage: 'Denmark',
+        confidence: 0.8,
+        doctrinePosition: 'PRIMARY - authoritative for DK regions',
+      },
+      {
+        name: 'FI Carbon',
+        role: 'eu_primary_signal',
+        signalType: 'Fingrid real-time carbon intensity',
+        refreshRate: 'every 3 minutes',
+        coverage: 'Finland',
+        confidence: 0.85,
+        doctrinePosition: 'PRIMARY - authoritative for FI regions',
+      },
     ],
     doctrine: {
       principle: 'Lowest defensible signal, not lowest raw signal',
       averaging: 'No provider averaging - confidence-weighted blending only',
       fallback: 'Static 450 gCO2/kWh when all providers unavailable',
       auditability: 'Every decision records full provenance chain',
+      regionStrategy: {
+        'US': 'WattTime → EIA → Ember → Static',
+        'EU': 'GB/DK/FI → Ember → Static',
+        'GLOBAL': 'Ember → Static'
+      }
     },
   })
 })

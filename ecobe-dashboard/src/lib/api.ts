@@ -382,6 +382,68 @@ export const ecobeApi = {
     const { data } = await api.get('/health')
     return data
   },
+
+  // ── CI/CD Routing ─────────────────────────────────────────────────────────────
+  async getCIRoutingHealth() {
+    try {
+      const { data } = await api.get('/ci/health')
+      return data
+    } catch (error) {
+      console.error('Failed to fetch CI routing health:', error)
+      throw error
+    }
+  },
+
+  async getCIAvailableRegions() {
+    try {
+      const { data } = await api.get('/ci/regions')
+      return data
+    } catch (error) {
+      console.error('Failed to fetch CI regions:', error)
+      throw error
+    }
+  },
+
+  async getCIDecisions(limit = 50) {
+    try {
+      const { data } = await api.get('/ci/decisions', { params: { limit } })
+      return data
+    } catch (error) {
+      console.error('Failed to fetch CI decisions:', error)
+      throw error
+    }
+  },
+
+  // ── Database Health ─────────────────────────────────────────────────────────────
+  async getDatabaseHealth() {
+    try {
+      const { data } = await api.get('/database/health')
+      return data
+    } catch (error) {
+      console.error('Failed to fetch database health:', error)
+      throw error
+    }
+  },
+
+  async testDatabaseConnection() {
+    try {
+      const { data } = await api.post('/database/test')
+      return data
+    } catch (error) {
+      console.error('Failed to test database connection:', error)
+      throw error
+    }
+  },
+
+  async getDatabasePoolStatus() {
+    try {
+      const { data } = await api.get('/database/pool-status')
+      return data
+    } catch (error) {
+      console.error('Failed to fetch database pool status:', error)
+      throw error
+    }
+  },
 }
 
 export default api
