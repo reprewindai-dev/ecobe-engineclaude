@@ -1,0 +1,66 @@
+name: Warm Cache
+
+# Scheduled automation workflow for cache warming
+# Purpose: Pre-populate cache with carbon signals for common regions
+# Frequency: Every 2 hours to maintain cache hit performance
+
+on:
+  schedule:
+    - cron: '0 */2 * * *'  # Every 2 hours at minute 0
+  workflow_dispatch:  # Allow manual triggering
+
+env:
+  NODE_ENV: production
+  ECOBE_ENGINE_URL: ${{ secrets.ECOBE_ENGINE_URL }}
+  ECOBE_ENGINE_API_KEY: ${{ secrets.ECOBE_ENGINE_API_KEY }}
+
+jobs:
+  warm-cache:
+    name: Warm Signal Cache
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci --production
+        
+      - name: Warm cache for common regions
+        run: |
+          echo "🔄 Starting cache warming..."
+          curl -X POST "${ECOBE_ENGINE_URL}/api/v1/cache/warm" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "regions": [
+                "us-east-1", "us-east-2", "us-west-1", "us-west-2",
+                "eu-west-1", "eu-west-2", "eu-central-1",
+                "ap-southeast-1", "ap-northeast-1"
+              ]
+            }' \
+            --fail-with-body
+          echo "✅ Cache warming completed"
+          
+      - name: Verify cache status
+        run: |
+          echo "🔍 Verifying cache status..."
+          response=$(curl -s "${ECOBE_ENGINE_URL}/api/v1/cache/status" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}")
+          echo "Cache status: $response"
+          
+      - name: Report status
+        if: always()
+        run: |
+          if [ ${{ job.status }} == 'success' ]; then
+            echo "🎉 Cache warming completed successfully"
+          else
+            echo "❌ Cache warming failed"
+            exit 1
+          fi

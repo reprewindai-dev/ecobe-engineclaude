@@ -1,0 +1,70 @@
+name: Verify Signal Quality
+
+# Scheduled automation workflow for signal verification
+# Purpose: Run signal quality checks and validation across all providers
+# Frequency: Every 6 hours to ensure data quality
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Every 6 hours at minute 0
+  workflow_dispatch:  # Allow manual triggering
+
+env:
+  NODE_ENV: production
+  ECOBE_ENGINE_URL: ${{ secrets.ECOBE_ENGINE_URL }}
+  ECOBE_ENGINE_API_KEY: ${{ secrets.ECOBE_ENGINE_API_KEY }}
+
+jobs:
+  verify-signals:
+    name: Verify Signal Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci --production
+        
+      - name: Run signal verification
+        run: |
+          echo "🔄 Starting signal verification..."
+          curl -X POST "${ECOBE_ENGINE_URL}/api/v1/verification/run" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "test_regions": ["us-east-1", "us-west-2", "eu-west-1", "ap-southeast-1"],
+              "providers": ["watttime", "eia", "gb_carbon_intensity", "dk_carbon", "fi_carbon", "ember"],
+              "validation_checks": ["freshness", "confidence", "range", "consistency"]
+            }' \
+            --fail-with-body
+          echo "✅ Signal verification completed"
+          
+      - name: Check system health
+        run: |
+          echo "🔍 Checking system health..."
+          response=$(curl -s "${ECOBE_ENGINE_URL}/api/v1/health" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}")
+          echo "System health: $response"
+          
+      - name: Check database health
+        run: |
+          echo "🔍 Checking database health..."
+          response=$(curl -s "${ECOBE_ENGINE_URL}/database/health")
+          echo "Database health: $response"
+          
+      - name: Report status
+        if: always()
+        run: |
+          if [ ${{ job.status }} == 'success' ]; then
+            echo "🎉 Signal verification completed successfully"
+          else
+            echo "❌ Signal verification failed"
+            exit 1
+          fi

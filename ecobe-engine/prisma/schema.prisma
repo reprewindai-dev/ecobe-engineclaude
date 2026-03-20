@@ -1147,3 +1147,39 @@ model CapacityBucket {
   @@unique([region, bucketStartTs])
   @@index([region, bucketStartTs])
 }
+
+// ============================================================================
+// CI/CD ROUTING DECISIONS — CARBON-AWARE RUNNER SELECTION
+// ============================================================================
+
+model CIDecision {
+  id                    String   @id @default(cuid())
+
+  // Decision details
+  decisionFrameId       String   // Links to routing decision frame
+  selectedRunner        String   // e.g., "ubuntu-latest"
+  selectedRegion        String   // e.g., "us-east-1"
+  
+  // Carbon metrics
+  carbonIntensity        Float    // gCO2/kWh
+  baseline              Float    // Baseline carbon intensity
+  savings               Float    // Percentage savings vs baseline
+  
+  // Request parameters
+  jobType               String   // standard | heavy | light
+  preferredRegions      Json     // Array of preferred regions
+  carbonWeight          Float    // Carbon importance weight (0-1)
+  
+  // Recommendation
+  recommendation        String   // Routing recommendation text
+  
+  // Metadata
+  metadata              Json     @default("{}")
+  
+  createdAt             DateTime @default(now())
+
+  @@index([decisionFrameId])
+  @@index([selectedRegion, createdAt])
+  @@index([jobType, createdAt])
+  @@index([createdAt])
+}

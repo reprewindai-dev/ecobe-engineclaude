@@ -1,0 +1,60 @@
+name: EIA Data Ingestion
+
+# Scheduled automation workflow for EIA fuel mix data ingestion
+# Purpose: Refresh US region carbon intensity data from EIA-930 fuel mix reports
+# Frequency: Every 4 hours to capture generation changes
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'  # Every 4 hours at minute 0
+  workflow_dispatch:  # Allow manual triggering
+
+env:
+  NODE_ENV: production
+  ECOBE_ENGINE_URL: ${{ secrets.ECOBE_ENGINE_URL }}
+  ECOBE_ENGINE_API_KEY: ${{ secrets.ECOBE_ENGINE_API_KEY }}
+
+jobs:
+  ingest-eia:
+    name: Ingest EIA Fuel Mix Data
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci --production
+        
+      - name: Ingest EIA data
+        run: |
+          echo "🔄 Starting EIA data ingestion..."
+          curl -X POST "${ECOBE_ENGINE_URL}/api/v1/ingest/eia" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"regions": ["us-east-1", "us-east-2", "us-west-1", "us-west-2"]}' \
+            --fail-with-body
+          echo "✅ EIA data ingestion completed"
+          
+      - name: Verify ingestion
+        run: |
+          echo "🔍 Verifying EIA data ingestion..."
+          response=$(curl -s "${ECOBE_ENGINE_URL}/api/v1/health" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}")
+          echo "Health check response: $response"
+          
+      - name: Report status
+        if: always()
+        run: |
+          if [ ${{ job.status }} == 'success' ]; then
+            echo "🎉 EIA ingestion completed successfully"
+          else
+            echo "❌ EIA ingestion failed"
+            exit 1
+          fi

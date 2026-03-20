@@ -1,0 +1,138 @@
+name: 'ECOBE Carbon-Aware Runner'
+description: 'Select optimal GitHub Actions runner based on carbon intensity'
+author: 'ECOBE'
+branding:
+  icon: 'leaf'
+  color: 'green'
+
+inputs:
+  engine-url:
+    description: 'ECOBE Engine URL'
+    required: true
+  api-key:
+    description: 'ECOBE Engine API Key'
+    required: true
+  preferred-regions:
+    description: 'Preferred runner regions (comma-separated)'
+    required: false
+    default: 'us-east-1,us-west-2,eu-west-1'
+  job-type:
+    description: 'Type of job (affects carbon weighting)'
+    required: false
+    default: 'standard'
+    options:
+      - standard
+      - heavy
+      - light
+  carbon-weight:
+    description: 'Carbon importance weight (0-1)'
+    required: false
+    default: '0.7'
+  timeout-seconds:
+    description: 'Timeout for API calls in seconds'
+    required: false
+    default: '30'
+
+outputs:
+  selected-runner:
+    description: 'Selected optimal runner'
+    value: ${{ steps.select-runner.outputs.selected-runner }}
+  selected-region:
+    description: 'Selected optimal region'
+    value: ${{ steps.select-runner.outputs.selected-region }}
+  carbon-intensity:
+    description: 'Carbon intensity (gCO2/kWh)'
+    value: ${{ steps.select-runner.outputs.carbon-intensity }}
+  baseline:
+    description: 'Baseline carbon intensity for comparison'
+    value: ${{ steps.select-runner.outputs.baseline }}
+  savings:
+    description: 'Carbon savings percentage'
+    value: ${{ steps.select-runner.outputs.savings }}
+  recommendation:
+    description: 'Routing recommendation details'
+    value: ${{ steps.select-runner.outputs.recommendation }}
+  decision-id:
+    description: 'Decision frame ID for audit'
+    value: ${{ steps.select-runner.outputs.decision-id }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Select Carbon-Aware Runner
+      id: select-runner
+      shell: bash
+      run: |
+        echo "🌱 Selecting carbon-aware GitHub Actions runner..."
+        
+        # Parse preferred regions
+        IFS=',' read -ra REGIONS <<< "${{ inputs.preferred-regions }}"
+        
+        # Prepare request payload
+        payload=$(cat <<EOF
+        {
+          "preferredRegions": [$(printf '"%s",' "${REGIONS[@]}" | sed 's/,$//')],
+          "carbonWeight": ${{ inputs.carbon-weight }},
+          "jobType": "${{ inputs.job-type }}",
+          "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+        }
+        EOF
+        )
+        
+        echo "📊 Request payload: $payload"
+        
+        # Call ECOBE Engine CI routing endpoint
+        response=$(curl -s \
+          --max-time ${{ inputs.timeout-seconds }} \
+          -X POST "${{ inputs.engine-url }}/api/v1/ci/route" \
+          -H "Authorization: Bearer ${{ inputs.api-key }}" \
+          -H "Content-Type: application/json" \
+          -d "$payload")
+        
+        if [ $? -ne 0 ]; then
+          echo "❌ Failed to contact ECOBE Engine"
+          echo "Response: $response"
+          exit 1
+        fi
+        
+        echo "📈 ECOBE response: $response"
+        
+        # Parse response and set outputs
+        selected_runner=$(echo "$response" | jq -r '.selectedRunner // "ubuntu-latest"')
+        selected_region=$(echo "$response" | jq -r '.selectedRegion // "us-east-1"')
+        carbon_intensity=$(echo "$response" | jq -r '.carbonIntensity // "0"')
+        baseline=$(echo "$response" | jq -r '.baseline // "0"')
+        savings=$(echo "$response" | jq -r '.savings // "0"')
+        decision_id=$(echo "$response" | jq -r '.decisionFrameId // "unknown"')
+        
+        # Create recommendation summary
+        recommendation=$(echo "$response" | jq -r '.recommendation // "Standard routing applied"')
+        
+        echo "selected-runner=$selected_runner" >> $GITHUB_OUTPUT
+        echo "selected-region=$selected_region" >> $GITHUB_OUTPUT
+        echo "carbon-intensity=$carbon_intensity" >> $GITHUB_OUTPUT
+        echo "baseline=$baseline" >> $GITHUB_OUTPUT
+        echo "savings=$savings" >> $GITHUB_OUTPUT
+        echo "recommendation=$recommendation" >> $GITHUB_OUTPUT
+        echo "decision-id=$decision_id" >> $GITHUB_OUTPUT
+        
+        echo "✅ Carbon-aware runner selection complete"
+        echo "📍 Selected: $selected_runner ($selected_region)"
+        echo "🌍 Carbon: $carbon_intensity gCO2/kWh"
+        echo "💰 Savings: $savings% vs baseline"
+
+    - name: Display Selection Summary
+      shell: bash
+      run: |
+        echo ""
+        echo "🌱 ECOBE Carbon-Aware Runner Selection"
+        echo "=========================================="
+        echo "📍 Runner: ${{ steps.select-runner.outputs.selected-runner }}"
+        echo "🌍 Region: ${{ steps.select-runner.outputs.selected-region }}"
+        echo "⚡ Carbon: ${{ steps.select-runner.outputs.carbon-intensity }} gCO2/kWh"
+        echo "📊 Baseline: ${{ steps.select-runner.outputs.baseline }} gCO2/kWh"
+        echo "💰 Savings: ${{ steps.select-runner.outputs.savings }}%"
+        echo "🎯 Decision ID: ${{ steps.select-runner.outputs.decision-id }}"
+        echo "💡 Recommendation: ${{ steps.select-runner.outputs.recommendation }}"
+        echo "=========================================="
+        echo ""

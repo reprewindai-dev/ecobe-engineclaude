@@ -1,0 +1,60 @@
+name: Refresh Carbon Forecasts
+
+# Scheduled automation workflow for carbon forecast refresh
+# Purpose: Update carbon intensity forecasts for all supported regions
+# Frequency: Every 30 minutes to maintain fresh predictions
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'  # Every 30 minutes
+  workflow_dispatch:  # Allow manual triggering
+
+env:
+  NODE_ENV: production
+  ECOBE_ENGINE_URL: ${{ secrets.ECOBE_ENGINE_URL }}
+  ECOBE_ENGINE_API_KEY: ${{ secrets.ECOBE_ENGINE_API_KEY }}
+
+jobs:
+  refresh-forecasts:
+    name: Refresh Carbon Forecasts
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci --production
+        
+      - name: Refresh forecasts
+        run: |
+          echo "🔄 Starting carbon forecast refresh..."
+          curl -X POST "${ECOBE_ENGINE_URL}/api/v1/forecast/refresh" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"regions": ["us-east-1", "us-east-2", "us-west-1", "us-west-2", "eu-west-1", "eu-west-2", "ap-southeast-1"]}' \
+            --fail-with-body
+          echo "✅ Carbon forecast refresh completed"
+          
+      - name: Verify forecast freshness
+        run: |
+          echo "🔍 Verifying forecast data freshness..."
+          response=$(curl -s "${ECOBE_ENGINE_URL}/api/v1/forecast/status" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}")
+          echo "Forecast status: $response"
+          
+      - name: Report status
+        if: always()
+        run: |
+          if [ ${{ job.status }} == 'success' ]; then
+            echo "🎉 Forecast refresh completed successfully"
+          else
+            echo "❌ Forecast refresh failed"
+            exit 1
+          fi
