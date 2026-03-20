@@ -35,6 +35,12 @@ export async function forecastCarbonIntensity(
   region: string,
   hoursAhead: number = 24
 ): Promise<CarbonForecastResult[]> {
+  // Validate input region
+  if (!region || region.trim() === '') {
+    console.warn('forecastCarbonIntensity: Invalid region provided, returning empty results')
+    return []
+  }
+
   // Get historical data
   const historicalData = await prisma.carbonIntensity.findMany({
     where: {
@@ -50,18 +56,21 @@ export async function forecastCarbonIntensity(
     // Not enough data, use Electricity Maps forecast
     const forecast = await electricityMaps.getForecast(region)
     const mapped = await Promise.all(
-      forecast.map(async (f) => {
-        const forecastTime = new Date(f.datetime)
-        const predictedIntensity = Math.round(f.carbonIntensity)
-        const result: CarbonForecastResult = {
-          region: f.zone,
-          forecastTime,
-          predictedIntensity,
-          confidence: 0.7,
-          trend: 'stable',
-        }
-        await prisma.carbonForecast.upsert({
-          where: { region_forecastTime: { region: f.zone, forecastTime } },
+      forecast
+        .filter((f) => f.zone || region) // Filter out entries with no zone
+        .map(async (f) => {
+          const forecastTime = new Date(f.datetime)
+          const predictedIntensity = Math.round(f.carbonIntensity)
+          const zone = f.zone || region // Fallback to input region if zone is undefined
+          const result: CarbonForecastResult = {
+            region: zone,
+            forecastTime,
+            predictedIntensity,
+            confidence: 0.7,
+            trend: 'stable',
+          }
+          await prisma.carbonForecast.upsert({
+            where: { region_forecastTime: { region: zone, forecastTime } },
           update: {
             predictedIntensity,
             confidence: result.confidence,
@@ -69,7 +78,7 @@ export async function forecastCarbonIntensity(
             features: { provider: 'electricity-maps' },
           },
           create: {
-            region: f.zone,
+            region: zone,
             forecastTime,
             predictedIntensity,
             confidence: result.confidence,
