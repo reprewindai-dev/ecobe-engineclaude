@@ -3,16 +3,16 @@
   "configurations": [
     {
       "name": "ECOBE Engine",
-      "runtimeExecutable": "node",
-      "runtimeArgs": ["node_modules/.bin/tsx", "watch", "src/server.ts"],
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["tsx", "watch", "src/server.ts"],
       "port": 3000,
       "autoPort": true,
       "cwd": "ecobe-engine"
     },
     {
       "name": "ECOBE Dashboard",
-      "runtimeExecutable": "node",
-      "runtimeArgs": ["node_modules/.bin/next", "dev"],
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["next", "dev"],
       "port": 3001,
       "autoPort": true,
       "cwd": "ecobe-dashboard"
