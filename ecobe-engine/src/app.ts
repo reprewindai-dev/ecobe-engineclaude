@@ -17,6 +17,7 @@ import regionMappingRoutes from './routes/region-mapping'
 import patternsRoutes from './routes/patterns'
 import dksRoutes from './routes/dks'
 import testPostRoutes from './routes/test-post'
+import routeDebugRoutes from './routes/route-debug'
 
 function attachHealthRoutes(app: express.Express) {
   async function healthHandler(_req: express.Request, res: express.Response) {
@@ -95,6 +96,7 @@ export function createApp() {
   app.use('/api/v1/patterns', patternsRoutes)
   app.use('/api/v1/integrations/dks', dksRoutes)
   app.use('/api/v1/test-post', testPostRoutes)
+  app.use('/api/v1/route-debug', routeDebugRoutes)
   attachFallbackHandlers(app)
 
   return app
