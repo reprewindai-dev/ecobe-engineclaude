@@ -8,6 +8,7 @@ import dashboardRoutes from './routes/dashboard'
 import forecastingRoutes from './routes/forecasting'
 import methodologyRoutes from './routes/methodology'
 import routeRoutes from './routes/route'
+import routeSimpleRoutes from './routes/route-simple'
 import routeTestRoutes from './routes/route-test'
 import simpleTestRoutes from './routes/simple-test'
 import healthRoutes from './routes/health'
@@ -84,6 +85,7 @@ export function createApp() {
   app.use('/api/v1/forecasting', forecastingRoutes)
   app.use('/api/v1/methodology', methodologyRoutes)
   app.use('/api/v1/route', routeRoutes)
+  app.use('/api/v1/route-simple', routeSimpleRoutes)
   app.use('/api/v1/route-test', routeTestRoutes)
   app.use('/api/v1/simple-test', simpleTestRoutes)
   app.use('/api/v1/health', healthRoutes)
