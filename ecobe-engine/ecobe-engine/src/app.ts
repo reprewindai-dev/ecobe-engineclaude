@@ -9,6 +9,7 @@ import routingRoutes from './routes/routing'
 import creditsRoutes from './routes/credits'
 import decisionsRoutes from './routes/decisions'
 import dashboardRoutes from './routes/dashboard'
+import dashboardApiRoutes from './routes/dashboard-api'
 import forecastingRoutes from './routes/forecasting'
 import carbonRoutes from './routes/carbon-command'
 import organizationsRoutes from './routes/organizations'
@@ -270,6 +271,7 @@ function attachApiRoutes(app: express.Express) {
   app.use('/api/v1/credits', creditsRoutes)
   app.use('/api/v1/decisions', decisionsRoutes)
   app.use('/api/v1/dashboard', dashboardRoutes)
+  app.use('/api/v1/dashboard', dashboardApiRoutes) // New dashboard API routes
   app.use('/api/v1/forecasting', forecastingRoutes)
   app.use('/api/v1/carbon', carbonRoutes)
   app.use('/api/v1/organizations', organizationsRoutes)

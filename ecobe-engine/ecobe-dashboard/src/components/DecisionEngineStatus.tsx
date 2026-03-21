@@ -1,9 +1,17 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
+import {
+  Activity,
+  AlertTriangle,
+  CheckCircle,
+  Shield,
+  TrendingDown,
+  Zap,
+} from 'lucide-react'
+
 import { ecobeApi } from '@/lib/api'
 import { getQualityTierColor } from '@/types'
-import { Shield, Zap, TrendingDown, Activity, AlertTriangle, CheckCircle } from 'lucide-react'
 
 export function DecisionEngineStatus() {
   const { data: metrics, isError: metricsError } = useQuery({
@@ -12,7 +20,7 @@ export function DecisionEngineStatus() {
     refetchInterval: 30_000,
   })
 
-  const { data: health, isError: healthError } = useQuery({
+  const { isError: healthError } = useQuery({
     queryKey: ['health'],
     queryFn: () => ecobeApi.health(),
     refetchInterval: 30_000,
@@ -25,7 +33,7 @@ export function DecisionEngineStatus() {
   })
 
   const sorted = mappingData?.mappings
-    ?.filter((m) => m.carbonIntensityGPerKwh != null)
+    ?.filter((mapping) => mapping.carbonIntensityGPerKwh != null)
     ?.sort((a, b) => (a.carbonIntensityGPerKwh ?? 9999) - (b.carbonIntensityGPerKwh ?? 9999))
 
   const cleanest = sorted?.[0]
@@ -37,16 +45,15 @@ export function DecisionEngineStatus() {
       : null
 
   const disagreeRate =
-    metrics?.electricityMaps?.successRate != null
-      ? ((1 - metrics.electricityMaps.successRate) * 100).toFixed(1)
+    metrics?.providerSignals?.successRate != null
+      ? ((1 - metrics.providerSignals.successRate) * 100).toFixed(1)
       : null
 
   const isOnline = !healthError && !metricsError
 
-  // Derive overall quality tier from fallback rate
   const qualityLabel =
     metrics == null
-      ? '—'
+      ? '-'
       : metrics.fallbackRate < 0.05
         ? 'HIGH'
         : metrics.fallbackRate < 0.2
@@ -75,9 +82,7 @@ export function DecisionEngineStatus() {
         </div>
         <span
           className={`text-xs font-medium px-2 py-0.5 rounded ${
-            isOnline
-              ? 'text-emerald-400 bg-emerald-500/10'
-              : 'text-red-400 bg-red-500/10'
+            isOnline ? 'text-emerald-400 bg-emerald-500/10' : 'text-red-400 bg-red-500/10'
           }`}
         >
           {isOnline ? 'LIVE' : 'OFFLINE'}
@@ -88,21 +93,21 @@ export function DecisionEngineStatus() {
         <StatusMetric
           icon={<Shield className="w-3.5 h-3.5" />}
           label="Cleanest Region"
-          value={cleanest?.cloudRegion ?? '—'}
+          value={cleanest?.cloudRegion ?? '-'}
           sub={cleanest?.zone}
           highlight
         />
         <StatusMetric
           icon={<Zap className="w-3.5 h-3.5" />}
           label="Carbon Intensity"
-          value={cleanest?.carbonIntensityGPerKwh != null ? `${cleanest.carbonIntensityGPerKwh}` : '—'}
-          sub="gCO₂/kWh"
+          value={cleanest?.carbonIntensityGPerKwh != null ? `${cleanest.carbonIntensityGPerKwh}` : '-'}
+          sub="gCO2/kWh"
           color="text-emerald-400"
         />
         <StatusMetric
           icon={<TrendingDown className="w-3.5 h-3.5" />}
           label="Carbon Delta"
-          value={carbonDelta != null ? `+${carbonDelta}` : '—'}
+          value={carbonDelta != null ? `+${carbonDelta}` : '-'}
           sub="vs worst candidate"
           color="text-sky-400"
         />
@@ -115,15 +120,13 @@ export function DecisionEngineStatus() {
         <StatusMetric
           icon={<AlertTriangle className="w-3.5 h-3.5" />}
           label="Provider Disagree"
-          value={disagreeRate != null ? `${disagreeRate}%` : '—'}
-          color={
-            disagreeRate && parseFloat(disagreeRate) > 15 ? 'text-red-400' : 'text-slate-300'
-          }
+          value={disagreeRate != null ? `${disagreeRate}%` : '-'}
+          color={disagreeRate && parseFloat(disagreeRate) > 15 ? 'text-red-400' : 'text-slate-300'}
         />
         <StatusMetric
           icon={<Activity className="w-3.5 h-3.5" />}
           label="Decisions / 24h"
-          value={metrics?.totalDecisions?.toLocaleString() ?? '—'}
+          value={metrics?.totalDecisions?.toLocaleString() ?? '-'}
         />
       </div>
     </div>
@@ -148,9 +151,7 @@ function StatusMetric({
   return (
     <div
       className={`rounded-lg p-3 ${
-        highlight
-          ? 'bg-emerald-500/5 border border-emerald-500/20'
-          : 'bg-slate-800/40'
+        highlight ? 'bg-emerald-500/5 border border-emerald-500/20' : 'bg-slate-800/40'
       }`}
     >
       <div className={`flex items-center space-x-1 mb-1 ${color ?? 'text-slate-400'}`}>

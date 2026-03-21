@@ -1,9 +1,10 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { ecobeApi } from '@/lib/api'
-import { Loader2, Wifi, WifiOff, AlertCircle } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
+import { AlertCircle, Loader2, Wifi, WifiOff } from 'lucide-react'
+
+import { ecobeApi } from '@/lib/api'
 
 export function ProviderHealthMonitor() {
   const { data, isLoading, isError } = useQuery({
@@ -19,15 +20,15 @@ export function ProviderHealthMonitor() {
   })
 
   const disagreeRate =
-    metrics?.electricityMaps?.successRate != null
-      ? ((1 - metrics.electricityMaps.successRate) * 100).toFixed(1)
+    metrics?.providerSignals?.successRate != null
+      ? ((1 - metrics.providerSignals.successRate) * 100).toFixed(1)
       : null
 
   return (
     <div className="bg-slate-900/50 rounded-xl border border-slate-800 p-6 space-y-5">
       <div>
         <h3 className="text-lg font-semibold text-white">Provider Health</h3>
-        <p className="text-xs text-slate-500 mt-0.5">Signal validation layer</p>
+        <p className="text-xs text-slate-500 mt-0.5">Live signal provider mesh</p>
       </div>
 
       {isLoading && (
@@ -38,36 +39,39 @@ export function ProviderHealthMonitor() {
 
       {isError && (
         <div className="space-y-3">
-          {/* Fallback: show Carbon Signal Provider status from metrics */}
-          {metrics?.carbonSignal && (
+          {metrics?.providerSignals && (
             <ProviderRow
-              name="Carbon Signal Provider"
-              status={metrics.carbonSignal.successRate != null && metrics.carbonSignal.successRate > 0.8 ? 'healthy' : 'degraded'}
+              name="Live Signal Mesh"
+              status={
+                metrics.providerSignals.successRate != null &&
+                metrics.providerSignals.successRate > 0.8
+                  ? 'healthy'
+                  : 'degraded'
+              }
               latencyMs={metrics.p95LatencyDeltaMs}
-              lastSuccessAt={metrics.carbonSignal.lastSuccessAt}
+              lastSuccessAt={metrics.providerSignals.lastSuccessAt}
               disagreeRate={null}
             />
           )}
-          <p className="text-xs text-slate-600">Additional provider data unavailable</p>
+          <p className="text-xs text-slate-600">Additional provider details unavailable</p>
         </div>
       )}
 
       {data?.providers && (
         <div className="space-y-3">
-          {data.providers.map((p) => (
+          {data.providers.map((provider) => (
             <ProviderRow
-              key={p.name}
-              name={p.name}
-              status={p.status}
-              latencyMs={p.latencyMs}
-              lastSuccessAt={p.lastSuccessAt}
-              disagreeRate={p.disagreementPct}
+              key={provider.name}
+              name={provider.name}
+              status={provider.status}
+              latencyMs={provider.latencyMs}
+              lastSuccessAt={provider.lastSuccessAt}
+              disagreeRate={provider.disagreementPct}
             />
           ))}
         </div>
       )}
 
-      {/* Disagreement summary */}
       {disagreeRate != null && (
         <div className="border-t border-slate-800 pt-4">
           <div className="flex justify-between text-xs">
@@ -83,25 +87,25 @@ export function ProviderHealthMonitor() {
           <div className="flex justify-between text-xs mt-2">
             <span className="text-slate-400">Signal successes (24h)</span>
             <span className="text-emerald-400">
-              {metrics?.electricityMaps?.successCount ?? '—'}
+              {metrics?.providerSignals?.successCount ?? '-'}
             </span>
           </div>
           <div className="flex justify-between text-xs mt-2">
             <span className="text-slate-400">Signal failures (24h)</span>
             <span
               className={
-                (metrics?.electricityMaps?.failureCount ?? 0) > 0
+                (metrics?.providerSignals?.failureCount ?? 0) > 0
                   ? 'text-orange-400'
                   : 'text-slate-400'
               }
             >
-              {metrics?.electricityMaps?.failureCount ?? '—'}
+              {metrics?.providerSignals?.failureCount ?? '-'}
             </span>
           </div>
-          {metrics?.electricityMaps?.lastError && (
+          {metrics?.providerSignals?.lastError && (
             <div className="mt-3 p-2 bg-red-500/10 border border-red-500/20 rounded-lg">
               <p className="text-xs text-red-400 font-mono truncate">
-                {metrics.electricityMaps.lastError}
+                {metrics.providerSignals.lastError}
               </p>
             </div>
           )}
@@ -125,16 +129,29 @@ function ProviderRow({
   disagreeRate: number | null
 }) {
   const statusConfig = {
-    healthy: { icon: <Wifi className="w-4 h-4 text-emerald-400" />, label: 'healthy', color: 'text-emerald-400' },
-    degraded: { icon: <AlertCircle className="w-4 h-4 text-yellow-400" />, label: 'degraded', color: 'text-yellow-400' },
-    offline: { icon: <WifiOff className="w-4 h-4 text-red-400" />, label: 'offline', color: 'text-red-400' },
+    healthy: {
+      icon: <Wifi className="w-4 h-4 text-emerald-400" />,
+      label: 'healthy',
+      color: 'text-emerald-400',
+    },
+    degraded: {
+      icon: <AlertCircle className="w-4 h-4 text-yellow-400" />,
+      label: 'degraded',
+      color: 'text-yellow-400',
+    },
+    offline: {
+      icon: <WifiOff className="w-4 h-4 text-red-400" />,
+      label: 'offline',
+      color: 'text-red-400',
+    },
   }
-  const cfg = statusConfig[status]
+
+  const config = statusConfig[status]
 
   return (
     <div className="flex items-center justify-between p-3 bg-slate-800/40 rounded-lg">
       <div className="flex items-center space-x-3">
-        {cfg.icon}
+        {config.icon}
         <div>
           <p className="text-sm font-medium text-white">{name}</p>
           {lastSuccessAt && (
@@ -159,7 +176,7 @@ function ProviderRow({
             <p className="text-slate-600">disagree</p>
           </div>
         )}
-        <span className={`font-medium ${cfg.color}`}>{cfg.label}</span>
+        <span className={`font-medium ${config.color}`}>{config.label}</span>
       </div>
     </div>
   )

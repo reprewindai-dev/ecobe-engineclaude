@@ -1,7 +1,6 @@
 import cron from 'node-cron'
 import { subHours } from 'date-fns'
 import { prisma } from '../lib/db'
-import { electricityMaps } from '../lib/electricity-maps'
 import { forecastCarbonIntensity } from '../lib/carbon-forecasting'
 import { env } from '../config/env'
 import { redis } from '../lib/redis'
@@ -36,20 +35,15 @@ async function upsertCarbonSample(region: string, timestamp: Date, intensity: nu
 async function ingestRegionHistory(region: string) {
   const end = new Date()
   const start = subHours(end, DEFAULT_FORECAST_LOOKBACK_HOURS)
-  const history = await electricityMaps.getCarbonIntensityHistory(region, start, end)
-
-  let ingested = 0
-  for (const sample of history) {
-    const timestamp = new Date(sample.datetime)
-    const carbonIntensity = Math.round(sample.carbonIntensity)
-    await upsertCarbonSample(sample.zone ?? region, timestamp, carbonIntensity)
-    ingested += 1
-  }
-
+  
+  // For now, skip historical ingestion as Electricity Maps is disabled
+  // TODO: Implement historical data collection from approved providers
+  console.log(`Historical data ingestion for ${region} skipped (Electricity Maps disabled)`)
+  
   const forecasts = await forecastCarbonIntensity(region, DEFAULT_FORECAST_HOURS)
-
+  
   return {
-    recordsIngested: ingested,
+    recordsIngested: 0,
     forecastsGenerated: forecasts.length,
   }
 }

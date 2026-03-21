@@ -7,7 +7,8 @@ import { env } from '../config/env'
 const router = Router()
 
 // Shared secret between DEKES SaaS and ECOBE
-const DEKES_API_KEY = env.DEKES_API_KEY
+const DEKES_API_KEY =
+  env.DEKES_API_KEY || process.env.ECOBE_API_KEY || process.env.ECOBE_ENGINE_API_KEY
 
 function requireApiKey(req: any, res: any, next: any) {
   const auth = req.headers.authorization

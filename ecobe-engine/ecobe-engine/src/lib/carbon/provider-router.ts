@@ -1,5 +1,4 @@
 import { wattTime } from '../watttime'
-import { electricityMaps } from '../electricity-maps'
 import { ember } from '../ember'
 import { GridSignalCache } from '../grid-signals/grid-signal-cache'
 import { GridSignalAudit } from '../grid-signals/grid-signal-audit'
@@ -30,7 +29,7 @@ export interface ProviderDisagreement {
 
 export interface RoutingSignal {
   carbonIntensity: number
-  source: 'watttime' | 'electricity_maps' | 'ember' | 'fallback'
+  source: 'watttime' | 'eia930' | 'gb-grid' | 'dk-grid' | 'fi-grid' | 'ember' | 'static'
   isForecast: boolean
   confidence: number
   provenance: {
@@ -46,22 +45,33 @@ export interface RoutingSignal {
 }
 
 /**
- * PROVIDER DOCTRINE – LOCKED HIERARCHY (REV 2026-03-12)
+ * PROVIDER DOCTRINE – LOCKED HIERARCHY (REV 2026-03-21)
  *
+ * ELECTRICITY MAPS IS DISABLED per locked provider rules
+ * 
  * PRIMARY (Live Carbon Signal)
- *  - Electricity Maps => authoritative realtime intensity + flow-traced context
- *  - Required for every routing decision
+ *  - WattTime => primary causal routing signal (US)
+ *  - MOER current + forecast data
+ *  - Fast-path routing truth
  *
- * SECONDARY (Marginal Signal Amplifier)
- *  - WattTime => marginal operating emission rate (MOER) enriches primary
- *  - Never used alone; always blended with Electricity Maps weight
+ * SECONDARY (Predictive Telemetry)
+ *  - EIA-930 => US backbone / predictive telemetry
+ *  - BALANCE, INTERCHANGE, SUBREGION data
+ *  - demandRampPct, fossilRatio, renewableRatio
+ *
+ * REGIONAL GRID SOURCES (EU Direct Truth)
+ *  - GB Grid Source => Great Britain direct grid data
+ *  - Denmark Grid Source => Denmark direct grid data  
+ *  - Finland Grid Source => Finland direct grid data
  *
  * BASELINE / VALIDATION
  *  - Ember => structural baseline + historical sanity check
- *  - Supplies confidence dampening when primary deviates beyond tolerance
+ *  - Monthly/yearly carbon intensity and generation mix
+ *  - NOT for fast-path routing
  *
  * FALLBACK
- *  - Static fallback only when both API providers are unavailable
+ *  - Static fallback only when all providers are unavailable
+ *  - Always marked as degraded
  */
 export class ProviderRouter {
   /**

@@ -11,7 +11,6 @@ import {
 } from 'date-fns'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/db'
-import { electricityMaps } from '../lib/electricity-maps'
 import { getIntegrationMetric, computeIntegrationSuccessRate } from '../lib/integration-metrics'
 import { getForecastRefreshSummary, getLastForecastRefreshState } from '../lib/forecast-refresh'
 import { getProviderFreshness, getCapacityOverview } from '../lib/routing'
@@ -366,7 +365,7 @@ router.get('/metrics', async (req, res) => {
 
     const co2AvoidedPer1kRequestsG = totalRequests > 0 ? (co2SavedG / totalRequests) * 1000 : 0
 
-    const electricityMapsMetric = integrationMetric
+    const wattTimeMetric = integrationMetric
       ? {
           successRate: computeIntegrationSuccessRate(integrationMetric) ?? null,
           successCount: integrationMetric.successCount,
@@ -403,8 +402,8 @@ router.get('/metrics', async (req, res) => {
       topChosenRegion,
       p95LatencyDeltaMs,
       dataFreshnessMaxSeconds,
-      electricityMapsSuccessRate: electricityMapsMetric?.successRate ?? null,
-      electricityMaps: electricityMapsMetric,
+      wattTimeSuccessRate: wattTimeMetric?.successRate ?? null,
+      wattTime: wattTimeMetric,
       forecastRefresh,
     })
   } catch (error: any) {
@@ -875,8 +874,8 @@ router.post('/what-if/intensities', async (req, res) => {
           return { zone, carbonIntensity: latest.carbonIntensity }
         }
 
-        const resp = await electricityMaps.getCarbonIntensity(zone)
-        const carbonIntensity = resp?.carbonIntensity ?? 400
+        // Use static fallback since Electricity Maps is disabled
+        const carbonIntensity = 400 // Static fallback value
         return { zone, carbonIntensity }
       })
     )

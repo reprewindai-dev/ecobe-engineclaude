@@ -31,6 +31,7 @@ import patternsRoutes from './routes/patterns'
 import dksRoutes from './routes/dks'
 import testPostRoutes from './routes/test-post'
 import routeDebugRoutes from './routes/route-debug'
+import { env } from './config/env'
 
 function attachHealthRoutes(app: express.Express) {
   async function healthHandler(_req: express.Request, res: express.Response) {
@@ -50,11 +51,14 @@ function attachHealthRoutes(app: express.Express) {
         status: ok ? 'ok' : 'degraded',
         engine: 'online',
         router: true,
-        fingard: true,
+        fingrid: Boolean(env.FINGRID_API_KEY),
         providers: {
-          watttime: false,
-          eia930: true,
-          ember: true,
+          watttime: Boolean(env.WATTTIME_USERNAME && env.WATTTIME_PASSWORD),
+          gridstatus: Boolean(env.GRIDSTATUS_API_KEY || env.EIA_API_KEY),
+          ember: Boolean(env.EMBER_API_KEY),
+          gbCarbon: true,
+          dkCarbon: true,
+          fiCarbon: Boolean(env.FINGRID_API_KEY),
           static: true
         },
         timestamp: new Date().toISOString(),

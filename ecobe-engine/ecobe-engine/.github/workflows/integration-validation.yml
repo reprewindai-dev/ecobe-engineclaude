@@ -1,0 +1,416 @@
+name: Cross-Repo Integration Validation
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'src/routes/carbon-command.ts'
+      - 'src/routes/integrations.ts'
+      - 'src/routes/dashboard.ts'
+      - 'lib/integrations/**'
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  schema-validation:
+    name: Schema Contract Validation
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Validate CO₂Router Schemas
+        run: |
+          echo "🔍 Validating CO₂Router engine schemas..."
+          
+          # Check carbon command schema
+          node -e "
+            const fs = require('fs');
+            const carbonCommandContent = fs.readFileSync('./src/routes/carbon-command.ts', 'utf8');
+            
+            // Required fields for DKS integration
+            const requiredFields = [
+              'orgId',
+              'workload.type', 
+              'metadata',
+              'constraints',
+              'workload.estimatedGpuHours',
+              'workload.estimatedCpuHours'
+            ];
+            
+            requiredFields.forEach(field => {
+              if (carbonCommandContent.includes(field)) {
+                console.log('✅ Schema includes required field:', field);
+              } else {
+                console.error('❌ Schema missing required field:', field);
+                process.exit(1);
+              }
+            });
+            
+            console.log('✅ CO₂Router carbon command schema validation passed');
+          "
+          
+      - name: Validate Integration Endpoints
+        run: |
+          echo "🔗 Validating integration endpoints..."
+          
+          # Check DKS integration endpoints exist
+          node -e "
+            const fs = require('fs');
+            
+            const integrationFiles = [
+              'src/routes/integrations.ts',
+              'src/routes/dekes-handoff.ts'
+            ];
+            
+            integrationFiles.forEach(file => {
+              if (fs.existsSync(file)) {
+                console.log('✅ Integration file exists:', file);
+                
+                const content = fs.readFileSync(file, 'utf8');
+                
+                // Check for DKS-specific endpoints
+                if (content.includes('/integrations/dekes/summary') && 
+                    content.includes('/integrations/dekes/metrics')) {
+                  console.log('✅ DKS integration endpoints present');
+                } else {
+                  console.error('❌ DKS integration endpoints missing');
+                  process.exit(1);
+                }
+              } else {
+                console.error('❌ Integration file missing:', file);
+                process.exit(1);
+              }
+            });
+          "
+          
+      - name: Validate Dashboard API Contracts
+        run: |
+          echo "📊 Validating dashboard API contracts..."
+          
+          # Check dashboard endpoints return expected structure
+          node -e "
+            const fs = require('fs');
+            
+            const dashboardContent = fs.readFileSync('./src/routes/dashboard.ts', 'utf8');
+            
+            // Check for critical endpoints
+            const criticalEndpoints = [
+              '/api/v1/dashboard/savings',
+              '/api/v1/dashboard/decisions', 
+              '/api/v1/dashboard/metrics'
+            ];
+            
+            criticalEndpoints.forEach(endpoint => {
+              if (dashboardContent.includes(endpoint.split('/').pop())) {
+                console.log('✅ Dashboard endpoint present:', endpoint);
+              } else {
+                console.error('❌ Dashboard endpoint missing:', endpoint);
+                process.exit(1);
+              }
+            });
+            
+            console.log('✅ Dashboard API contracts validation passed');
+          "
+
+  contract-compatibility:
+    name: Contract Compatibility Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout CO₂Router Engine
+        uses: actions/checkout@v4
+        with:
+          repository: reprewindai-dev/ecobe-engineclaude
+          path: engine
+          fetch-depth: 0
+          
+      - name: Checkout DKS SaaS
+        uses: actions/checkout@v4
+        with:
+          repository: reprewindai-dev/dekes-saas
+          path: dks
+          fetch-depth: 0
+          
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          
+      - name: Validate DKS → CO₂Router Payload Compatibility
+        run: |
+          echo "🔄 Validating DKS → CO₂Router payload compatibility..."
+          
+          # Check DKS schema against CO₂Router expectations
+          node -e "
+            const fs = require('fs');
+            
+            // Load DKS schema
+            const dksSchemaPath = './dks/lib/integrations/dks-workload-schema.ts';
+            if (!fs.existsSync(dksSchemaPath)) {
+              console.error('❌ DKS schema file missing');
+              process.exit(1);
+            }
+            
+            const dksSchema = fs.readFileSync(dksSchemaPath, 'utf8');
+            
+            // Load CO₂Router schema
+            const engineSchemaPath = './engine/src/routes/carbon-command.ts';
+            if (!fs.existsSync(engineSchemaPath)) {
+              console.error('❌ CO₂Router schema file missing');
+              process.exit(1);
+            }
+            
+            const engineSchema = fs.readFileSync(engineSchemaPath, 'utf8');
+            
+            // Check for field compatibility
+            const compatibilityChecks = [
+              {
+                dksField: 'workloadType',
+                engineField: 'workload.type',
+                critical: true
+              },
+              {
+                dksField: 'estimatedGpuHours', 
+                engineField: 'workload.estimatedGpuHours',
+                critical: true
+              },
+              {
+                dksField: 'estimatedCpuHours',
+                engineField: 'workload.estimatedCpuHours', 
+                critical: true
+              },
+              {
+                dksField: 'deadlineAt',
+                engineField: 'constraints.deadlineAt',
+                critical: false
+              },
+              {
+                dksField: 'maxLatencyMs',
+                engineField: 'constraints.maxLatencyMs',
+                critical: false
+              },
+              {
+                dksField: 'candidateRegions',
+                engineField: 'constraints.mustRunRegions',
+                critical: false
+              },
+              {
+                dksField: 'metadata',
+                engineField: 'metadata',
+                critical: true
+              }
+            ];
+            
+            let hasErrors = false;
+            
+            compatibilityChecks.forEach(check => {
+              const dksHasField = dksSchema.includes(check.dksField);
+              const engineHasField = engineSchema.includes(check.engineField);
+              
+              if (dksHasField && engineHasField) {
+                console.log('✅ Field compatibility:', check.dksField, '→', check.engineField);
+              } else if (check.critical) {
+                console.error('❌ Critical field mismatch:', check.dksField, '→', check.engineField);
+                hasErrors = true;
+              } else {
+                console.log('⚠️ Optional field mismatch:', check.dksField, '→', check.engineField);
+              }
+            });
+            
+            // Check for sourceApp attribution
+            if (dksSchema.includes('sourceApp') && dksSchema.includes('dks')) {
+              console.log('✅ DKS source attribution present');
+            } else {
+              console.error('❌ DKS source attribution missing');
+              hasErrors = true;
+            }
+            
+            if (hasErrors) {
+              process.exit(1);
+            }
+            
+            console.log('✅ DKS → CO₂Router payload compatibility validated');
+          "
+          
+      - name: Validate Integration Response Contracts
+        run: |
+          echo "📡 Validating integration response contracts..."
+          
+          node -e "
+            const fs = require('fs');
+            
+            // Check CO₂Router integration responses
+            const integrationsPath = './engine/src/routes/integrations.ts';
+            const integrationsContent = fs.readFileSync(integrationsPath, 'utf8');
+            
+            // Expected response structure
+            const expectedFields = [
+              'integration',
+              'status', 
+              'metrics',
+              'totalWorkloads',
+              'carbonSaved'
+            ];
+            
+            expectedFields.forEach(field => {
+              if (integrationsContent.includes(field)) {
+                console.log('✅ Integration response includes:', field);
+              } else {
+                console.error('❌ Integration response missing:', field);
+                process.exit(1);
+              }
+            });
+            
+            console.log('✅ Integration response contracts validated');
+          "
+
+  api-contract-validation:
+    name: API Contract Validation
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Setup test database
+        run: |
+          npx prisma db push --force-reset
+          npx prisma generate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+          REDIS_URL: redis://localhost:6379
+          
+      - name: Build
+        run: npm run build
+        
+      - name: Start server
+        run: |
+          npm start &
+          sleep 10
+        env:
+          PORT: 8080
+          NODE_ENV: test
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+          REDIS_URL: redis://localhost:6379
+          
+      - name: Wait for server
+        run: |
+          timeout 60 bash -c 'until curl -f http://localhost:8080/health; do sleep 2; done'
+          
+      - name: Test Critical API Contracts
+        run: |
+          echo "🧪 Testing critical API contracts..."
+          
+          # Test POST /api/v1/route
+          echo "Testing /api/v1/route..."
+          route_response=$(curl -s -X POST http://localhost:8080/api/v1/route \
+            -H "Content-Type: application/json" \
+            -d '{
+              "workloadId": "contract-test-123",
+              "candidateRegions": ["US-CAL-CISO", "FR"],
+              "durationMinutes": 60
+            }')
+          
+          if echo "$route_response" | grep -q '"success":true\|"decision"'; then
+            echo "✅ /api/v1/route contract valid"
+          else
+            echo "❌ /api/v1/route contract failed"
+            echo "Response: $route_response"
+            exit 1
+          fi
+          
+          # Test GET /api/v1/dashboard/savings
+          echo "Testing /api/v1/dashboard/savings..."
+          savings_response=$(curl -s "http://localhost:8080/api/v1/dashboard/savings?days=7")
+          
+          if echo "$savings_response" | grep -q '"savings"\|"total"'; then
+            echo "✅ /api/v1/dashboard/savings contract valid"
+          else
+            echo "❌ /api/v1/dashboard/savings contract failed"
+            echo "Response: $savings_response"
+            exit 1
+          fi
+          
+          # Test GET /api/v1/dashboard/decisions
+          echo "Testing /api/v1/dashboard/decisions..."
+          decisions_response=$(curl -s "http://localhost:8080/api/v1/dashboard/decisions?limit=10")
+          
+          if echo "$decisions_response" | grep -q '"decisions"\|"data"'; then
+            echo "✅ /api/v1/dashboard/decisions contract valid"
+          else
+            echo "❌ /api/v1/dashboard/decisions contract failed"
+            echo "Response: $decisions_response"
+            exit 1
+          fi
+          
+          # Test GET /api/v1/integrations/dks/summary
+          echo "Testing /api/v1/integrations/dks/summary..."
+          dks_summary=$(curl -s "http://localhost:8080/api/v1/integrations/dekes/summary?days=7")
+          
+          if echo "$dks_summary" | grep -q '"integration":"DEKES"'; then
+            echo "✅ /api/v1/integrations/dks/summary contract valid"
+          else
+            echo "❌ /api/v1/integrations/dks/summary contract failed"
+            echo "Response: $dks_summary"
+            exit 1
+          fi
+          
+          # Test GET /api/v1/integrations/dks/metrics
+          echo "Testing /api/v1/integrations/dks/metrics..."
+          dks_metrics=$(curl -s "http://localhost:8080/api/v1/integrations/dekes/metrics?hours=24")
+          
+          if echo "$dks_metrics" | grep -q '"integration":"DEKES"'; then
+            echo "✅ /api/v1/integrations/dks/metrics contract valid"
+          else
+            echo "❌ /api/v1/integrations/dks/metrics contract failed"
+            echo "Response: $dks_metrics"
+            exit 1
+          fi
+          
+          echo "🎉 All API contract tests passed!"

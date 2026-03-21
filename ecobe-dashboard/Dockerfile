@@ -10,12 +10,12 @@ FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# ECOBE_API_URL must be set at build time for next.config.js rewrites
-ARG ECOBE_API_URL="https://ecobe-engineclaude-production.up.railway.app"
-ENV ECOBE_API_URL=${ECOBE_API_URL}
+# CO2ROUTER_API_URL must be set at build time for next.config.js rewrites
+ARG CO2ROUTER_API_URL="https://ecobe-engineclaude-production.up.railway.app"
+ENV ECOBE_API_URL=${CO2ROUTER_API_URL}
 # NEXT_PUBLIC_ prefix makes this available to client-side code (baked at build time)
-ARG NEXT_PUBLIC_ECOBE_API_URL="https://ecobe-engineclaude-production.up.railway.app/api/v1"
-ENV NEXT_PUBLIC_ECOBE_API_URL=${NEXT_PUBLIC_ECOBE_API_URL}
+ARG NEXT_PUBLIC_CO2ROUTER_API_URL="https://ecobe-engineclaude-production.up.railway.app/api/v1"
+ENV NEXT_PUBLIC_ECOBE_API_URL=${NEXT_PUBLIC_CO2ROUTER_API_URL}
 RUN npm run build
 
 FROM base AS runner
