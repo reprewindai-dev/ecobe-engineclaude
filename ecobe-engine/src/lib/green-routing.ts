@@ -1,5 +1,3 @@
-import { prisma } from './db'
-import { redis } from './redis'
 import { providerRouter } from './carbon/provider-router'
 import { GridSignalCache } from './grid-signals/grid-signal-cache'
 import { GridSignalAudit } from './grid-signals/grid-signal-audit'
