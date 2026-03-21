@@ -1,16 +1,7 @@
 import { Router } from 'express'
-import { z } from 'zod'
-import { randomUUID } from 'crypto'
 import { routeWorkload } from '../services/router.service'
 
 const router = Router()
-
-const routeRequestSchema = z.object({
-  workloadId: z.string().min(1),
-  candidateRegions: z.array(z.string()).min(1),
-  durationMinutes: z.number().positive().optional(),
-  workloadType: z.enum(['batch', 'inference', 'training']).optional(),
-})
 
 /**
  * POST /api/v1/route
@@ -18,7 +9,12 @@ const routeRequestSchema = z.object({
  */
 router.post('/', async (req, res) => {
   try {
-    const { workloadId, candidateRegions, durationMinutes, workloadType } = routeRequestSchema.parse(req.body)
+    const { workloadId, candidateRegions, durationMinutes, workloadType } = req.body
+
+    // Basic validation
+    if (!workloadId || !candidateRegions || !Array.isArray(candidateRegions) || candidateRegions.length === 0) {
+      return res.status(400).json({ error: 'Invalid request: workloadId and candidateRegions required' })
+    }
 
     const decision = await routeWorkload({
       workloadId,
@@ -46,11 +42,8 @@ router.post('/', async (req, res) => {
       carbonDeltaVsWorst: decision.carbon_delta,
     })
   } catch (error: any) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Invalid request', details: error.errors })
-    }
     console.error('Route error:', error)
-    res.status(500).json({ error: 'Internal server error' })
+    res.status(500).json({ error: 'Internal server error', message: error.message })
   }
 })
 
