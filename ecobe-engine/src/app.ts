@@ -4,6 +4,9 @@ import { prisma } from './lib/db'
 import { redis } from './lib/redis'
 import internalRoutes from './routes/internal'
 import ciRoutes from './routes/ci'
+import dashboardRoutes from './routes/dashboard'
+import forecastingRoutes from './routes/forecasting'
+import methodologyRoutes from './routes/methodology'
 
 function rawBodySaver(req: express.Request, _res: express.Response, buf: Buffer) {
   if (buf?.length) {
@@ -68,6 +71,9 @@ export function createApp() {
   attachHealthRoutes(app)
   app.use('/internal/v1', internalRoutes)
   app.use('/api/v1/ci', ciRoutes)
+  app.use('/api/v1/dashboard', dashboardRoutes)
+  app.use('/api/v1/forecasting', forecastingRoutes)
+  app.use('/api/v1/methodology', methodologyRoutes)
   attachFallbackHandlers(app)
 
   return app
