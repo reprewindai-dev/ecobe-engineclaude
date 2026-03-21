@@ -61,7 +61,7 @@ export default function RootLayout({
               <div className="container mx-auto px-6 py-8">
                 <div className="flex items-center justify-between text-sm text-slate-400">
                   <p>© 2026 CO₂ Router. Carbon-aware compute for a sustainable future.</p>
-                  <p>Signal layer: Electricity Maps · Ember</p>
+                  <p>Signal layer: Carbon Signal Provider · Ember</p>
                 </div>
               </div>
             </footer>

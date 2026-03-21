@@ -1,7 +1,7 @@
 'use client'
 
-import DashboardPage from '../page'
+import DksIntegrationDashboard from '@/components/integrations/DksDashboard'
 
 export default function DekesPage() {
-  return <DashboardPage />
+  return <DksIntegrationDashboard />
 }

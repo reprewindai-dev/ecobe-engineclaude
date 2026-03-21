@@ -88,7 +88,7 @@ export default function LandingPage() {
       curtailmentProbability: 0.02,
       importCarbonLeakageScore: 0.15,
       source_used: 'WattTime',
-      validation_source: 'Electricity Maps',
+      validation_source: 'Carbon Signal Provider',
       fallback_used: false,
       estimatedFlag: false,
       syntheticFlag: false,
@@ -436,7 +436,7 @@ export default function LandingPage() {
                 color: 'emerald',
               },
               {
-                name: 'Electricity Maps',
+                name: 'Carbon Signal Provider',
                 signal: 'Flow-traced Intensity',
                 description: 'Grid intelligence with electricity mix and cross-zone effects.',
                 status: 'Live',
@@ -621,7 +621,7 @@ export default function LandingPage() {
                 <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
                   <span className="text-white font-bold text-lg">🌱</span>
                 </div>
-                <span className="text-lg font-bold text-white">ECOBE</span>
+                <span className="text-lg font-bold text-white">CO₂Router</span>
               </div>
               <p className="text-gray-500 text-sm">
                 Carbon-aware compute routing engine built for a sustainable future.
@@ -673,10 +673,10 @@ export default function LandingPage() {
 
           <div className="border-t border-gray-800 pt-8 flex items-center justify-between">
             <p className="text-gray-500 text-sm">
-              © 2026 ECOBE. Built for a carbon-neutral future.
+              © 2026 CO₂Router. Built for a carbon-neutral future.
             </p>
             <p className="text-gray-500 text-sm">
-              Powered by WattTime, Electricity Maps, Ember, EIA-930
+              Powered by WattTime, Carbon Signal Provider, Ember, EIA-930
             </p>
           </div>
         </div>

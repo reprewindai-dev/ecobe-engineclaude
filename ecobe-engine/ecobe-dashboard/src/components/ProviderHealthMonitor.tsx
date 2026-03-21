@@ -38,13 +38,13 @@ export function ProviderHealthMonitor() {
 
       {isError && (
         <div className="space-y-3">
-          {/* Fallback: show Electricity Maps status from metrics */}
-          {metrics?.electricityMaps && (
+          {/* Fallback: show Carbon Signal Provider status from metrics */}
+          {metrics?.carbonSignal && (
             <ProviderRow
-              name="Electricity Maps"
-              status={metrics.electricityMaps.successRate != null && metrics.electricityMaps.successRate > 0.8 ? 'healthy' : 'degraded'}
+              name="Carbon Signal Provider"
+              status={metrics.carbonSignal.successRate != null && metrics.carbonSignal.successRate > 0.8 ? 'healthy' : 'degraded'}
               latencyMs={metrics.p95LatencyDeltaMs}
-              lastSuccessAt={metrics.electricityMaps.lastSuccessAt}
+              lastSuccessAt={metrics.carbonSignal.lastSuccessAt}
               disagreeRate={null}
             />
           )}

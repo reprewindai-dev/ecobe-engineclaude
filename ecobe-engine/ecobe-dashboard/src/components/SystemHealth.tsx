@@ -58,7 +58,7 @@ export function SystemHealth() {
           icon={<Database className="w-4 h-4 text-teal-400" />}
           label="Signal success rate"
           value={cacheHit != null ? `${cacheHit}%` : '—'}
-          sub="Electricity Maps"
+          sub="Carbon Signal Provider"
           color="text-teal-400"
         />
         <MetricCard

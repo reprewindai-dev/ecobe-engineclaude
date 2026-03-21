@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { routeWorkload, createRouteResponse } from '../services/router.service'
+import { routeGreen } from '../lib/green-routing'
 
 const router = Router()
 
@@ -16,16 +16,22 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Invalid request: workloadId and candidateRegions required' })
     }
 
-    const decision = await routeWorkload({
-      workloadId,
-      candidateRegions,
-      durationMinutes: durationMinutes || 240,
-      workloadType: workloadType || 'batch',
+    const decision = await routeGreen({
+      preferredRegions: candidateRegions,
     })
 
-    const response = await createRouteResponse(decision)
-
-    res.status(201).json(response)
+    res.status(201).json({
+      success: true,
+      decision: {
+        selectedRegion: decision.selectedRegion,
+        carbonIntensity: decision.carbonIntensity,
+        estimatedLatency: decision.estimatedLatency,
+        score: decision.score,
+        explanation: decision.explanation,
+        qualityTier: decision.qualityTier,
+        alternatives: decision.alternatives,
+      }
+    })
   } catch (error: any) {
     console.error('Route error:', error)
     res.status(500).json({ error: 'Internal server error', message: error.message })
