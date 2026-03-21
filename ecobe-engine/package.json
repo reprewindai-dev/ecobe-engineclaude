@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "prebuild": "node -e \"console.log('ECOBE_ENGINE_URL present:', Boolean(process.env.ECOBE_ENGINE_URL))\"",
-    "build": "tsc && prisma generate",
+    "build": "prisma generate && tsc",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "start": "npm run prisma:migrate:deploy && node dist/server.js",
     "test": "jest",
