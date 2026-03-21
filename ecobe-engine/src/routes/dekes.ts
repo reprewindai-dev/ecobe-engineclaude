@@ -110,7 +110,7 @@ router.post('/report', requireApiKey, async (req, res) => {
  * GET /api/v1/dekes/analytics
  * Returns aggregated DEKES analytics
  */
-router.get('/analytics', async (req, res) => {
+router.get('/analytics', requireApiKey, async (req, res) => {
   try {
     const days = parseInt(req.query.days as string) || 7
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
@@ -144,34 +144,15 @@ router.get('/analytics', async (req, res) => {
       .map(([date, co2]: [string, number]) => ({ date, co2: Math.round(co2 * 1000) / 1000 }))
       .sort((a, b) => a.date.localeCompare(b.date))
 
-    // Compute average carbon intensity from workloads that have actualCO2 and kWh proxy
-    const withCO2 = workloads.filter((w: any) => w.actualCO2 && w.estimatedResults > 0)
-    const averageCarbonIntensity = withCO2.length > 0
-      ? Math.round(withCO2.reduce((sum: number, w: any) => sum + w.actualCO2 / (w.estimatedResults * 0.001), 0) / withCO2.length)
-      : 0
-
-    const totalCO2Rounded = Math.round(totalCO2 * 1000) / 1000
-
     return res.json({
       timeRange: `${days}d`,
       totalWorkloads,
-      totalCO2: totalCO2Rounded,
-      totalCO2Saved: totalCO2Rounded,  // alias for dashboard compatibility
+      totalCO2: Math.round(totalCO2 * 1000) / 1000,
       totalQueries,
       totalResults,
       avgCO2PerQuery: totalQueries > 0 ? Math.round((totalCO2 / totalQueries) * 1000) / 1000 : 0,
-      averageCarbonIntensity,
       statusBreakdown: Object.fromEntries(statusMap),
       dailyTrend,
-      workloads: workloads.slice(0, 20).map((w: any) => ({
-        id: w.id,
-        dekesQueryId: w.dekesQueryId,
-        queryString: w.queryString,
-        selectedRegion: w.selectedRegion,
-        actualCO2: w.actualCO2 ?? 0,
-        status: w.status,
-        createdAt: (w.scheduledTime ?? w.createdAt ?? new Date()).toISOString(),
-      })),
     })
   } catch (error: any) {
     if (error instanceof z.ZodError) {

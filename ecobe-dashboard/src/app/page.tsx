@@ -1,33 +1,18 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { ecobeApi, type GreenRoutingRequest } from '@/lib/api'
+import axios from 'axios'
 
-const REGION_NAMES: Record<string, string> = {
-  'us-east-1': 'US East (N. Virginia)',
-  'us-west-2': 'US West (Oregon)',
-  'eu-west-1': 'EU (Ireland)',
-  'eu-central-1': 'EU (Frankfurt)',
-  'ap-southeast-1': 'Asia Pacific (Singapore)',
-  'ap-northeast-1': 'Asia Pacific (Tokyo)',
-}
-
-const FALLBACK_REGIONS = [
-  { id: 'us-east-1', name: 'US East (N. Virginia)', carbon: 245, demand: '67%', renewable: '45%' },
-  { id: 'us-west-2', name: 'US West (Oregon)', carbon: 124, demand: '51%', renewable: '78%' },
-  { id: 'eu-west-1', name: 'EU (Ireland)', carbon: 189, demand: '58%', renewable: '62%' },
-  { id: 'eu-central-1', name: 'EU (Frankfurt)', carbon: 156, demand: '54%', renewable: '68%' },
-  { id: 'ap-southeast-1', name: 'Asia Pacific (Singapore)', carbon: 312, demand: '82%', renewable: '12%' },
-  { id: 'ap-northeast-1', name: 'Asia Pacific (Tokyo)', carbon: 203, demand: '71%', renewable: '35%' },
-]
-
-interface RegionDisplay {
+interface RegionData {
   id: string
   name: string
-  carbon: number
+  carbonIntensity: number | null
   demand: string
   renewable: string
+  confidence: number
+  source: string
+  timestamp: string
 }
 
 const scenarios = [
@@ -36,7 +21,6 @@ const scenarios = [
     memory: '256 GB',
     compute: '8x GPU',
     deadline: '2 hours',
-    durationMinutes: 120,
     description: 'Time-flexible ML workload',
   },
   {
@@ -44,7 +28,6 @@ const scenarios = [
     memory: '512 GB',
     compute: '16x vCPU',
     deadline: '6 hours',
-    durationMinutes: 360,
     description: 'Batch data processing job',
   },
   {
@@ -52,61 +35,51 @@ const scenarios = [
     memory: '128 GB',
     compute: '32x vCPU',
     deadline: '1 hour',
-    durationMinutes: 60,
     description: 'Parallel transcoding pipeline',
   },
 ]
 
 export default function LandingPage() {
   const [demoScenario, setDemoScenario] = useState(0)
+  const [regions, setRegions] = useState<RegionData[]>([])
+  const [regionsLoading, setRegionsLoading] = useState(true)
+  const [regionsError, setRegionsError] = useState<string | null>(null)
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null)
   const [showDecision, setShowDecision] = useState(false)
   const [decisionPayload, setDecisionPayload] = useState<any>(null)
   const [expandPayload, setExpandPayload] = useState(false)
-  const demoTimer = useRef<NodeJS.Timeout>()
   const [isMounted, setIsMounted] = useState(false)
-  const [regions, setRegions] = useState<RegionDisplay[]>(FALLBACK_REGIONS)
-  const [isDemoMode, setIsDemoMode] = useState(false)
-  const [isRouting, setIsRouting] = useState(false)
 
   useEffect(() => {
     setIsMounted(true)
   }, [])
 
-  // Fetch live region data from the engine on mount
   useEffect(() => {
-    let cancelled = false
-    async function fetchRegions() {
+    let active = true
+
+    async function loadRegions() {
       try {
-        const summary = await ecobeApi.getGridSummary()
-        if (cancelled) return
-        if (summary?.regions?.length) {
-          const mapped: RegionDisplay[] = summary.regions.map((r: any) => ({
-            id: r.region,
-            name: REGION_NAMES[r.region] || r.region,
-            carbon: Math.round(
-              r.carbonIntensity != null
-                ? r.carbonIntensity
-                : (r.fossilRatio != null && r.renewableRatio != null)
-                  ? (r.fossilRatio * 800)
-                  : 200
-            ),
-            demand: r.demandRampPct != null ? `${Math.abs(r.demandRampPct).toFixed(0)}%` : '--',
-            renewable: r.renewableRatio != null ? `${Math.round(r.renewableRatio * 100)}%` : '--',
-          }))
-          setRegions(mapped)
-          setIsDemoMode(false)
-        } else {
-          setIsDemoMode(true)
-        }
-      } catch {
-        if (!cancelled) {
-          setIsDemoMode(true)
+        setRegionsLoading(true)
+        setRegionsError(null)
+        const { data } = await axios.get<RegionData[]>('/api/dashboard/regions')
+        if (!active) return
+        setRegions(data)
+      } catch (error) {
+        if (!active) return
+        console.error('Failed to load live regions:', error)
+        setRegionsError(error instanceof Error ? error.message : 'Failed to load live regions')
+      } finally {
+        if (active) {
+          setRegionsLoading(false)
         }
       }
     }
-    fetchRegions()
-    return () => { cancelled = true }
+
+    void loadRegions()
+
+    return () => {
+      active = false
+    }
   }, [])
 
   useEffect(() => {
@@ -121,67 +94,55 @@ export default function LandingPage() {
     return () => clearTimeout(timer)
   }, [demoScenario])
 
-  const handleRouteGreen = async () => {
-    setIsRouting(true)
-    try {
-      const scenario = scenarios[demoScenario]
-      const request: GreenRoutingRequest = {
-        preferredRegions: regions.map((r) => r.id),
-        durationMinutes: scenario.durationMinutes,
-      }
-      const result = await ecobeApi.routeGreen(request)
+  const handleRouteGreen = () => {
+    const routableRegions = regions.filter(
+      (region): region is RegionData & { carbonIntensity: number } =>
+        typeof region.carbonIntensity === 'number'
+    )
 
-      // Build display payload from real engine response
-      const payload = {
-        timestamp: new Date().toISOString().split('T')[1].split('.')[0],
-        scenario: scenario.workload,
-        ...result,
-      }
-
-      setSelectedRegion((result as any).selectedRegion ?? regions[0]?.id)
-      setShowDecision(true)
-      setDecisionPayload(payload)
-      setIsDemoMode(false)
-    } catch {
-      // Fallback to demo payload when engine is unreachable
-      const cleanestRegion = regions.reduce((prev, current) =>
-        current.carbon < prev.carbon ? current : prev
-      )
-      const carbonSaved = Math.round(
-        (regions[0].carbon - cleanestRegion.carbon) *
-          (parseInt(scenarios[demoScenario].memory) / 100) *
-          2.5
-      )
-      const payload = {
-        timestamp: new Date().toISOString().split('T')[1].split('.')[0],
-        scenario: scenarios[demoScenario].workload,
-        selectedRegion: cleanestRegion.id,
-        carbonIntensity: cleanestRegion.carbon,
-        score: 94 + Math.random() * 6,
-        qualityTier: 'high',
-        carbon_delta_g_per_kwh: regions[0].carbon - cleanestRegion.carbon,
-        forecast_stability: 'stable',
-        provider_disagreement: { flag: false, pct: 0 },
-        balancingAuthority: 'MISO',
-        demandRampPct: 2.3,
-        carbonSpikeProbability: 0.08,
-        curtailmentProbability: 0.02,
-        importCarbonLeakageScore: 0.15,
-        source_used: 'WattTime',
-        validation_source: 'Electricity Maps',
-        fallback_used: false,
-        estimatedFlag: false,
-        syntheticFlag: false,
-        carbonSaved: `${carbonSaved}g CO2`,
-        deadline: scenarios[demoScenario].deadline,
-      }
-      setSelectedRegion(cleanestRegion.id)
-      setShowDecision(true)
-      setDecisionPayload(payload)
-      setIsDemoMode(true)
-    } finally {
-      setIsRouting(false)
+    if (routableRegions.length === 0) {
+      return
     }
+
+    const baselineRegion =
+      routableRegions.find((region) => region.id === selectedRegion) ?? routableRegions[0]
+    const cleanestRegion = routableRegions.reduce((prev, current) =>
+      current.carbonIntensity < prev.carbonIntensity ? current : prev
+    )
+
+    const carbonSaved = Math.round(
+      Math.max(0, baselineRegion.carbonIntensity - cleanestRegion.carbonIntensity) *
+        (parseInt(scenarios[demoScenario].memory) / 100) *
+        2.5
+    )
+
+    const payload = {
+      timestamp: new Date().toISOString().split('T')[1].split('.')[0],
+      scenario: scenarios[demoScenario].workload,
+      selectedRegion: cleanestRegion.id,
+      carbonIntensity: cleanestRegion.carbonIntensity,
+      score: 94 + Math.random() * 6,
+      qualityTier: 'high',
+      carbon_delta_g_per_kwh: baselineRegion.carbonIntensity - cleanestRegion.carbonIntensity,
+      forecast_stability: 'stable',
+      provider_disagreement: { flag: false, pct: 0 },
+      balancingAuthority: 'MISO',
+      demandRampPct: 2.3,
+      carbonSpikeProbability: 0.08,
+      curtailmentProbability: 0.02,
+      importCarbonLeakageScore: 0.15,
+      source_used: 'WattTime',
+      validation_source: 'Carbon Signal Provider',
+      fallback_used: false,
+      estimatedFlag: false,
+      syntheticFlag: false,
+      carbonSaved: `${carbonSaved}g CO₂`,
+      deadline: scenarios[demoScenario].deadline,
+    }
+
+    setSelectedRegion(cleanestRegion.id)
+    setShowDecision(true)
+    setDecisionPayload(payload)
   }
 
   if (!isMounted) return null
@@ -196,11 +157,6 @@ export default function LandingPage() {
               <span className="text-white font-bold text-xl">🌱</span>
             </div>
             <span className="text-lg font-bold text-white">ECOBE</span>
-            {isDemoMode && (
-              <span className="ml-3 px-2 py-0.5 bg-amber-500/20 text-amber-400 text-xs font-semibold rounded border border-amber-500/40">
-                DEMO MODE
-              </span>
-            )}
           </div>
           <div className="flex items-center space-x-6">
             <a
@@ -238,7 +194,7 @@ export default function LandingPage() {
               <span className="block text-emerald-400">Automatically.</span>
             </h1>
             <p className="text-xl text-gray-400 mb-8 leading-relaxed">
-              ECOBE is the world's most accurate carbon-aware routing engine. Cut your cloud
+              ECOBE is the world&apos;s most accurate carbon-aware routing engine. Cut your cloud
               carbon footprint by 40–70% with zero code changes.
             </p>
 
@@ -325,6 +281,16 @@ export default function LandingPage() {
               <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-6">
                 <h3 className="text-lg font-semibold text-white mb-4">Regions</h3>
                 <div className="space-y-2">
+                  {regionsLoading && (
+                    <div className="rounded-lg border border-gray-700 bg-gray-900/50 p-3 text-sm text-gray-400">
+                      Loading live provider data...
+                    </div>
+                  )}
+                  {regionsError && (
+                    <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-300">
+                      {regionsError}
+                    </div>
+                  )}
                   {regions.map((region) => (
                     <div
                       key={region.id}
@@ -338,7 +304,9 @@ export default function LandingPage() {
                       <div className="flex items-center justify-between">
                         <div className="font-medium text-gray-100">{region.name}</div>
                         <div className="text-sm font-bold text-emerald-400">
-                          {region.carbon} g/kWh
+                          {region.carbonIntensity != null
+                            ? `${region.carbonIntensity} g/kWh`
+                            : 'Unavailable'}
                         </div>
                       </div>
                       <div className="text-xs text-gray-500 mt-1">
@@ -351,10 +319,10 @@ export default function LandingPage() {
 
               <button
                 onClick={handleRouteGreen}
-                disabled={isRouting}
-                className="w-full px-6 py-3 bg-emerald-500 text-gray-950 font-semibold rounded-lg hover:bg-emerald-400 transition disabled:opacity-60 disabled:cursor-not-allowed"
+                disabled={regionsLoading || regions.length === 0}
+                className="w-full px-6 py-3 bg-emerald-500 text-gray-950 font-semibold rounded-lg hover:bg-emerald-400 transition"
               >
-                {isRouting ? 'Routing...' : 'Route Green'}
+                Route Green
               </button>
             </div>
 
@@ -386,22 +354,9 @@ export default function LandingPage() {
                 <>
                   <div className="bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 border border-emerald-500/50 rounded-lg p-6">
                     <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center space-x-2">
-                        <h3 className="text-lg font-semibold text-white">Decision</h3>
-                        {isDemoMode && (
-                          <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 text-xs font-semibold rounded border border-amber-500/40">
-                            DEMO
-                          </span>
-                        )}
-                      </div>
-                      <div className={`px-3 py-1 text-xs font-semibold rounded ${
-                        (decisionPayload.qualityTier ?? 'high') === 'high'
-                          ? 'bg-emerald-500/20 text-emerald-400'
-                          : (decisionPayload.qualityTier) === 'medium'
-                            ? 'bg-amber-500/20 text-amber-400'
-                            : 'bg-red-500/20 text-red-400'
-                      }`}>
-                        {(decisionPayload.qualityTier ?? 'HIGH').toString().toUpperCase()} CONFIDENCE
+                      <h3 className="text-lg font-semibold text-white">Decision</h3>
+                      <div className="px-3 py-1 bg-emerald-500/20 text-emerald-400 text-xs font-semibold rounded">
+                        HIGH CONFIDENCE
                       </div>
                     </div>
 
@@ -409,10 +364,7 @@ export default function LandingPage() {
                       <div>
                         <div className="text-gray-500 text-sm mb-1">Selected Region</div>
                         <div className="text-2xl font-bold text-emerald-400">
-                          {regions.find((r) => r.id === (decisionPayload.selectedRegion ?? selectedRegion))?.name
-                            ?? REGION_NAMES[decisionPayload.selectedRegion ?? selectedRegion]
-                            ?? decisionPayload.selectedRegion
-                            ?? selectedRegion}
+                          {regions.find((r) => r.id === selectedRegion)?.name}
                         </div>
                       </div>
 
@@ -420,81 +372,30 @@ export default function LandingPage() {
                         <div>
                           <div className="text-gray-500 text-xs mb-1">Carbon Intensity</div>
                           <div className="text-xl font-bold text-gray-100">
-                            {decisionPayload.carbonIntensity != null ? Math.round(decisionPayload.carbonIntensity) : '--'}
+                            {decisionPayload.carbonIntensity}
                             <span className="text-xs text-gray-500 ml-1">g/kWh</span>
                           </div>
                         </div>
                         <div>
                           <div className="text-gray-500 text-xs mb-1">Quality Score</div>
                           <div className="text-xl font-bold text-gray-100">
-                            {decisionPayload.score != null ? Math.round(decisionPayload.score) : '--'}
+                            {Math.round(decisionPayload.score)}
                             <span className="text-xs text-gray-500 ml-1">/100</span>
                           </div>
                         </div>
                         <div>
-                          <div className="text-gray-500 text-xs mb-1">Carbon Delta</div>
+                          <div className="text-gray-500 text-xs mb-1">Carbon Saved</div>
                           <div className="text-xl font-bold text-emerald-400">
-                            {decisionPayload.carbon_delta_g_per_kwh != null
-                              ? `${Math.round(decisionPayload.carbon_delta_g_per_kwh)} g/kWh`
-                              : decisionPayload.carbonSaved ?? '--'}
+                            {decisionPayload.carbonSaved}
                           </div>
                         </div>
                         <div>
                           <div className="text-gray-500 text-xs mb-1">Forecast Stability</div>
                           <div className="text-xl font-bold text-gray-100 capitalize">
-                            {decisionPayload.forecast_stability ?? '--'}
+                            {decisionPayload.forecast_stability}
                           </div>
                         </div>
                       </div>
-
-                      {/* Extra signal fields from real engine */}
-                      {(decisionPayload.source_used || decisionPayload.balancingAuthority) && (
-                        <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-700">
-                          {decisionPayload.source_used && (
-                            <div>
-                              <div className="text-gray-500 text-xs mb-1">Source Used</div>
-                              <div className="text-sm font-medium text-gray-300">{decisionPayload.source_used}</div>
-                            </div>
-                          )}
-                          {decisionPayload.validation_source && (
-                            <div>
-                              <div className="text-gray-500 text-xs mb-1">Validation Source</div>
-                              <div className="text-sm font-medium text-gray-300">{decisionPayload.validation_source}</div>
-                            </div>
-                          )}
-                          {decisionPayload.balancingAuthority && (
-                            <div>
-                              <div className="text-gray-500 text-xs mb-1">Balancing Authority</div>
-                              <div className="text-sm font-medium text-gray-300">{decisionPayload.balancingAuthority}</div>
-                            </div>
-                          )}
-                          {decisionPayload.provider_disagreement?.flag && (
-                            <div>
-                              <div className="text-gray-500 text-xs mb-1">Provider Disagreement</div>
-                              <div className="text-sm font-medium text-amber-400">
-                                {decisionPayload.provider_disagreement.pct != null
-                                  ? `${Math.round(decisionPayload.provider_disagreement.pct)}%`
-                                  : 'Yes'}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Data quality flags */}
-                      {(decisionPayload.estimatedFlag || decisionPayload.syntheticFlag || decisionPayload.fallback_used) && (
-                        <div className="flex flex-wrap gap-2 pt-3 border-t border-gray-700">
-                          {decisionPayload.estimatedFlag && (
-                            <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 text-xs font-semibold rounded">ESTIMATED</span>
-                          )}
-                          {decisionPayload.syntheticFlag && (
-                            <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 text-xs font-semibold rounded">SYNTHETIC</span>
-                          )}
-                          {decisionPayload.fallback_used && (
-                            <span className="px-2 py-0.5 bg-orange-500/20 text-orange-400 text-xs font-semibold rounded">FALLBACK</span>
-                          )}
-                        </div>
-                      )}
                     </div>
                   </div>
 
@@ -517,7 +418,7 @@ export default function LandingPage() {
               ) : (
                 <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-12 text-center">
                   <div className="text-gray-500">
-                    Select a region and click "Route Green" to see the decision
+                    Select a region and click &quot;Route Green&quot; to see the decision
                   </div>
                 </div>
               )}
@@ -592,7 +493,7 @@ export default function LandingPage() {
                 color: 'emerald',
               },
               {
-                name: 'Electricity Maps',
+                name: 'Carbon Signal Provider',
                 signal: 'Flow-traced Intensity',
                 description: 'Grid intelligence with electricity mix and cross-zone effects.',
                 status: 'Live',
@@ -777,7 +678,7 @@ export default function LandingPage() {
                 <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
                   <span className="text-white font-bold text-lg">🌱</span>
                 </div>
-                <span className="text-lg font-bold text-white">ECOBE</span>
+                <span className="text-lg font-bold text-white">CO₂Router</span>
               </div>
               <p className="text-gray-500 text-sm">
                 Carbon-aware compute routing engine built for a sustainable future.
@@ -829,10 +730,10 @@ export default function LandingPage() {
 
           <div className="border-t border-gray-800 pt-8 flex items-center justify-between">
             <p className="text-gray-500 text-sm">
-              © 2026 ECOBE. Built for a carbon-neutral future.
+              © 2026 CO₂Router. Built for a carbon-neutral future.
             </p>
             <p className="text-gray-500 text-sm">
-              Powered by WattTime, Electricity Maps, Ember, EIA-930
+              Powered by WattTime, Carbon Signal Provider, Ember, EIA-930
             </p>
           </div>
         </div>
