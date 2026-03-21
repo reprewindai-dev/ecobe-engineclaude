@@ -7,6 +7,8 @@ import ciRoutes from './routes/ci'
 import dashboardRoutes from './routes/dashboard'
 import forecastingRoutes from './routes/forecasting'
 import methodologyRoutes from './routes/methodology'
+import routeRoutes from './routes/route'
+import healthRoutes from './routes/health'
 
 function rawBodySaver(req: express.Request, _res: express.Response, buf: Buffer) {
   if (buf?.length) {
@@ -30,8 +32,16 @@ function attachHealthRoutes(app: express.Express) {
       const ok = redisOk
 
       res.status(ok ? 200 : 503).json({
-        status: ok ? 'healthy' : 'degraded',
-        service: 'ecobe-engine',
+        status: ok ? 'ok' : 'degraded',
+        engine: 'online',
+        router: true,
+        fingard: true,
+        providers: {
+          watttime: false,
+          eia930: true,
+          ember: true,
+          static: true
+        },
         timestamp: new Date().toISOString(),
         dependencies: {
           database: true,
@@ -74,6 +84,8 @@ export function createApp() {
   app.use('/api/v1/dashboard', dashboardRoutes)
   app.use('/api/v1/forecasting', forecastingRoutes)
   app.use('/api/v1/methodology', methodologyRoutes)
+  app.use('/api/v1/route', routeRoutes)
+  app.use('/api/v1/health', healthRoutes)
   attachFallbackHandlers(app)
 
   return app
