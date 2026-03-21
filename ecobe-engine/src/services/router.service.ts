@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { getSignals } from './fingard.service'
+import { getSignals, type NormalizedSignal } from './fingard.service'
 import { saveDecision, getRecentDecisions } from '../db/decision-log.repo'
 
 export interface RouteRequest {
@@ -20,6 +20,25 @@ export interface RoutingDecision {
   carbon_delta: number
   degraded: boolean
   created_at: Date
+}
+
+export interface RouteResponse {
+  decisionId: string
+  chosenRegion: string
+  gridZone: string
+  source: string
+  signalType: string
+  carbonValue: number
+  confidence: number
+  freshness: string
+  degraded: boolean
+  alternatives: Array<{
+    region: string
+    carbonValue: number
+    source: string
+    degraded: boolean
+  }>
+  carbonDeltaVsWorst: number
 }
 
 /**
@@ -64,4 +83,38 @@ export async function routeWorkload(request: RouteRequest): Promise<RoutingDecis
   await saveDecision(decision)
 
   return decision
+}
+
+/**
+ * Create route response from decision and signals
+ */
+export async function createRouteResponse(decision: RoutingDecision): Promise<RouteResponse> {
+  // Get all signals for alternatives
+  const signals = await getSignals(decision.candidate_regions)
+  
+  const alternatives = signals
+    .filter(signal => signal.region !== decision.chosen_region)
+    .map(signal => ({
+      region: signal.region,
+      carbonValue: signal.carbonValue,
+      source: signal.source,
+      degraded: signal.degraded,
+    }))
+    .slice(0, 3) // Top 3 alternatives
+
+  const winnerSignal = signals.find(s => s.region === decision.chosen_region)!
+
+  return {
+    decisionId: decision.decision_id,
+    chosenRegion: decision.chosen_region,
+    gridZone: winnerSignal.gridZone,
+    source: decision.winner_source,
+    signalType: winnerSignal.signalType,
+    carbonValue: decision.winner_value,
+    confidence: winnerSignal.confidence,
+    freshness: winnerSignal.freshness,
+    degraded: decision.degraded,
+    alternatives,
+    carbonDeltaVsWorst: decision.carbon_delta,
+  }
 }

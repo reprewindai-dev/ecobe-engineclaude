@@ -11,13 +11,10 @@ import routeRoutes from './routes/route'
 import routeTestRoutes from './routes/route-test'
 import simpleTestRoutes from './routes/simple-test'
 import healthRoutes from './routes/health'
-
-function rawBodySaver(req: express.Request, _res: express.Response, buf: Buffer) {
-  if (buf?.length) {
-    const rawReq = req as { rawBody?: string }
-    rawReq.rawBody = buf.toString('utf8')
-  }
-}
+import metricsRoutes from './routes/metrics'
+import regionMappingRoutes from './routes/region-mapping'
+import patternsRoutes from './routes/patterns'
+import dksRoutes from './routes/dks'
 
 function attachHealthRoutes(app: express.Express) {
   async function healthHandler(_req: express.Request, res: express.Response) {
@@ -90,6 +87,10 @@ export function createApp() {
   app.use('/api/v1/route-test', routeTestRoutes)
   app.use('/api/v1/simple-test', simpleTestRoutes)
   app.use('/api/v1/health', healthRoutes)
+  app.use('/api/v1/dashboard/metrics', metricsRoutes)
+  app.use('/api/v1/dashboard/region-mapping', regionMappingRoutes)
+  app.use('/api/v1/patterns', patternsRoutes)
+  app.use('/api/v1/integrations/dks', dksRoutes)
   attachFallbackHandlers(app)
 
   return app
