@@ -4,7 +4,6 @@ import { Prisma } from '@prisma/client'
 import { env } from '../config/env'
 import { prisma } from './db'
 import { redis } from './redis'
-import { electricityMaps } from './electricity-maps'
 import { forecastCarbonIntensity } from './carbon-forecasting'
 import { indexWorkloadEmbedding } from './workload-embedding'
 import { buildAdaptiveRun, logAdaptiveRun } from './adaptive'
@@ -215,21 +214,9 @@ async function getCurrentCarbonIntensity(region: string): Promise<number> {
   const cached = await redis.get(cacheKey)
   if (cached) return parseFloat(cached)
 
-  const data = await electricityMaps.getCarbonIntensity(region)
-  const intensity = data?.carbonIntensity ?? 400
+  const signal = await providerRouter.getRoutingSignal(region, new Date())
+  const intensity = signal?.carbonIntensity ?? 400
   await redis.setex(cacheKey, CARBON_CACHE_TTL, intensity.toString())
-  await prisma.carbonIntensity
-    .create({
-      data: {
-        region,
-        carbonIntensity: intensity,
-        timestamp: new Date(),
-        source: 'ELECTRICITY_MAPS',
-      },
-    })
-    .catch(() => {
-      // swallow duplicates
-    })
   return intensity
 }
 

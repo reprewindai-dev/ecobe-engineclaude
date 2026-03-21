@@ -8,6 +8,19 @@ import dashboardRoutes from './routes/dashboard'
 import forecastingRoutes from './routes/forecasting'
 import methodologyRoutes from './routes/methodology'
 import routeRoutes from './routes/route'
+import routingRoutes from './routes/routing'
+import carbonCommandRoutes from './routes/carbon-command'
+import energyRoutes from './routes/energy'
+import intelligenceRoutes from './routes/intelligence'
+import gridIntelligenceRoutes from './routes/intelligence/grid'
+import dekesRoutes from './routes/dekes'
+import dekesHandoffRoutes from './routes/dekes-handoff'
+import organizationsRoutes from './routes/organizations'
+import decisionsRoutes from './routes/decisions'
+import systemRoutes from './routes/system'
+import creditsRoutes from './routes/credits'
+import carbonLedgerRoutes from './routes/carbon-ledger'
+import integrationsRoutes from './routes/integrations'
 import routeSimpleRoutes from './routes/route-simple'
 import routeTestRoutes from './routes/route-test'
 import simpleTestRoutes from './routes/simple-test'
@@ -67,7 +80,7 @@ function attachFallbackHandlers(app: express.Express) {
     res.status(404).json({ error: `Not found: ${req.path}` })
   })
 
-  app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  app.use((err: unknown, _req: express.Request, res: express.Response) => {
     console.error('Engine server error:', err)
     res.status(500).json({ error: 'Internal server error' })
   })
@@ -86,7 +99,26 @@ export function createApp() {
   app.use('/api/v1/dashboard', dashboardRoutes)
   app.use('/api/v1/forecasting', forecastingRoutes)
   app.use('/api/v1/methodology', methodologyRoutes)
+  // Core routing — order matters: carbon-command and routing extend /route
   app.use('/api/v1/route', routeRoutes)
+  app.use('/api/v1/route', routingRoutes)
+  app.use('/api/v1/route', carbonCommandRoutes)
+  // Energy equation
+  app.use('/api/v1/energy', energyRoutes)
+  // Grid intelligence (specific path before general intelligence)
+  app.use('/api/v1/intelligence/grid', gridIntelligenceRoutes)
+  app.use('/api/v1/intelligence', intelligenceRoutes)
+  // DEKES integration
+  app.use('/api/v1/dekes', dekesRoutes)
+  app.use('/api/v1/integrations/dekes', dekesHandoffRoutes)
+  // Admin / management
+  app.use('/api/v1/organizations', organizationsRoutes)
+  app.use('/api/v1/decisions', decisionsRoutes)
+  app.use('/api/v1/system', systemRoutes)
+  app.use('/api/v1/credits', creditsRoutes)
+  app.use('/api/v1/carbon-ledger', carbonLedgerRoutes)
+  app.use('/api/v1/integrations', integrationsRoutes)
+  // Legacy / test routes
   app.use('/api/v1/route-simple', routeSimpleRoutes)
   app.use('/api/v1/route-test', routeTestRoutes)
   app.use('/api/v1/simple-test', simpleTestRoutes)

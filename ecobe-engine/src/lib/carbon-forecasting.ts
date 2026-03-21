@@ -10,7 +10,8 @@
  */
 
 import { prisma } from './db'
-import { electricityMaps } from './electricity-maps'
+import { wattTime } from './watttime'
+import { providerRouter } from './carbon/provider-router'
 import { addHours, subDays } from 'date-fns'
 
 export interface CarbonForecastResult {
@@ -53,44 +54,46 @@ export async function forecastCarbonIntensity(
   })
 
   if (historicalData.length < 24) {
-    // Not enough data, use Electricity Maps forecast
-    const forecast = await electricityMaps.getForecast(region)
-    const mapped = await Promise.all(
-      forecast
-        .filter((f) => f.zone || region) // Filter out entries with no zone
-        .map(async (f) => {
-          const forecastTime = new Date(f.datetime)
-          const predictedIntensity = Math.round(f.carbonIntensity)
-          const zone = f.zone || region // Fallback to input region if zone is undefined
-          const result: CarbonForecastResult = {
-            region: zone,
-            forecastTime,
-            predictedIntensity,
-            confidence: 0.7,
-            trend: 'stable',
+    // Not enough data — try WattTime MOER forecast for US regions
+    try {
+      const { WATTTIME_REGION_MAP } = await import('./carbon/provider-router') as any
+      const ba = WATTTIME_REGION_MAP?.[region]
+      if (ba) {
+        const moerForecast = await wattTime.getMOERForecast(ba, new Date())
+        if (moerForecast.length > 0) {
+          const mapped: CarbonForecastResult[] = []
+          for (const f of moerForecast.slice(0, hoursAhead)) {
+            const forecastTime = new Date(f.timestamp)
+            const predictedIntensity = Math.round(f.moer)
+            const result: CarbonForecastResult = { region, forecastTime, predictedIntensity, confidence: 0.7, trend: 'stable' }
+            await prisma.carbonForecast.upsert({
+              where: { region_forecastTime: { region, forecastTime } },
+              update: { predictedIntensity, confidence: 0.7, modelVersion: 'watttime-moer', features: { provider: 'watttime' } },
+              create: { region, forecastTime, predictedIntensity, confidence: 0.7, modelVersion: 'watttime-moer', features: { provider: 'watttime' } },
+            }).catch(() => {})
+            mapped.push(result)
           }
-          await prisma.carbonForecast.upsert({
-            where: { region_forecastTime: { region: zone, forecastTime } },
-          update: {
-            predictedIntensity,
-            confidence: result.confidence,
-            modelVersion: 'electricity-maps',
-            features: { provider: 'electricity-maps' },
-          },
-          create: {
-            region: zone,
-            forecastTime,
-            predictedIntensity,
-            confidence: result.confidence,
-            modelVersion: 'electricity-maps',
-            features: { provider: 'electricity-maps' },
-          },
-        }).catch(() => {})
-        return result
-      })
-    )
+          if (mapped.length > 0) return mapped
+        }
+      }
+    } catch { /* fall through to projection */ }
 
-    return mapped
+    // Fallback: project current signal forward (static with decay)
+    const current = await providerRouter.getRoutingSignal(region, new Date()).catch(() => null)
+    const baseIntensity = current?.carbonIntensity ?? 400
+    const now = new Date()
+    const projected: CarbonForecastResult[] = []
+    for (let h = 1; h <= hoursAhead; h++) {
+      const forecastTime = addHours(now, h)
+      const result: CarbonForecastResult = { region, forecastTime, predictedIntensity: baseIntensity, confidence: 0.3, trend: 'stable' }
+      await prisma.carbonForecast.upsert({
+        where: { region_forecastTime: { region, forecastTime } },
+        update: { predictedIntensity: baseIntensity, confidence: 0.3, modelVersion: 'static-projection', features: { provider: 'provider-router' } },
+        create: { region, forecastTime, predictedIntensity: baseIntensity, confidence: 0.3, modelVersion: 'static-projection', features: { provider: 'provider-router' } },
+      }).catch(() => {})
+      projected.push(result)
+    }
+    return projected
   }
 
   // Generate forecasts

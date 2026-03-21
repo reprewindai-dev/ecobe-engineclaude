@@ -11,7 +11,7 @@ import {
 } from 'date-fns'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/db'
-import { electricityMaps } from '../lib/electricity-maps'
+import { providerRouter } from '../lib/carbon/provider-router'
 import { getIntegrationMetric, computeIntegrationSuccessRate } from '../lib/integration-metrics'
 import { getForecastRefreshSummary, getLastForecastRefreshState } from '../lib/forecast-refresh'
 import { getProviderFreshness, getCapacityOverview } from '../lib/routing'
@@ -875,8 +875,8 @@ router.post('/what-if/intensities', async (req, res) => {
           return { zone, carbonIntensity: latest.carbonIntensity }
         }
 
-        const resp = await electricityMaps.getCarbonIntensity(zone)
-        const carbonIntensity = resp?.carbonIntensity ?? 400
+        const signal = await providerRouter.getRoutingSignal(zone, new Date()).catch(() => null)
+        const carbonIntensity = signal?.carbonIntensity ?? 400
         return { zone, carbonIntensity }
       })
     )

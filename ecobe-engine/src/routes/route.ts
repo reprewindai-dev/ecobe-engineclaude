@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { routeWorkload, createRouteResponse } from '../services/router.service'
+import { routeWorkload, createRouteResponse } from '../../src/services/router.service'
 
 const router = Router()
 

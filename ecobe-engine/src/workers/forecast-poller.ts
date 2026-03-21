@@ -1,7 +1,6 @@
 import cron from 'node-cron'
-import { subHours } from 'date-fns'
 import { prisma } from '../lib/db'
-import { electricityMaps } from '../lib/electricity-maps'
+import { providerRouter } from '../lib/carbon/provider-router'
 import { forecastCarbonIntensity } from '../lib/carbon-forecasting'
 import { env } from '../config/env'
 import { redis } from '../lib/redis'
@@ -22,28 +21,28 @@ async function upsertCarbonSample(region: string, timestamp: Date, intensity: nu
     },
     update: {
       carbonIntensity: intensity,
-      source: 'ELECTRICITY_MAPS',
+      source: 'PROVIDER_ROUTER',
     },
     create: {
       region,
       timestamp,
       carbonIntensity: intensity,
-      source: 'ELECTRICITY_MAPS',
+      source: 'PROVIDER_ROUTER',
     },
   })
 }
 
 async function ingestRegionHistory(region: string) {
-  const end = new Date()
-  const start = subHours(end, DEFAULT_FORECAST_LOOKBACK_HOURS)
-  const history = await electricityMaps.getCarbonIntensityHistory(region, start, end)
-
+  // Sample current signal from provider-router (EM history removed — disallowed provider)
   let ingested = 0
-  for (const sample of history) {
-    const timestamp = new Date(sample.datetime)
-    const carbonIntensity = Math.round(sample.carbonIntensity)
-    await upsertCarbonSample(sample.zone ?? region, timestamp, carbonIntensity)
-    ingested += 1
+  try {
+    const signal = await providerRouter.getRoutingSignal(region, new Date())
+    if (signal && signal.source !== 'fallback') {
+      await upsertCarbonSample(region, new Date(), Math.round(signal.carbonIntensity))
+      ingested = 1
+    }
+  } catch (err) {
+    console.warn(`forecast-poller: signal fetch failed for ${region}:`, err)
   }
 
   const forecasts = await forecastCarbonIntensity(region, DEFAULT_FORECAST_HOURS)

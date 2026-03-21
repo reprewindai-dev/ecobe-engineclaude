@@ -1,6 +1,5 @@
 import { prisma } from './db'
 import { redis } from './redis'
-import { electricityMaps } from './electricity-maps'
 import { providerRouter } from './carbon/provider-router'
 import { GridSignalCache } from './grid-signals/grid-signal-cache'
 import { GridSignalAudit } from './grid-signals/grid-signal-audit'
@@ -88,33 +87,10 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
         }
       } catch (error) {
         console.error(`Failed to get routing signal for ${region}:`, error)
-        // Fallback to electricity maps
-        const cached = await redis.get(`carbon:${region}`)
-        let carbonIntensity: number
-
-        if (cached) {
-          carbonIntensity = parseInt(cached)
-        } else {
-          const data = await electricityMaps.getCarbonIntensity(region)
-          carbonIntensity = data?.carbonIntensity ?? 400
-
-          // Cache for 15 minutes
-          await redis.setex(`carbon:${region}`, 900, carbonIntensity.toString())
-
-          // Store in DB
-          await prisma.carbonIntensity.create({
-            data: {
-              region,
-              carbonIntensity,
-              timestamp: new Date(),
-              source: 'ELECTRICITY_MAPS',
-            },
-          }).catch(() => {}) // Ignore duplicates
-        }
-
+        // Static fallback — degraded state, confidence 0.05
         return {
           region,
-          carbonIntensity,
+          carbonIntensity: 400,
           latency: latencyMsByRegion[region] ?? 100,
           signal: null,
         }

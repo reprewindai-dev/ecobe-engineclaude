@@ -305,6 +305,12 @@ The production engine runs as a Docker container on Railway. Redeployments build
 
 Railway automatically applies the health check (`/health`) and restart policy defined in `railway.json`.
 
+### Note on Automated Workflows
+
+**Previous automated workflows (EIA ingestion, forecast refresh, signal verification, cache warming) have been temporarily removed** to focus on core functionality. These will be re-implemented in a future update with improved reliability and monitoring.
+
+For now, data refresh should be handled manually through the API endpoints or custom scheduling.
+
 ## Architecture
 
 ```

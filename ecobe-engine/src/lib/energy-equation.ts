@@ -1,5 +1,5 @@
 import { prisma } from './db'
-import { electricityMaps } from './electricity-maps'
+import { providerRouter } from './carbon/provider-router'
 
 export interface EnergyRequest {
   requestVolume: number
@@ -92,19 +92,9 @@ export async function calculateEnergyEquation(
   // Get carbon intensity for all regions
   const regionEstimates = await Promise.all(
     regionTargets.map(async (region) => {
-      const data = await electricityMaps.getCarbonIntensity(region)
-      const carbonIntensity = data?.carbonIntensity ?? 400
+      const signal = await providerRouter.getRoutingSignal(region, new Date()).catch(() => null)
+      const carbonIntensity = signal?.carbonIntensity ?? 400
       const estimatedCO2 = energyKwh * carbonIntensity  // gCO2eq
-
-      // Store in DB
-      await prisma.carbonIntensity.create({
-        data: {
-          region,
-          carbonIntensity,
-          timestamp: new Date(),
-          source: 'ELECTRICITY_MAPS',
-        },
-      }).catch(() => {}) // Ignore duplicates
 
       return {
         region,

@@ -6,7 +6,7 @@
  */
 
 import { prisma } from './db'
-import { electricityMaps } from './electricity-maps'
+import { providerRouter } from './carbon/provider-router'
 
 export interface ForecastAccuracyResult {
   region: string
@@ -115,7 +115,7 @@ async function getRealizedIntensity(
 
   // Fallback: try to fetch from provider
   try {
-    const signal = await electricityMaps.getCarbonIntensity(region)
+    const signal = await providerRouter.getRoutingSignal(region, new Date())
     if (signal) {
       return signal.carbonIntensity
     }

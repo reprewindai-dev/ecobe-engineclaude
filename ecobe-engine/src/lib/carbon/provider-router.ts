@@ -1,5 +1,4 @@
 import { wattTime } from '../watttime'
-import { electricityMaps } from '../electricity-maps'
 import { ember } from '../ember'
 import { gbCarbonIntensity } from '../gb-carbon-intensity'
 import { denmarkCarbon } from '../denmark-carbon'
@@ -11,10 +10,6 @@ import { FuelMixParser } from '../grid-signals/fuel-mix-parser'
 import { gridStatus } from '../grid-signals/gridstatus-client'
 import { EmberStructuralProfile, type EmberData, type RegionStructuralProfile } from '../ember/structural-profile'
 
-interface WeightedSignal {
-  provider: ProviderSignal
-  weight: number
-}
 
 export interface ProviderSignal {
   carbonIntensity: number // gCO2eq/kWh
@@ -81,134 +76,19 @@ export class ProviderRouter {
   /**
    * Produce a routing signal using free-first provider stack:
    *
-   * 1. EIA-930 fuel mix CI (US) / GB Carbon API / DK / FI (EU) — free primary
-   * 2. WattTime MOER enrichment (marginal signal)
-   * 3. Electricity Maps (optional, if key available)
-   * 4. Ember baseline fallback
-   * 5. Static fallback
+   * 1. WattTime MOER (US) — primary causal routing signal
+   * 2. GB Carbon Intensity / DK Energi Data / FI Fingrid (EU) — regional primary
+   * 3. EIA-930 fuel mix CI — US backbone when WattTime unavailable
+   * 4. Ember structural baseline — global fallback
+   * 5. Static fallback — degraded state
    */
   async getRoutingSignal(region: string, timestamp: Date): Promise<RoutingSignal> {
     const referenceTime = timestamp.toISOString()
     const fetchedAt = new Date().toISOString()
 
-    // ── TIER 1: Free direct carbon intensity sources ──────────────────
-
-    // 1a. US regions → EIA-930 fuel mix computed CI (free backbone)
-    const fuelMixCI = await this.getGridStatusFuelMixCI(region)
-    if (fuelMixCI !== null) {
-      // Also try WattTime MOER for marginal enrichment
-      const wattTimeSignal = await this.getWattTimeSignal(region, timestamp)
-      const contributingSources = ['eia930_fuel_mix']
-      let enrichmentNote = `EIA-930 fuel mix derived: ${fuelMixCI.toFixed(0)} gCO2/kWh`
-
-      const primarySignal: ProviderSignal = {
-        carbonIntensity: fuelMixCI,
-        isForecast: false,
-        source: 'gridstatus_fuel_mix',
-        timestamp: new Date().toISOString(),
-        estimatedFlag: false,
-        syntheticFlag: false,
-        confidence: 0.7, // Real measured fuel data + IPCC factors
-      }
-
-      if (wattTimeSignal) {
-        contributingSources.push('watttime')
-        enrichmentNote += `; WattTime MOER: ${wattTimeSignal.carbonIntensity} (percentile)`
-      }
-
-      const validation = await this.validateWithEmber(
-        primarySignal, region, timestamp,
-        wattTimeSignal ? [primarySignal, wattTimeSignal] : [primarySignal]
-      )
-
-      return {
-        carbonIntensity: fuelMixCI,
-        source: 'gridstatus_fuel_mix',
-        isForecast: false,
-        confidence: validation.adjustedConfidence,
-        provenance: {
-          sourceUsed: 'EIA930_FUEL_MIX_IPCC',
-          contributingSources,
-          referenceTime,
-          fetchedAt,
-          fallbackUsed: false,
-          disagreementFlag: validation.disagreement.level !== 'none',
-          disagreementPct: validation.disagreement.disagreementPct,
-          validationNotes: enrichmentNote + (validation.validationNotes ? `; ${validation.validationNotes}` : '')
-        }
-      }
-    }
-
-    // 1b. GB regions → GB Carbon Intensity API (free, no auth, 96h forecast)
-    const gbSignal = await this.getGBCarbonIntensitySignal(region)
-    if (gbSignal) {
-      const validation = await this.validateWithEmber(gbSignal, region, timestamp, [gbSignal])
-
-      return {
-        carbonIntensity: gbSignal.carbonIntensity,
-        source: 'gb_carbon_intensity',
-        isForecast: gbSignal.isForecast,
-        confidence: validation.adjustedConfidence,
-        provenance: {
-          sourceUsed: 'GB_CARBON_INTENSITY_API',
-          contributingSources: ['gb_carbon_intensity'],
-          referenceTime,
-          fetchedAt,
-          fallbackUsed: false,
-          disagreementFlag: validation.disagreement.level !== 'none',
-          disagreementPct: validation.disagreement.disagreementPct,
-          validationNotes: validation.validationNotes
-        }
-      }
-    }
-
-    // 1c. Denmark regions → Energi Data Service (free, CO2 forecast + realtime)
-    const dkSignal = await this.getDenmarkSignal(region)
-    if (dkSignal) {
-      const validation = await this.validateWithEmber(dkSignal, region, timestamp, [dkSignal])
-
-      return {
-        carbonIntensity: dkSignal.carbonIntensity,
-        source: 'dk_carbon' as any,
-        isForecast: dkSignal.isForecast,
-        confidence: validation.adjustedConfidence,
-        provenance: {
-          sourceUsed: 'DK_ENERGI_DATA_SERVICE',
-          contributingSources: ['dk_carbon'],
-          referenceTime,
-          fetchedAt,
-          fallbackUsed: false,
-          disagreementFlag: validation.disagreement.level !== 'none',
-          disagreementPct: validation.disagreement.disagreementPct,
-          validationNotes: validation.validationNotes
-        }
-      }
-    }
-
-    // 1d. Finland → Fingrid (free, 3-min realtime, API key)
-    const fiSignal = await this.getFinlandSignal(region)
-    if (fiSignal) {
-      const validation = await this.validateWithEmber(fiSignal, region, timestamp, [fiSignal])
-
-      return {
-        carbonIntensity: fiSignal.carbonIntensity,
-        source: 'fi_carbon' as any,
-        isForecast: fiSignal.isForecast,
-        confidence: validation.adjustedConfidence,
-        provenance: {
-          sourceUsed: 'FI_FINGRID',
-          contributingSources: ['fi_carbon'],
-          referenceTime,
-          fetchedAt,
-          fallbackUsed: false,
-          disagreementFlag: validation.disagreement.level !== 'none',
-          disagreementPct: validation.disagreement.disagreementPct,
-          validationNotes: validation.validationNotes
-        }
-      }
-    }
-
-    // ── TIER 2: WattTime MOER (US marginal, works as standalone for CAISO) ──
+    // ── TIER 1a: WattTime MOER — primary causal US signal (locked doctrine) ──
+    // WattTime provides real-time marginal emissions (MOER) for US regions.
+    // This is the fast-path routing truth for US. EIA-930 is backbone/fallback.
     const wattTimeSignal = await this.getWattTimeSignal(region, timestamp)
     if (wattTimeSignal) {
       const validation = await this.validateWithEmber(wattTimeSignal, region, timestamp, [wattTimeSignal])
@@ -231,19 +111,19 @@ export class ProviderRouter {
       }
     }
 
-    // ── TIER 3: Electricity Maps (OPTIONAL — only if key is set) ──────
-    const electricityMapsSignal = await this.getElectricityMapsSignal(region, timestamp)
-    if (electricityMapsSignal) {
-      const validation = await this.validateWithEmber(electricityMapsSignal, region, timestamp, [electricityMapsSignal])
+    // ── TIER 1b: GB regions → GB Carbon Intensity API (free, no auth, 96h forecast) ──
+    const gbSignal = await this.getGBCarbonIntensitySignal(region)
+    if (gbSignal) {
+      const validation = await this.validateWithEmber(gbSignal, region, timestamp, [gbSignal])
 
       return {
-        carbonIntensity: electricityMapsSignal.carbonIntensity,
-        source: 'electricity_maps',
-        isForecast: electricityMapsSignal.isForecast,
+        carbonIntensity: gbSignal.carbonIntensity,
+        source: 'gb_carbon_intensity',
+        isForecast: gbSignal.isForecast,
         confidence: validation.adjustedConfidence,
         provenance: {
-          sourceUsed: 'ELECTRICITY_MAPS',
-          contributingSources: ['electricity_maps'],
+          sourceUsed: 'GB_CARBON_INTENSITY_API',
+          contributingSources: ['gb_carbon_intensity'],
           referenceTime,
           fetchedAt,
           fallbackUsed: false,
@@ -254,14 +134,95 @@ export class ProviderRouter {
       }
     }
 
-    // ── TIER 4: Ember baseline (global, free) ─────────────────────────
+    // ── TIER 1c: Denmark regions → Energi Data Service (free, CO2 forecast + realtime) ──
+    const dkSignal = await this.getDenmarkSignal(region)
+    if (dkSignal) {
+      const validation = await this.validateWithEmber(dkSignal, region, timestamp, [dkSignal])
+
+      return {
+        carbonIntensity: dkSignal.carbonIntensity,
+        source: 'dk_carbon' as any,
+        isForecast: dkSignal.isForecast,
+        confidence: validation.adjustedConfidence,
+        provenance: {
+          sourceUsed: 'DK_ENERGI_DATA_SERVICE',
+          contributingSources: ['dk_carbon'],
+          referenceTime,
+          fetchedAt,
+          fallbackUsed: false,
+          disagreementFlag: validation.disagreement.level !== 'none',
+          disagreementPct: validation.disagreement.disagreementPct,
+          validationNotes: validation.validationNotes
+        }
+      }
+    }
+
+    // ── TIER 1d: Finland → Fingrid (free, 3-min realtime, API key) ──
+    const fiSignal = await this.getFinlandSignal(region)
+    if (fiSignal) {
+      const validation = await this.validateWithEmber(fiSignal, region, timestamp, [fiSignal])
+
+      return {
+        carbonIntensity: fiSignal.carbonIntensity,
+        source: 'fi_carbon' as any,
+        isForecast: fiSignal.isForecast,
+        confidence: validation.adjustedConfidence,
+        provenance: {
+          sourceUsed: 'FI_FINGRID',
+          contributingSources: ['fi_carbon'],
+          referenceTime,
+          fetchedAt,
+          fallbackUsed: false,
+          disagreementFlag: validation.disagreement.level !== 'none',
+          disagreementPct: validation.disagreement.disagreementPct,
+          validationNotes: validation.validationNotes
+        }
+      }
+    }
+
+    // ── TIER 2: EIA-930 fuel mix — US backbone / predictive telemetry ──
+    // Used when WattTime is unavailable. Provides average intensity from
+    // real fuel mix data using IPCC emission factors.
+    const fuelMixCI = await this.getGridStatusFuelMixCI(region)
+    if (fuelMixCI !== null) {
+      const primarySignal: ProviderSignal = {
+        carbonIntensity: fuelMixCI,
+        isForecast: false,
+        source: 'gridstatus_fuel_mix',
+        timestamp: new Date().toISOString(),
+        estimatedFlag: false,
+        syntheticFlag: false,
+        confidence: 0.7,
+      }
+
+      const validation = await this.validateWithEmber(primarySignal, region, timestamp, [primarySignal])
+
+      return {
+        carbonIntensity: fuelMixCI,
+        source: 'gridstatus_fuel_mix',
+        isForecast: false,
+        confidence: validation.adjustedConfidence,
+        provenance: {
+          sourceUsed: 'EIA930_FUEL_MIX_IPCC',
+          contributingSources: ['eia930_fuel_mix'],
+          referenceTime,
+          fetchedAt,
+          fallbackUsed: false,
+          disagreementFlag: validation.disagreement.level !== 'none',
+          disagreementPct: validation.disagreement.disagreementPct,
+          validationNotes: `EIA-930 fuel mix: ${fuelMixCI.toFixed(0)} gCO2/kWh (WattTime unavailable)` + (validation.validationNotes ? `; ${validation.validationNotes}` : '')
+        }
+      }
+    }
+
+    // ── TIER 3: Ember baseline (global, free — structural context only) ──
     const emberProfile = await this.getStructuralProfile(region)
     if (emberProfile?.structuralCarbonBaseline) {
       return {
         carbonIntensity: emberProfile.structuralCarbonBaseline,
         source: 'ember',
         isForecast: false,
-        confidence: 0.25, // Historical baseline, not realtime
+        confidence: 0.25,
         provenance: {
           sourceUsed: 'EMBER_STRUCTURAL_BASELINE',
           contributingSources: ['ember'],
@@ -275,7 +236,7 @@ export class ProviderRouter {
       }
     }
 
-    // ── TIER 5: Static fallback (last resort) ─────────────────────────
+    // ── TIER 4: Static fallback (last resort — degraded state) ────────
     return {
       carbonIntensity: 450,
       source: 'fallback',
@@ -353,69 +314,6 @@ export class ProviderRouter {
 
     } catch (error) {
       console.warn(`WattTime signal failed for ${region}:`, error)
-    }
-
-    return null
-  }
-
-  // Cloud regions → Electricity Maps zone codes
-  // See: https://app.electricitymaps.com/zone/ for valid zone IDs
-  private static EMAPS_ZONE_MAP: Record<string, string> = {
-    // AWS
-    'us-east-1': 'US-MIDA-PJM',    // N. Virginia → PJM
-    'us-east-2': 'US-MIDA-PJM',    // Ohio → PJM
-    'us-west-1': 'US-CAL-CISO',    // N. California → CAISO
-    'us-west-2': 'US-NW-BPAT',     // Oregon → BPA
-    'eu-west-1': 'IE',             // Ireland
-    'eu-west-2': 'GB',             // London
-    'eu-central-1': 'DE',          // Frankfurt
-    'ap-southeast-1': 'SG',        // Singapore
-    'ap-northeast-1': 'JP-TK',     // Tokyo
-    'ap-south-1': 'IN-WE',         // Mumbai
-    'ca-central-1': 'CA-ON',       // Canada Central
-    'sa-east-1': 'BR-CS',          // São Paulo
-    // GCP
-    'us-central1': 'US-MIDW-MISO', // Iowa → MISO
-    'us-east4': 'US-MIDA-PJM',     // N. Virginia → PJM
-    'us-west1': 'US-NW-BPAT',      // Oregon → BPA
-    'europe-west1': 'BE',          // Belgium
-    'europe-west2': 'GB',          // London
-    // Azure
-    'eastus': 'US-MIDA-PJM',       // Virginia → PJM
-    'eastus2': 'US-MIDA-PJM',      // Virginia → PJM
-    'westus2': 'US-NW-BPAT',       // Washington → BPA
-    'centralus': 'US-MIDW-MISO',   // Iowa → MISO
-    'southcentralus': 'US-TEX-ERCO', // Texas → ERCOT
-    'uksouth': 'GB',               // UK South
-    'northeurope': 'IE',           // Ireland
-    'westeurope': 'NL',            // Netherlands
-  }
-
-  /**
-   * Get Electricity Maps signal (validation/intelligence only)
-   */
-  private async getElectricityMapsSignal(region: string, timestamp: Date): Promise<ProviderSignal | null> {
-    try {
-      const zone = ProviderRouter.EMAPS_ZONE_MAP[region] ?? region
-      const intensity = await electricityMaps.getCarbonIntensity(zone)
-      if (intensity) {
-        return {
-          carbonIntensity: intensity.carbonIntensity,
-          isForecast: false,
-          source: 'electricity_maps',
-          timestamp: (intensity as any).date || new Date().toISOString(),
-          estimatedFlag: (intensity as any).estimated ?? false,
-          syntheticFlag: false,
-          confidence: 0.7,
-          metadata: {
-            signalType: 'current_intensity',
-            zone: intensity.zone,
-            zoneName: intensity.zone || 'Unknown'
-          }
-        }
-      }
-    } catch (error) {
-      console.warn(`Electricity Maps signal failed for ${region}:`, error)
     }
 
     return null
@@ -574,50 +472,6 @@ export class ProviderRouter {
     } catch (error) {
       console.warn(`GridStatus fuel-mix CI failed for ${region}/${ba}:`, error)
       return null
-    }
-  }
-
-  /**
-   * Blend provider signals using confidence weights
-   */
-  private blendSignals(signals: WeightedSignal[]): {
-    carbonIntensity: number
-    isForecast: boolean
-    provenanceSource: string
-  } {
-    if (signals.length === 0) {
-      return {
-        carbonIntensity: 0,
-        isForecast: false,
-        provenanceSource: 'NO_SIGNAL'
-      }
-    }
-
-    const totalWeight = signals.reduce((sum, s) => sum + s.weight, 0)
-    if (totalWeight === 0) {
-      return {
-        carbonIntensity: signals[0].provider.carbonIntensity,
-        isForecast: signals[0].provider.isForecast,
-        provenanceSource: signals[0].provider.source.toUpperCase()
-      }
-    }
-
-    const blendedIntensity =
-      signals.reduce((sum, s) => sum + s.provider.carbonIntensity * s.weight, 0) / totalWeight
-
-    const forecastWeight = signals.reduce(
-      (sum, s) => sum + (s.provider.isForecast ? s.weight : 0),
-      0
-    )
-
-    const provenanceSource = signals
-      .map((s) => `${s.provider.source.toUpperCase()}_${Math.round((s.weight / totalWeight) * 100)}%`)
-      .join('::')
-
-    return {
-      carbonIntensity: blendedIntensity,
-      isForecast: forecastWeight / totalWeight > 0.4,
-      provenanceSource
     }
   }
 
