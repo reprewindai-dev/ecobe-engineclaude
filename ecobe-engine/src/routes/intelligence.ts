@@ -259,9 +259,9 @@ router.post('/best-window', async (req, res) => {
     const forecasts = await prisma.carbonForecast.findMany({
       where: {
         region: targetRegion,
-        forecastFor: { gte: new Date(), lte: new Date(Date.now() + lookAheadHours * 3600000) },
+        forecastTime: { gte: new Date(), lte: new Date(Date.now() + lookAheadHours * 3600000) },
       },
-      orderBy: { forecastFor: 'asc' },
+      orderBy: { forecastTime: 'asc' },
     })
 
     if (forecasts.length === 0) {
@@ -307,8 +307,8 @@ router.post('/best-window', async (req, res) => {
 
     // Use real forecasts
     const windows = forecasts.map((f: any) => ({
-      startTime: f.forecastFor.toISOString(),
-      endTime: new Date(f.forecastFor.getTime() + (f.horizonMinutes ?? 60) * 60000).toISOString(),
+      startTime: f.forecastTime.toISOString(),
+      endTime: new Date(f.forecastTime.getTime() + (f.horizonMinutes ?? 60) * 60000).toISOString(),
       predictedIntensity: f.predictedIntensity,
       confidence: f.confidence ?? 0.7,
       source: f.model ?? 'forecast_model',
