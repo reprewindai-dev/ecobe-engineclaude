@@ -51,7 +51,7 @@ async function publishSchedule(job: IntelligenceJobDefinition, destination: stri
       url: destination,
       body: { job: job.name },
       cron: job.cron,
-      deduplicationId: `intelligence:${job.name}`,
+      deduplicationId: `intelligence-${job.name}`,
     })
     await recordIntegrationSuccess('QSTASH', { statusCode: 200, latencyMs: Date.now() - started })
   } catch (error: any) {
