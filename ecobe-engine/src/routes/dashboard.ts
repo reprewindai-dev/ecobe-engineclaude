@@ -11,12 +11,7 @@ import {
 } from 'date-fns'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/db'
-<<<<<<< HEAD
-import { getIntegrationMetric, computeIntegrationSuccessRate } from '../lib/integration-metrics'
-=======
-import { providerRouter } from '../lib/carbon/provider-router'
 import { getIntegrationMetricsSummary, computeIntegrationSuccessRate } from '../lib/integration-metrics'
->>>>>>> dd7ae528c524fe9cc199aee8f1e7ec21ca1e97bb
 import { getForecastRefreshSummary, getLastForecastRefreshState } from '../lib/forecast-refresh'
 import { getProviderFreshness, getCapacityOverview } from '../lib/routing'
 
@@ -397,18 +392,6 @@ router.get('/metrics', async (req, res) => {
 
     const co2AvoidedPer1kRequestsG = totalRequests > 0 ? (co2SavedG / totalRequests) * 1000 : 0
 
-<<<<<<< HEAD
-    const wattTimeMetric = integrationMetric
-      ? {
-          successRate: computeIntegrationSuccessRate(integrationMetric) ?? null,
-          successCount: integrationMetric.successCount,
-          failureCount: integrationMetric.failureCount,
-          lastSuccessAt: integrationMetric.lastSuccessAt ?? null,
-          lastFailureAt: integrationMetric.lastFailureAt ?? null,
-          lastError: integrationMetric.lastError ?? null,
-        }
-      : null
-=======
     const typedIntegrationMetrics = integrationMetrics as IntegrationMetricRecord[]
 
     const providerMetrics = typedIntegrationMetrics.filter((metric: IntegrationMetricRecord) =>
@@ -444,7 +427,6 @@ router.get('/metrics', async (req, res) => {
               .map((metric: IntegrationMetricRecord) => metric.source),
           }
         : null
->>>>>>> dd7ae528c524fe9cc199aee8f1e7ec21ca1e97bb
 
     const forecastRefresh = {
       ...refreshSummary,
@@ -472,12 +454,7 @@ router.get('/metrics', async (req, res) => {
       topChosenRegion,
       p95LatencyDeltaMs,
       dataFreshnessMaxSeconds,
-<<<<<<< HEAD
-      wattTimeSuccessRate: wattTimeMetric?.successRate ?? null,
-      wattTime: wattTimeMetric,
-=======
       providerSignals: providerSignalsMetric,
->>>>>>> dd7ae528c524fe9cc199aee8f1e7ec21ca1e97bb
       forecastRefresh,
     })
   } catch (error: any) {
