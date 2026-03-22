@@ -1,7 +1,6 @@
 import { prisma } from './db'
 import { redis } from './redis'
-import { electricityMaps } from './electricity-maps'
-import { providerRouter } from './carbon/provider-router'
+import { fingard } from '../services/fingard-control'
 import { GridSignalCache } from './grid-signals/grid-signal-cache'
 import { GridSignalAudit } from './grid-signals/grid-signal-audit'
 import { wattTime } from './watttime'
@@ -71,13 +70,14 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
   const normalizedLatency = latencyWeight / totalWeight
   const normalizedCost = costWeight / totalWeight
 
-  // Get routing signals for all regions from ProviderRouter
+  // Get routing signals for all regions from Fingard control layer
   const regionSignals = new Map<string, any>()
   const regionData = await Promise.all(
     preferredRegions.map(async (region) => {
       try {
-        // Get routing signal from provider router (uses WattTime + Electricity Maps)
-        const signal = await providerRouter.getRoutingSignal(region, new Date())
+        // Get routing signal from Fingard (uses locked provider hierarchy)
+        const fingardDecision = await fingard.getNormalizedSignal(region, new Date())
+        const signal = fingardDecision.signal
         regionSignals.set(region, signal)
 
         return {
@@ -205,13 +205,21 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
   // Calculate worst intensity for delta
   const worstIntensity = Math.max(...scored.map(r => r.carbonIntensity))
 
-  // Determine quality tier — use providerRouter.validateSignalQuality when available,
-  // otherwise fall back to confidence-based derivation
+  // Determine quality tier based on Fingard signal confidence
   let qualityTier: 'high' | 'medium' | 'low' = 'low'
   if (bestSignal) {
     try {
-      const validation = await providerRouter.validateSignalQuality(bestSignal)
-      qualityTier = validation.qualityTier
+      // Use Fingard confidence and trust level for quality assessment
+      const confidence = bestSignal.confidence || 0.5
+      const trustLevel = bestSignal.provenance?.trustLevel || 'medium'
+      
+      if (trustLevel === 'high' && confidence >= 0.8) {
+        qualityTier = 'high'
+      } else if (trustLevel !== 'low' && confidence >= 0.6) {
+        qualityTier = 'medium'
+      } else {
+        qualityTier = 'low'
+      }
     } catch {
       // Fallback: derive from confidence directly
       qualityTier = bestSignal.confidence >= 0.8 ? 'high' : bestSignal.confidence >= 0.5 ? 'medium' : 'low'
@@ -245,8 +253,6 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
 
   // Record audit trail (with retry — governance-critical data)
   if (bestSignal) {
-    retryAsync(() => providerRouter.recordSignalProvenance(bestSignal, decisionFrameId), 'signal-provenance')
-
     // Record grid signal audit (with retry)
     retryAsync(() => GridSignalAudit.recordRoutingDecision(
       decisionFrameId,

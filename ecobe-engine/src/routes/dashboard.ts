@@ -11,7 +11,12 @@ import {
 } from 'date-fns'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/db'
+<<<<<<< HEAD
 import { getIntegrationMetric, computeIntegrationSuccessRate } from '../lib/integration-metrics'
+=======
+import { providerRouter } from '../lib/carbon/provider-router'
+import { getIntegrationMetricsSummary, computeIntegrationSuccessRate } from '../lib/integration-metrics'
+>>>>>>> dd7ae528c524fe9cc199aee8f1e7ec21ca1e97bb
 import { getForecastRefreshSummary, getLastForecastRefreshState } from '../lib/forecast-refresh'
 import { getProviderFreshness, getCapacityOverview } from '../lib/routing'
 
@@ -91,6 +96,17 @@ interface BreakdownRow {
   regionMatchRate?: number
 }
 
+type IntegrationMetricRecord = {
+  source: string
+  successCount: number
+  failureCount: number
+  lastSuccessAt: Date | null
+  lastFailureAt: Date | null
+  lastLatencyMs: number | null
+  lastError: string | null
+  alertActive: boolean
+}
+
 const safeAvg = (values: (number | null)[]): number | null => {
   const filtered = values.filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
   if (filtered.length === 0) return null
@@ -101,6 +117,22 @@ const safeAvg = (values: (number | null)[]): number | null => {
 const rate = (numerator: number, denominator: number): number => {
   if (!denominator) return 0
   return Number((numerator / denominator).toFixed(4))
+}
+
+const LIVE_SIGNAL_SOURCES = [
+  'WATTTIME',
+  'GRIDSTATUS',
+  'EIA_930',
+  'EMBER',
+  'GB_CARBON',
+  'DK_CARBON',
+  'FI_CARBON',
+] as const
+
+const isoLatest = (...values: Array<Date | null | undefined>) => {
+  const valid = values.filter((value): value is Date => value instanceof Date)
+  if (valid.length === 0) return null
+  return new Date(Math.max(...valid.map((value) => value.getTime()))).toISOString()
 }
 
 const buildInsightMessages = (
@@ -298,15 +330,15 @@ router.get('/metrics', async (req, res) => {
       take: 1,
     })
 
-    const integrationMetricPromise = getIntegrationMetric('ELECTRICITY_MAPS')
+    const integrationMetricsPromise = getIntegrationMetricsSummary()
     const refreshSummaryPromise = getForecastRefreshSummary(windowHours)
     const refreshStatePromise = getLastForecastRefreshState()
 
-    const [decisions, topChosenRegionAgg, integrationMetric, refreshSummary, refreshState] =
+    const [decisions, topChosenRegionAgg, integrationMetrics, refreshSummary, refreshState] =
       await Promise.all([
         decisionsPromise,
         topChosenRegionPromise,
-        integrationMetricPromise,
+        integrationMetricsPromise,
         refreshSummaryPromise,
         refreshStatePromise,
       ])
@@ -365,6 +397,7 @@ router.get('/metrics', async (req, res) => {
 
     const co2AvoidedPer1kRequestsG = totalRequests > 0 ? (co2SavedG / totalRequests) * 1000 : 0
 
+<<<<<<< HEAD
     const wattTimeMetric = integrationMetric
       ? {
           successRate: computeIntegrationSuccessRate(integrationMetric) ?? null,
@@ -375,6 +408,43 @@ router.get('/metrics', async (req, res) => {
           lastError: integrationMetric.lastError ?? null,
         }
       : null
+=======
+    const typedIntegrationMetrics = integrationMetrics as IntegrationMetricRecord[]
+
+    const providerMetrics = typedIntegrationMetrics.filter((metric: IntegrationMetricRecord) =>
+      LIVE_SIGNAL_SOURCES.includes(metric.source as (typeof LIVE_SIGNAL_SOURCES)[number])
+    )
+
+    const successCount = providerMetrics.reduce(
+      (sum: number, metric: any) => sum + metric.successCount,
+      0
+    )
+    const failureCount = providerMetrics.reduce(
+      (sum: number, metric: any) => sum + metric.failureCount,
+      0
+    )
+    const providerSignalsMetric =
+      providerMetrics.length > 0
+        ? {
+            successRate:
+              successCount + failureCount > 0
+                ? Number((successCount / (successCount + failureCount)).toFixed(4))
+                : null,
+            successCount,
+            failureCount,
+            lastSuccessAt: isoLatest(...providerMetrics.map((metric: IntegrationMetricRecord) => metric.lastSuccessAt)),
+            lastFailureAt: isoLatest(...providerMetrics.map((metric: IntegrationMetricRecord) => metric.lastFailureAt)),
+            lastError:
+              providerMetrics.find((metric: IntegrationMetricRecord) => metric.lastError)?.lastError ?? null,
+            activeSources: providerMetrics
+              .filter((metric: IntegrationMetricRecord) => (computeIntegrationSuccessRate(metric) ?? 0) >= 0.8)
+              .map((metric: IntegrationMetricRecord) => metric.source),
+            degradedSources: providerMetrics
+              .filter((metric: IntegrationMetricRecord) => (computeIntegrationSuccessRate(metric) ?? 0) < 0.8)
+              .map((metric: IntegrationMetricRecord) => metric.source),
+          }
+        : null
+>>>>>>> dd7ae528c524fe9cc199aee8f1e7ec21ca1e97bb
 
     const forecastRefresh = {
       ...refreshSummary,
@@ -402,8 +472,12 @@ router.get('/metrics', async (req, res) => {
       topChosenRegion,
       p95LatencyDeltaMs,
       dataFreshnessMaxSeconds,
+<<<<<<< HEAD
       wattTimeSuccessRate: wattTimeMetric?.successRate ?? null,
       wattTime: wattTimeMetric,
+=======
+      providerSignals: providerSignalsMetric,
+>>>>>>> dd7ae528c524fe9cc199aee8f1e7ec21ca1e97bb
       forecastRefresh,
     })
   } catch (error: any) {
@@ -999,6 +1073,43 @@ router.get('/savings', async (req, res) => {
 })
 
 router.get('/methodology/providers', async (_req, res) => {
+  try {
+    const metrics = (await getIntegrationMetricsSummary()) as IntegrationMetricRecord[]
+    const bySource = new Map<string, IntegrationMetricRecord>(
+      metrics.map((metric: IntegrationMetricRecord) => [metric.source, metric])
+    )
+
+    const providers = [
+      ['WattTime', 'WATTTIME'],
+      ['GridStatus EIA-930', 'GRIDSTATUS'],
+      ['Ember', 'EMBER'],
+      ['GB Carbon Intensity', 'GB_CARBON'],
+      ['DK Carbon', 'DK_CARBON'],
+      ['FI Carbon', 'FI_CARBON'],
+    ].map(([name, source]) => {
+      const metric = bySource.get(source)
+      const successRate = metric ? computeIntegrationSuccessRate(metric) : null
+
+      return {
+        name,
+        status:
+          metric == null
+            ? 'offline'
+            : metric.alertActive || (successRate ?? 0) < 0.8
+              ? 'degraded'
+              : 'healthy',
+        latencyMs: metric?.lastLatencyMs != null ? Math.round(metric.lastLatencyMs) : null,
+        lastSuccessAt: metric?.lastSuccessAt?.toISOString() ?? null,
+        disagreementPct: null,
+      }
+    })
+
+    return res.json({ providers })
+  } catch (error) {
+    console.error('Dashboard methodology providers error:', error)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+
   res.json({
     providers: [
       {

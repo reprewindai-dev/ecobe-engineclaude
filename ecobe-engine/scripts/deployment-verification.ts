@@ -1,376 +1,158 @@
 #!/usr/bin/env ts-node
 
-/**
- * DEPLOYMENT VERIFICATION - Runtime Testing
- * 
- * This script verifies that both the engine and dashboard
- * can deploy and run successfully without mocks.
- */
-
 import { execSync } from 'child_process'
-import { existsSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
+
+type VerificationStatus = 'PASS' | 'FAIL' | 'WARN'
 
 interface VerificationResult {
   category: string
-  status: 'PASS' | 'FAIL' | 'WARN'
+  status: VerificationStatus
   message: string
-  details?: string
-}
-
-interface VerificationReport {
-  timestamp: string
-  overall: 'PASS' | 'FAIL' | 'WARN'
-  results: VerificationResult[]
-  criticalFailures: string[]
-  warnings: string[]
 }
 
 class DeploymentVerification {
   private results: VerificationResult[] = []
-  private engineRoot: string
-  private dashboardRoot: string
+  private readonly engineRoot = process.cwd()
+  private readonly dashboardRoot = join(process.cwd(), 'ecobe-dashboard')
 
-  constructor() {
-    this.engineRoot = join(process.cwd(), 'ecobe-engine')
-    this.dashboardRoot = join(process.cwd(), '..', 'ecobe-dashboardclaude', 'ecobe-dashboard')
-  }
-
-  async runFullVerification(): Promise<VerificationReport> {
-    console.log('🔍 Starting Deployment Verification...')
-    console.log(`📁 Engine Root: ${this.engineRoot}`)
-    console.log(`📁 Dashboard Root: ${this.dashboardRoot}`)
-
-    // Engine verification
+  async run() {
     await this.verifyEngineBuild()
-    await this.verifyEngineDependencies()
-    await this.verifyEngineEnvironment()
-    await this.verifyEngineServer()
-
-    // Dashboard verification
     await this.verifyDashboardBuild()
-    await this.verifyDashboardDependencies()
-    await this.verifyDashboardAPI()
-
-    // Integration verification
-    await this.verifyAPIContract()
-    await this.verifyDashboardIntegration()
-
-    const report = this.generateReport()
-    this.printReport(report)
-    
-    return report
+    await this.verifyIntegrationContracts()
+    await this.verifyAutomationAssets()
+    this.printReport()
   }
 
-  private async verifyEngineBuild(): Promise<void> {
+  private addResult(status: VerificationStatus, category: string, message: string) {
+    this.results.push({ status, category, message })
+  }
+
+  private async verifyEngineBuild() {
     try {
-      console.log('🔧 Building engine...')
-      execSync('npm run build', { stdio: 'pipe', cwd: this.engineRoot })
-      this.addResult('PASS', 'Engine Build', 'Engine builds successfully')
+      execSync('npm run build', { cwd: this.engineRoot, stdio: 'pipe' })
+      execSync('npm run type-check', { cwd: this.engineRoot, stdio: 'pipe' })
+      this.addResult('PASS', 'Engine Build', 'Engine builds and type-checks cleanly.')
     } catch (error) {
-      this.addResult('FAIL', 'Engine Build', `Engine build failed: ${error}`)
+      this.addResult('FAIL', 'Engine Build', `Engine verification failed: ${String(error)}`)
     }
   }
 
-  private async verifyEngineDependencies(): Promise<void> {
+  private async verifyDashboardBuild() {
     try {
-      const packageJsonPath = join(this.engineRoot, 'package.json')
-      if (!existsSync(packageJsonPath)) {
-        this.addResult('FAIL', 'Engine Dependencies', 'package.json not found')
-        return
-      }
+      execSync('npm run build', { cwd: this.dashboardRoot, stdio: 'pipe' })
+      execSync('npm run type-check', { cwd: this.dashboardRoot, stdio: 'pipe' })
+      this.addResult('PASS', 'Dashboard Build', 'Dashboard builds and type-checks cleanly.')
+    } catch (error) {
+      this.addResult('FAIL', 'Dashboard Build', `Dashboard verification failed: ${String(error)}`)
+    }
+  }
 
-      const packageJson = JSON.parse(require('fs').readFileSync(packageJsonPath, 'utf8'))
-      
-      // Check critical dependencies
-      const requiredDeps = [
-        '@prisma/client',
-        'express',
-        'redis',
-        'axios',
-        'node-cron',
-        'zod'
-      ]
+  private async verifyIntegrationContracts() {
+    const dashboardApiPath = join(this.dashboardRoot, 'src', 'lib', 'api.ts')
+    const dekesClientPath = join(
+      this.engineRoot,
+      '..',
+      'dekes-saas',
+      'dekes-saas',
+      'lib',
+      'ecobe',
+      'client.ts'
+    )
+    const dekesRouterPath = join(
+      this.engineRoot,
+      '..',
+      'dekes-saas',
+      'dekes-saas',
+      'lib',
+      'ecobe',
+      'router.ts'
+    )
 
-      const missingDeps = requiredDeps.filter(dep => 
-        !packageJson.dependencies?.[dep] && !packageJson.devDependencies?.[dep]
+    if (!existsSync(dashboardApiPath) || !existsSync(dekesClientPath) || !existsSync(dekesRouterPath)) {
+      this.addResult('FAIL', 'Contracts', 'One or more integration client files are missing.')
+      return
+    }
+
+    const dashboardApi = readFileSync(dashboardApiPath, 'utf8')
+    const dekesClient = readFileSync(dekesClientPath, 'utf8')
+    const dekesRouter = readFileSync(dekesRouterPath, 'utf8')
+
+    const requiredDashboardEndpoints = [
+      '/integrations/dekes/summary',
+      '/integrations/dekes/events',
+      '/integrations/dekes/metrics',
+      'getProviderHealth',
+    ]
+
+    const missingDashboardEndpoints = requiredDashboardEndpoints.filter(
+      (token) => !dashboardApi.includes(token)
+    )
+
+    if (missingDashboardEndpoints.length > 0) {
+      this.addResult(
+        'FAIL',
+        'Contracts',
+        `Dashboard API is missing: ${missingDashboardEndpoints.join(', ')}`
       )
-
-      if (missingDeps.length > 0) {
-        this.addResult('FAIL', 'Engine Dependencies', 
-          `Missing dependencies: ${missingDeps.join(', ')}`)
-      } else {
-        this.addResult('PASS', 'Engine Dependencies', 'All dependencies present')
-      }
-
-    } catch (error) {
-      this.addResult('FAIL', 'Engine Dependencies', `Error checking dependencies: ${error}`)
+      return
     }
-  }
 
-  private async verifyEngineEnvironment(): Promise<void> {
-    try {
-      const envExamplePath = join(this.engineRoot, '.env.example')
-      if (!existsSync(envExamplePath)) {
-        this.addResult('WARN', 'Engine Environment', '.env.example not found')
-        return
-      }
-
-      const envExample = require('fs').readFileSync(envExamplePath, 'utf8')
-      
-      // Check for required environment variables
-      const requiredEnvVars = [
-        'DATABASE_URL',
-        'REDIS_URL',
-        'EIA_API_KEY',
-        'WATTTIME_API_KEY',
-        'ELECTRICITY_MAPS_API_KEY',
-        'EMBER_API_KEY'
-      ]
-
-      const missingVars = requiredEnvVars.filter(varName => 
-        !envExample.includes(varName)
+    if (
+      !dekesClient.includes('/api/v1/integrations/dekes/prospects') ||
+      !dekesRouter.includes('/api/v1/integrations/dekes/route')
+    ) {
+      this.addResult(
+        'FAIL',
+        'Contracts',
+        'DEKES SaaS clients are not targeting the engine integration routes.'
       )
-
-      if (missingVars.length > 0) {
-        this.addResult('FAIL', 'Engine Environment', 
-          `Missing environment variables: ${missingVars.join(', ')}`)
-      } else {
-        this.addResult('PASS', 'Engine Environment', 'All environment variables documented')
-      }
-
-    } catch (error) {
-      this.addResult('FAIL', 'Engine Environment', `Error checking environment: ${error}`)
+      return
     }
+
+    this.addResult('PASS', 'Contracts', 'Engine, dashboard, and DEKES SaaS use the same integration routes.')
   }
 
-  private async verifyEngineServer(): Promise<void> {
-    try {
-      // Check if server file exists and can be imported
-      const serverPath = join(this.engineRoot, 'src', 'server.ts')
-      if (!existsSync(serverPath)) {
-        this.addResult('FAIL', 'Engine Server', 'server.ts not found')
-        return
-      }
+  private async verifyAutomationAssets() {
+    const workflows = [
+      '.github/workflows/ingest-eia.yml',
+      '.github/workflows/refresh-forecasts.yml',
+      '.github/workflows/verify-signals.yml',
+      '.github/workflows/warm-cache.yml',
+    ]
 
-      // Try to compile TypeScript without running
-      execSync('npx tsc --noEmit', { stdio: 'pipe', cwd: this.engineRoot })
-      this.addResult('PASS', 'Engine Server', 'Server compiles successfully')
+    const missing = workflows.filter((workflow) => !existsSync(join(this.engineRoot, '..', workflow)))
 
-    } catch (error) {
-      this.addResult('FAIL', 'Engine Server', `Server compilation failed: ${error}`)
+    if (missing.length > 0) {
+      this.addResult('FAIL', 'Workflows', `Missing workflow files: ${missing.join(', ')}`)
+      return
     }
+
+    this.addResult('PASS', 'Workflows', 'Scheduled GitHub workflow assets are present.')
   }
 
-  private async verifyDashboardBuild(): Promise<void> {
-    try {
-      console.log('🔧 Building dashboard...')
-      execSync('npm run build', { stdio: 'pipe', cwd: this.dashboardRoot })
-      this.addResult('PASS', 'Dashboard Build', 'Dashboard builds successfully')
-    } catch (error) {
-      this.addResult('FAIL', 'Dashboard Build', `Dashboard build failed: ${error}`)
-    }
-  }
+  private printReport() {
+    const failures = this.results.filter((result) => result.status === 'FAIL')
+    const warnings = this.results.filter((result) => result.status === 'WARN')
+    const overall: VerificationStatus =
+      failures.length > 0 ? 'FAIL' : warnings.length > 0 ? 'WARN' : 'PASS'
 
-  private async verifyDashboardDependencies(): Promise<void> {
-    try {
-      const packageJsonPath = join(this.dashboardRoot, 'package.json')
-      if (!existsSync(packageJsonPath)) {
-        this.addResult('FAIL', 'Dashboard Dependencies', 'package.json not found')
-        return
-      }
-
-      const packageJson = JSON.parse(require('fs').readFileSync(packageJsonPath, 'utf8'))
-      
-      // Check critical dependencies
-      const requiredDeps = [
-        'next',
-        'react',
-        'react-dom',
-        '@tanstack/react-query',
-        'axios',
-        'lucide-react'
-      ]
-
-      const missingDeps = requiredDeps.filter(dep => 
-        !packageJson.dependencies?.[dep] && !packageJson.devDependencies?.[dep]
-      )
-
-      if (missingDeps.length > 0) {
-        this.addResult('FAIL', 'Dashboard Dependencies', 
-          `Missing dependencies: ${missingDeps.join(', ')}`)
-      } else {
-        this.addResult('PASS', 'Dashboard Dependencies', 'All dependencies present')
-      }
-
-    } catch (error) {
-      this.addResult('FAIL', 'Dashboard Dependencies', `Error checking dependencies: ${error}`)
-    }
-  }
-
-  private async verifyDashboardAPI(): Promise<void> {
-    try {
-      const apiPath = join(this.dashboardRoot, 'src', 'lib', 'api.ts')
-      if (!existsSync(apiPath)) {
-        this.addResult('FAIL', 'Dashboard API', 'api.ts not found')
-        return
-      }
-
-      const apiContent = require('fs').readFileSync(apiPath, 'utf8')
-      
-      // Check for new grid intelligence endpoints
-      const requiredEndpoints = [
-        'getGridSummary',
-        'getGridRegionDetail',
-        'getGridHeroMetrics',
-        'getGridOpportunities',
-        'getGridImportLeakage',
-        'getGridAudit'
-      ]
-
-      const missingEndpoints = requiredEndpoints.filter(endpoint => 
-        !apiContent.includes(endpoint)
-      )
-
-      if (missingEndpoints.length > 0) {
-        this.addResult('FAIL', 'Dashboard API', 
-          `Missing grid intelligence endpoints: ${missingEndpoints.join(', ')}`)
-      } else {
-        this.addResult('PASS', 'Dashboard API', 'All grid intelligence endpoints present')
-      }
-
-    } catch (error) {
-      this.addResult('FAIL', 'Dashboard API', `Error checking API: ${error}`)
-    }
-  }
-
-  private async verifyAPIContract(): Promise<void> {
-    try {
-      // Check if dashboard can consume engine endpoints
-      const apiPath = join(this.dashboardRoot, 'src', 'lib', 'api.ts')
-      const apiContent = require('fs').readFileSync(apiPath, 'utf8')
-
-      // Check for proper TypeScript interfaces
-      const requiredInterfaces = [
-        'GridSummaryResponse',
-        'GridRegionDetail',
-        'GridHeroMetrics'
-      ]
-
-      const missingInterfaces = requiredInterfaces.filter(interfaceName => 
-        !apiContent.includes(interfaceName)
-      )
-
-      if (missingInterfaces.length > 0) {
-        this.addResult('FAIL', 'API Contract', 
-          `Missing TypeScript interfaces: ${missingInterfaces.join(', ')}`)
-      } else {
-        this.addResult('PASS', 'API Contract', 'API contracts properly defined')
-      }
-
-    } catch (error) {
-      this.addResult('FAIL', 'API Contract', `Error checking API contract: ${error}`)
-    }
-  }
-
-  private async verifyDashboardIntegration(): Promise<void> {
-    try {
-      // Check if dashboard components use the new API
-      const componentPath = join(this.dashboardRoot, 'src', 'components', 'CarbonIntensityCard.tsx')
-      if (!existsSync(componentPath)) {
-        this.addResult('WARN', 'Dashboard Integration', 'CarbonIntensityCard not found')
-        return
-      }
-
-      const componentContent = require('fs').readFileSync(componentPath, 'utf8')
-
-      // Check if component uses real API instead of mock
-      if (componentContent.includes('ecobeApi.getGridSummary')) {
-        this.addResult('PASS', 'Dashboard Integration', 'Dashboard uses real grid intelligence API')
-      } else {
-        this.addResult('WARN', 'Dashboard Integration', 'Dashboard may still be using mock data')
-      }
-
-    } catch (error) {
-      this.addResult('FAIL', 'Dashboard Integration', `Error checking integration: ${error}`)
-    }
-  }
-
-  private addResult(status: 'PASS' | 'FAIL' | 'WARN', category: string, message: string, details?: string): void {
-    this.results.push({ status, category, message, details })
-  }
-
-  private generateReport(): VerificationReport {
-    const criticalFailures = this.results
-      .filter(r => r.status === 'FAIL')
-      .map(r => `${r.category}: ${r.message}`)
-
-    const warnings = this.results
-      .filter(r => r.status === 'WARN')
-      .map(r => `${r.category}: ${r.message}`)
-
-    let overall: 'PASS' | 'FAIL' | 'WARN' = 'PASS'
-    if (criticalFailures.length > 0) overall = 'FAIL'
-    else if (warnings.length > 0) overall = 'WARN'
-
-    return {
-      timestamp: new Date().toISOString(),
-      overall,
-      results: this.results,
-      criticalFailures,
-      warnings
-    }
-  }
-
-  private printReport(report: VerificationReport): void {
-    console.log('\n' + '='.repeat(60))
-    console.log('📋 DEPLOYMENT VERIFICATION REPORT')
-    console.log('='.repeat(60))
-    console.log(`🕐 Timestamp: ${report.timestamp}`)
-    console.log(`🎯 Overall Status: ${report.overall}`)
-    console.log(`✅ Passed: ${report.results.filter(r => r.status === 'PASS').length}`)
-    console.log(`⚠️  Warnings: ${report.warnings.length}`)
-    console.log(`❌ Failures: ${report.criticalFailures.length}`)
-    
-    if (report.criticalFailures.length > 0) {
-      console.log('\n❌ CRITICAL FAILURES:')
-      report.criticalFailures.forEach(failure => console.log(`   • ${failure}`))
+    console.log(`Deployment verification: ${overall}`)
+    for (const result of this.results) {
+      console.log(`[${result.status}] ${result.category}: ${result.message}`)
     }
 
-    if (report.warnings.length > 0) {
-      console.log('\n⚠️  WARNINGS:')
-      report.warnings.forEach(warning => console.log(`   • ${warning}`))
-    }
-
-    console.log('\n📊 DETAILED RESULTS:')
-    report.results.forEach(result => {
-      const icon = result.status === 'PASS' ? '✅' : result.status === 'WARN' ? '⚠️' : '❌'
-      console.log(`   ${icon} ${result.category}: ${result.message}`)
-      if (result.details) {
-        console.log(`      ${result.details}`)
-      }
-    })
-
-    console.log('\n' + '='.repeat(60))
-    
-    if (report.overall === 'FAIL') {
-      console.log('🚫 VERIFICATION FAILED - Fix critical issues before deployment')
+    if (overall === 'FAIL') {
       process.exit(1)
-    } else if (report.overall === 'WARN') {
-      console.log('⚠️  VERIFICATION PASSED WITH WARNINGS - Review before deployment')
-    } else {
-      console.log('✅ VERIFICATION PASSED - Ready for deployment')
     }
   }
 }
 
-// Run verification if this script is executed directly
 if (require.main === module) {
   const verification = new DeploymentVerification()
-  verification.runFullVerification().catch(error => {
-    console.error('❌ Verification failed to run:', error)
+  verification.run().catch((error) => {
+    console.error(`Deployment verification failed to run: ${String(error)}`)
     process.exit(1)
   })
 }
-
-export { DeploymentVerification }

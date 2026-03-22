@@ -169,14 +169,15 @@ export interface DashboardMetrics {
   topChosenRegion: string | null
   p95LatencyDeltaMs: number | null
   dataFreshnessMaxSeconds: number | null
-  electricityMapsSuccessRate: number | null
-  electricityMaps: {
+  providerSignals: {
     successRate: number | null
     successCount: number
     failureCount: number
     lastSuccessAt: string | null
     lastFailureAt: string | null
     lastError: string | null
+    activeSources?: string[]
+    degradedSources?: string[]
   } | null
   forecastRefresh: {
     lastRun: {

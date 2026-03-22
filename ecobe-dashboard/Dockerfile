@@ -10,11 +10,14 @@ FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# ECOBE_API_URL must be set at build time for next.config.js rewrites
-ARG ECOBE_API_URL="https://ecobe-engineclaude-production.up.railway.app"
+# ECOBE_API_URL: Server-side rewrite URL (used by next.config.js rewrites)
+# Provide at build time for deployment. Default to localhost for development.
+ARG ECOBE_API_URL="http://localhost:3000"
 ENV ECOBE_API_URL=${ECOBE_API_URL}
-# NEXT_PUBLIC_ prefix makes this available to client-side code (baked at build time)
-ARG NEXT_PUBLIC_ECOBE_API_URL="https://ecobe-engineclaude-production.up.railway.app/api/v1"
+# NEXT_PUBLIC_ECOBE_API_URL: Client-side API URL (baked into build)
+# Default to relative path to use server-side rewrite proxy.
+# Override with full URL for direct client-to-engine calls if needed.
+ARG NEXT_PUBLIC_ECOBE_API_URL="/api/ecobe"
 ENV NEXT_PUBLIC_ECOBE_API_URL=${NEXT_PUBLIC_ECOBE_API_URL}
 RUN npm run build
 
@@ -31,6 +34,9 @@ COPY --from=builder /app/.next/static ./.next/static
 
 RUN chown -R nextjs:nodejs /app
 USER nextjs
+
+# Next.js server listens on port 3000 by default
+EXPOSE 3000
 
 ENV HOSTNAME="0.0.0.0"
 

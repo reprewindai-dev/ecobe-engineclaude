@@ -1,4 +1,5 @@
 import express from 'express'
+import cors from 'cors'
 
 import { env } from './config/env'
 import { prisma } from './lib/db'
@@ -16,6 +17,7 @@ import organizationsRoutes from './routes/organizations'
 import intelligenceRoutes from './routes/intelligence'
 import gridIntelligenceRoutes from './routes/intelligence/grid'
 import integrationsRoutes from './routes/integrations'
+<<<<<<< HEAD
 import systemRoutes from './routes/system'
 import dekesHandoffRoutes from './routes/dekes-handoff'
 import carbonLedgerRoutes from './routes/carbon-ledger'
@@ -26,6 +28,19 @@ function rawBodySaver(_req: express.Request, _res: express.Response, buf: Buffer
     rawReq.rawBody = buf.toString('utf8')
   }
 }
+=======
+import routeSimpleRoutes from './routes/route-simple'
+import routeTestRoutes from './routes/route-test'
+import simpleTestRoutes from './routes/simple-test'
+import healthRoutes from './routes/health'
+import metricsRoutes from './routes/metrics'
+import regionMappingRoutes from './routes/region-mapping'
+import patternsRoutes from './routes/patterns'
+import dksRoutes from './routes/dks'
+import testPostRoutes from './routes/test-post'
+import routeDebugRoutes from './routes/route-debug'
+import { env } from './config/env'
+>>>>>>> dd7ae528c524fe9cc199aee8f1e7ec21ca1e97bb
 
 function attachHealthRoutes(app: express.Express) {
   async function healthHandler(req: express.Request, res: express.Response) {
@@ -42,9 +57,25 @@ function attachHealthRoutes(app: express.Express) {
       const ok = redisOk
 
       res.status(ok ? 200 : 503).json({
+<<<<<<< HEAD
         status: ok ? 'healthy' : 'unhealthy',
         service: 'ECOBE Engine',
         version: '1.0.0',
+=======
+        status: ok ? 'ok' : 'degraded',
+        engine: 'online',
+        router: true,
+        fingrid: Boolean(env.FINGRID_API_KEY),
+        providers: {
+          watttime: Boolean(env.WATTTIME_USERNAME && env.WATTTIME_PASSWORD),
+          gridstatus: Boolean(env.GRIDSTATUS_API_KEY || env.EIA_API_KEY),
+          ember: Boolean(env.EMBER_API_KEY),
+          gbCarbon: true,
+          dkCarbon: true,
+          fiCarbon: Boolean(env.FINGRID_API_KEY),
+          static: true
+        },
+>>>>>>> dd7ae528c524fe9cc199aee8f1e7ec21ca1e97bb
         timestamp: new Date().toISOString(),
         checks: {
           database: true,
@@ -301,8 +332,14 @@ export function createApp() {
   const app = express()
 
   app.set('trust proxy', 1)
+<<<<<<< HEAD
   app.use(express.json({ limit: '1mb', verify: rawBodySaver }))
   app.use(express.urlencoded({ extended: true, limit: '1mb', verify: rawBodySaver }))
+=======
+  app.use(cors())
+  app.use(express.json({ limit: '1mb' }))
+  app.use(express.urlencoded({ extended: true, limit: '1mb' }))
+>>>>>>> dd7ae528c524fe9cc199aee8f1e7ec21ca1e97bb
 
   attachHealthRoutes(app)
   attachUiRoute(app)

@@ -2,11 +2,13 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/db'
 import { routeGreen } from '../lib/green-routing'
+import { env } from '../config/env'
 
 const router = Router()
 
 // ── Auth guard ─────────────────────────────────────────────────────────────────
-const DEKES_API_KEY = process.env.DEKES_API_KEY
+const DEKES_API_KEY =
+  env.DEKES_API_KEY || process.env.ECOBE_API_KEY || process.env.ECOBE_ENGINE_API_KEY
 
 function requireApiKey(req: any, res: any, next: any) {
   const auth = req.headers.authorization
