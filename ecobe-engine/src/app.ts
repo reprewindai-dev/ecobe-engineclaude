@@ -30,6 +30,7 @@ import patternsRoutes from './routes/patterns'
 import dksRoutes from './routes/dks'
 import testPostRoutes from './routes/test-post'
 import routeDebugRoutes from './routes/route-debug'
+import ciRoutes from './routes/ci'
 
 function rawBodySaver(_req: express.Request, _res: express.Response, buf: Buffer) {
   if (buf?.length) {
@@ -304,6 +305,19 @@ function attachApiRoutes(app: express.Express) {
   app.use('/api/v1', dekesHandoffRoutes)
   // Carbon Ledger — audit-grade accounting + reporting
   app.use('/api/v1/carbon-ledger', carbonLedgerRoutes)
+  // CI/CD green routing
+  app.use('/api/v1/ci', ciRoutes)
+  // Additional routes from remote merge
+  app.use('/api/v1/route-simple', routeSimpleRoutes)
+  app.use('/api/v1/route-test', routeTestRoutes)
+  app.use('/api/v1/simple-test', simpleTestRoutes)
+  app.use('/api/v1/health-ext', healthRoutes)
+  app.use('/api/v1/metrics', metricsRoutes)
+  app.use('/api/v1/region-mapping', regionMappingRoutes)
+  app.use('/api/v1/patterns', patternsRoutes)
+  app.use('/api/v1/dks', dksRoutes)
+  app.use('/api/v1/test-post', testPostRoutes)
+  app.use('/api/v1/route-debug', routeDebugRoutes)
 }
 
 function attachFallbackHandlers(app: express.Express) {
