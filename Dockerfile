@@ -35,6 +35,7 @@ COPY --from=builder /app/ecobe-engine/node_modules ./node_modules
 COPY --from=builder /app/ecobe-engine/package.json ./package.json
 COPY --from=builder /app/ecobe-engine/prisma ./prisma
 COPY --from=builder /app/ecobe-engine/prisma.config.ts ./prisma.config.ts
+COPY --from=builder /app/ecobe-engine/ecobe-engine/ecobe-engine/METHODOLOGY.md ./METHODOLOGY.md
 COPY --from=builder /app/ecobe-engine/node_modules/.prisma ./node_modules/.prisma
 
 RUN chown -R ecobe:nodejs /app

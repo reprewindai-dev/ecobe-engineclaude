@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { readFile } from 'fs/promises'
+import { access, readFile } from 'fs/promises'
 import path from 'path'
 import { env } from '../config/env'
 import { getIntegrationMetricsSummary, computeIntegrationSuccessRate } from '../lib/integration-metrics'
@@ -62,14 +62,23 @@ const PROVIDERS: ProviderConfig[] = [
 ]
 
 async function readMethodologyMarkdown() {
-  const methodologyPath = path.resolve(
-    process.cwd(),
-    'ecobe-engine',
-    'ecobe-engine',
-    'METHODOLOGY.md'
-  )
+  const candidatePaths = [
+    path.resolve(process.cwd(), 'METHODOLOGY.md'),
+    path.resolve(process.cwd(), 'ecobe-engine', 'ecobe-engine', 'METHODOLOGY.md'),
+    path.resolve(__dirname, '../../METHODOLOGY.md'),
+    path.resolve(__dirname, '../../ecobe-engine/ecobe-engine/METHODOLOGY.md'),
+  ]
 
-  return readFile(methodologyPath, 'utf8')
+  for (const candidatePath of candidatePaths) {
+    try {
+      await access(candidatePath)
+      return readFile(candidatePath, 'utf8')
+    } catch {
+      continue
+    }
+  }
+
+  throw new Error(`Methodology markdown not found in any known location: ${candidatePaths.join(', ')}`)
 }
 
 function getProviderStatus(metric?: {
