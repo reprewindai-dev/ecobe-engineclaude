@@ -104,30 +104,42 @@ export class EIAIngestionWorker {
 
   /**
    * Run the ingestion process
+   * Processes regions SEQUENTIALLY with delays to avoid rate limiting.
+   * If GridStatus fails for a region, falls back to direct EIA API.
    */
   private async runIngestion(): Promise<void> {
     const runStart = new Date()
     console.log(`Starting EIA-930 ingestion at ${runStart.toISOString()} [source: ${this.useGridStatus ? 'GridStatus.io' : 'EIA Direct'}]`)
 
     try {
-      // Get time window for ingestion (last 48 hours)
+      // Get time window for ingestion (last 6 hours for recurring, keeps request volume low)
       const endTime = new Date()
-      const startTime = new Date(endTime.getTime() - 48 * 60 * 60 * 1000)
+      const startTime = new Date(endTime.getTime() - 6 * 60 * 60 * 1000)
 
-      const results = await Promise.allSettled(
-        DEFAULT_REGIONS.map(config => this.ingestRegion(config, startTime, endTime))
-      )
-
-      // Log results
       let successCount = 0
       let failureCount = 0
+      let gridStatusFailed = false  // Track if GridStatus is failing this cycle
 
-      for (const result of results) {
-        if (result.status === 'fulfilled') {
+      // Process regions SEQUENTIALLY to avoid rate limiting
+      for (let i = 0; i < DEFAULT_REGIONS.length; i++) {
+        const config = DEFAULT_REGIONS[i]
+
+        // Add delay between regions (skip first)
+        if (i > 0) {
+          await new Promise(resolve => setTimeout(resolve, 3000))
+        }
+
+        try {
+          await this.ingestRegionWithFallback(config, startTime, endTime, gridStatusFailed)
           successCount++
-        } else {
+        } catch (error: any) {
           failureCount++
-          console.error('Region ingestion failed:', result.reason)
+          // If GridStatus returned 429/403, mark it as failed for remaining regions
+          if (error.message?.includes('429') || error.message?.includes('403') || error.message?.includes('Circuit breaker')) {
+            gridStatusFailed = true
+            console.warn(`GridStatus rate limited/blocked — switching to EIA direct for remaining regions`)
+          }
+          console.error(`Region ${config.region} ingestion failed:`, error.message || error)
         }
       }
 
@@ -151,7 +163,67 @@ export class EIAIngestionWorker {
   }
 
   /**
-   * Ingest data for a single region
+   * Ingest data for a single region with automatic fallback.
+   * If GridStatus fails (429/403/circuit breaker), falls back to direct EIA API.
+   */
+  private async ingestRegionWithFallback(
+    config: RegionConfig,
+    startTime: Date,
+    endTime: Date,
+    skipGridStatus: boolean = false
+  ): Promise<{
+    snapshotsProcessed: number
+    rawRecordsStored: number
+    featuresCalculated: number
+  }> {
+    // Try GridStatus first (unless already known to be failing this cycle)
+    if (this.useGridStatus && !skipGridStatus) {
+      try {
+        console.log(`Ingesting EIA-930 data for ${config.region} (${config.balancingAuthority}) [GridStatus]`)
+        const result = await this.ingestFromGridStatus(config, startTime, endTime)
+        // If we got data, return it
+        if (result.snapshotsProcessed > 0) {
+          return result
+        }
+        console.warn(`GridStatus returned 0 snapshots for ${config.region} — falling back to EIA direct`)
+      } catch (error: any) {
+        console.warn(`GridStatus failed for ${config.region}: ${error.message} — falling back to EIA direct`)
+        // Re-throw rate limit errors so the caller can skip GridStatus for remaining regions
+        if (error.message?.includes('429') || error.message?.includes('403') || error.message?.includes('Circuit breaker')) {
+          // Still try EIA direct below, but re-throw after
+          try {
+            return await this.tryDirectEia(config, startTime, endTime)
+          } catch (eiaError) {
+            // Throw the original GridStatus error to signal rate limiting
+            throw error
+          }
+        }
+      }
+    }
+
+    // Fallback: direct EIA API
+    return this.tryDirectEia(config, startTime, endTime)
+  }
+
+  /**
+   * Try direct EIA API with graceful handling of missing API key
+   */
+  private async tryDirectEia(
+    config: RegionConfig,
+    startTime: Date,
+    endTime: Date
+  ): Promise<{ snapshotsProcessed: number; rawRecordsStored: number; featuresCalculated: number }> {
+    if (!eia930.isAvailable) {
+      console.warn(`EIA direct API also unavailable (no EIA_API_KEY) — skipping ${config.region}`)
+      return { snapshotsProcessed: 0, rawRecordsStored: 0, featuresCalculated: 0 }
+    }
+
+    console.log(`Ingesting EIA-930 data for ${config.region} (${config.balancingAuthority}) [EIA Direct]`)
+    return this.ingestFromDirectEia(config, startTime, endTime)
+  }
+
+  /**
+   * Ingest data for a single region (legacy method, kept for backfill)
    */
   private async ingestRegion(
     config: RegionConfig,
@@ -162,13 +234,7 @@ export class EIAIngestionWorker {
     rawRecordsStored: number
     featuresCalculated: number
   }> {
-    console.log(`Ingesting EIA-930 data for ${config.region} (${config.balancingAuthority}) [${this.useGridStatus ? 'GridStatus' : 'EIA'}]`)
-
-    if (this.useGridStatus) {
-      return this.ingestFromGridStatus(config, startTime, endTime)
-    } else {
-      return this.ingestFromDirectEia(config, startTime, endTime)
-    }
+    return this.ingestRegionWithFallback(config, startTime, endTime)
   }
 
   /**
@@ -410,29 +476,46 @@ export class EIAIngestionWorker {
   private async storeProcessedSnapshots(snapshots: any[]): Promise<void> {
     if (snapshots.length === 0) return
 
-    await prisma.gridSignalSnapshot.createMany({
-      data: snapshots.map(snapshot => ({
-        region: snapshot.region,
-        balancingAuthority: snapshot.balancingAuthority,
-        timestamp: new Date(snapshot.timestamp),
-        demandMwh: snapshot.demandMwh,
-        demandChangeMwh: snapshot.demandChangeMwh,
-        demandChangePct: snapshot.demandChangePct,
-        netGenerationMwh: snapshot.netGenerationMwh,
-        netInterchangeMwh: snapshot.netInterchangeMwh,
-        renewableRatio: snapshot.renewableRatio,
-        fossilRatio: snapshot.fossilRatio,
-        carbonSpikeProbability: snapshot.carbonSpikeProbability,
-        curtailmentProbability: snapshot.curtailmentProbability,
-        importCarbonLeakageScore: snapshot.importCarbonLeakageScore,
-        signalQuality: snapshot.signalQuality,
-        estimatedFlag: snapshot.estimatedFlag,
-        syntheticFlag: snapshot.syntheticFlag,
-        source: snapshot.source,
-        metadata: snapshot.metadata
-      })),
-      skipDuplicates: true
-    })
+    try {
+      // Normalize signalQuality to Prisma enum (uppercase)
+      const normalizeQuality = (q: string | undefined): string => {
+        const upper = (q || 'MEDIUM').toUpperCase()
+        if (['HIGH', 'MEDIUM', 'LOW'].includes(upper)) return upper
+        return 'MEDIUM'
+      }
+
+      const result = await prisma.gridSignalSnapshot.createMany({
+        data: snapshots.map(snapshot => ({
+          region: snapshot.region,
+          balancingAuthority: snapshot.balancingAuthority,
+          timestamp: new Date(snapshot.timestamp),
+          demandMwh: snapshot.demandMwh,
+          demandChangeMwh: snapshot.demandChangeMwh,
+          demandChangePct: snapshot.demandChangePct,
+          netGenerationMwh: snapshot.netGenerationMwh,
+          netInterchangeMwh: snapshot.netInterchangeMwh,
+          renewableRatio: snapshot.renewableRatio,
+          fossilRatio: snapshot.fossilRatio,
+          carbonSpikeProbability: snapshot.carbonSpikeProbability,
+          curtailmentProbability: snapshot.curtailmentProbability,
+          importCarbonLeakageScore: snapshot.importCarbonLeakageScore,
+          signalQuality: normalizeQuality(snapshot.signalQuality) as any,
+          estimatedFlag: snapshot.estimatedFlag ?? false,
+          syntheticFlag: snapshot.syntheticFlag ?? false,
+          source: snapshot.source || 'eia930',
+          metadata: snapshot.metadata || {}
+        })),
+        skipDuplicates: true
+      })
+      console.log(`Stored ${result.count} GridSignalSnapshots for ${snapshots[0]?.region}`)
+    } catch (error: any) {
+      console.error(`Failed to store GridSignalSnapshots:`, error.message)
+      // Log first snapshot for debugging
+      if (snapshots[0]) {
+        console.error('Sample snapshot:', JSON.stringify(snapshots[0], null, 2).slice(0, 500))
+      }
+      throw error
+    }
   }
 
   /**
