@@ -67,6 +67,9 @@ const envSchema = z.object({
   UI_ENABLED: z.string().optional(),
   UI_TOKEN: z.string().optional(),
 
+  // Internal service auth (used by internal-auth middleware and admin routes)
+  ECOBE_INTERNAL_API_KEY: z.string().optional(),
+
   // External integrations
   ECOBE_ENGINE_URL: z.string().optional(),
   ECOBE_ENGINE_API_KEY: z.string().optional(),
