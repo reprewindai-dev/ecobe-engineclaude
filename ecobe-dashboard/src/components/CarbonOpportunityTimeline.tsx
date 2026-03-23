@@ -76,7 +76,7 @@ export function CarbonOpportunityTimeline() {
   const timelineData = (() => {
     if (!forecasts.data || forecasts.data.length === 0) return []
     const allTimes = new Set<string>()
-    forecasts.data.forEach((f) => (f.forecasts ?? []).forEach((p) => allTimes.add(p.forecastTime)))
+    forecasts.data.forEach((f) => f.forecasts.forEach((p) => allTimes.add(p.forecastTime)))
     const sortedTimes = Array.from(allTimes).sort()
     return sortedTimes.map((time) => {
       const point: Record<string, unknown> = {
@@ -84,7 +84,7 @@ export function CarbonOpportunityTimeline() {
         rawTime: time,
       }
       forecasts.data!.forEach((f) => {
-        const match = (f.forecasts ?? []).find((p) => p.forecastTime === time)
+        const match = f.forecasts.find((p) => p.forecastTime === time)
         if (match) point[f.region] = match.predictedIntensity
       })
       return point
@@ -184,7 +184,7 @@ export function CarbonOpportunityTimeline() {
 
       {forecasts.isError && (
         <div className="py-12 text-center">
-          <p className="text-sm text-slate-500">Connect ECOBE Engine to view forecast data</p>
+          <p className="text-sm text-slate-500">Connect CO₂Router Engine to view forecast data</p>
           <p className="text-xs text-slate-600 mt-1">GET /api/v1/forecasting/:region/forecasts</p>
         </div>
       )}

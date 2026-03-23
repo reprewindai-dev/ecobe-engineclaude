@@ -1,20 +1,19 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
+import { ecobeApi } from '@/lib/api'
+import { Loader2 } from 'lucide-react'
+import { deriveQualityTier } from '@/lib/decisions'
 import {
-  Bar,
   BarChart,
-  CartesianGrid,
-  Cell,
-  ResponsiveContainer,
-  Tooltip,
+  Bar,
   XAxis,
   YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Cell,
 } from 'recharts'
-import { Loader2 } from 'lucide-react'
-
-import { ecobeApi } from '@/lib/api'
-import { deriveQualityTier } from '@/lib/decisions'
 
 export function DecisionConfidencePanel() {
   const { data: metrics, isLoading } = useQuery({
@@ -29,19 +28,38 @@ export function DecisionConfidencePanel() {
     refetchInterval: 60_000,
   })
 
+  // Derive tier distribution using the shared utility — keeps thresholds consistent
+  // with DecisionStream, DekesImpactCard, IntegrationSourcesPanel, and the timeline.
   const decisions = decisionsData?.decisions ?? []
-  const high = decisions.filter((decision) => deriveQualityTier(decision) === 'high').length
-  const medium = decisions.filter((decision) => deriveQualityTier(decision) === 'medium').length
-  const low = decisions.filter((decision) => deriveQualityTier(decision) === 'low').length
+  const high = decisions.filter((d) => deriveQualityTier(d) === 'high').length
+  const low = decisions.filter((d) => deriveQualityTier(d) === 'low').length
+  const medium = decisions.filter((d) => deriveQualityTier(d) === 'medium').length
+
   const total = decisions.length || 1
 
   const chartData = [
-    { tier: 'HIGH', count: high, pct: +((high / total) * 100).toFixed(1), color: '#10b981' },
-    { tier: 'MEDIUM', count: medium, pct: +((medium / total) * 100).toFixed(1), color: '#f59e0b' },
-    { tier: 'LOW', count: low, pct: +((low / total) * 100).toFixed(1), color: '#ef4444' },
+    {
+      tier: 'HIGH',
+      count: high,
+      pct: +((high / total) * 100).toFixed(1),
+      color: '#10b981',
+    },
+    {
+      tier: 'MEDIUM',
+      count: medium,
+      pct: +((medium / total) * 100).toFixed(1),
+      color: '#f59e0b',
+    },
+    {
+      tier: 'LOW',
+      count: low,
+      pct: +((low / total) * 100).toFixed(1),
+      color: '#ef4444',
+    },
   ]
 
-  const providerErrors = metrics?.providerSignals?.failureCount ?? 0
+  // Provider events from metrics
+  const providerErrors = metrics?.electricityMaps?.failureCount ?? 0
   const fallbackRate = metrics ? (metrics.fallbackRate * 100).toFixed(1) : null
   const greenRate = metrics ? (metrics.greenRouteRate * 100).toFixed(1) : null
 
@@ -81,7 +99,7 @@ export function DecisionConfidencePanel() {
                   borderRadius: '8px',
                   fontSize: '12px',
                 }}
-                formatter={(value: number) => [`${value}%`, 'Share']}
+                formatter={(val: number, name: string) => [`${val}%`, 'Share']}
                 labelStyle={{ color: '#94a3b8' }}
               />
               <Bar dataKey="pct" radius={[4, 4, 0, 0]}>
@@ -93,24 +111,25 @@ export function DecisionConfidencePanel() {
           </ResponsiveContainer>
 
           <div className="grid grid-cols-3 gap-3">
-            {chartData.map((item) => (
-              <div key={item.tier} className="bg-slate-800/40 rounded-lg p-3 text-center">
-                <p className="text-xl font-bold" style={{ color: item.color }}>
-                  {item.pct}%
+            {chartData.map((c) => (
+              <div key={c.tier} className="bg-slate-800/40 rounded-lg p-3 text-center">
+                <p className="text-xl font-bold" style={{ color: c.color }}>
+                  {c.pct}%
                 </p>
-                <p className="text-xs text-slate-500 mt-0.5">{item.tier}</p>
-                <p className="text-xs text-slate-600">{item.count} decisions</p>
+                <p className="text-xs text-slate-500 mt-0.5">{c.tier}</p>
+                <p className="text-xs text-slate-600">{c.count} decisions</p>
               </div>
             ))}
           </div>
         </>
       )}
 
+      {/* Engine stats from metrics */}
       <div className="border-t border-slate-800 pt-4 space-y-2">
         <div className="flex justify-between text-xs">
           <span className="text-slate-400">Green route rate</span>
           <span className="text-emerald-400 font-medium">
-            {greenRate != null ? `${greenRate}%` : '-'}
+            {greenRate != null ? `${greenRate}%` : '—'}
           </span>
         </div>
         <div className="flex justify-between text-xs">
@@ -120,18 +139,20 @@ export function DecisionConfidencePanel() {
               fallbackRate && parseFloat(fallbackRate) > 20 ? 'text-red-400' : 'text-slate-300'
             }
           >
-            {fallbackRate != null ? `${fallbackRate}%` : '-'}
+            {fallbackRate != null ? `${fallbackRate}%` : '—'}
           </span>
         </div>
         <div className="flex justify-between text-xs">
           <span className="text-slate-400">Provider errors</span>
           <span className={providerErrors > 0 ? 'text-orange-400' : 'text-slate-300'}>
-            {metrics ? providerErrors : '-'}
+            {metrics ? providerErrors : '—'}
           </span>
         </div>
         <div className="flex justify-between text-xs">
           <span className="text-slate-400">Top chosen region</span>
-          <span className="text-white font-medium font-mono">{metrics?.topChosenRegion ?? '-'}</span>
+          <span className="text-white font-medium font-mono">
+            {metrics?.topChosenRegion ?? '—'}
+          </span>
         </div>
       </div>
     </div>

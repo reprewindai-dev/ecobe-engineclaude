@@ -96,11 +96,11 @@ export function CIRoutingMonitor() {
           )}
 
           {/* Recent Decisions */}
-          {decisions?.decisions && decisions.decisions.length > 0 && (
+          {decisions && decisions.length > 0 && (
             <div>
               <h4 className="text-sm font-medium text-white mb-3">Recent Routing Decisions</h4>
               <div className="space-y-2">
-                {decisions.decisions.slice(0, 5).map((decision: any) => (
+                {decisions.slice(0, 5).map((decision: any) => (
                   <div key={decision.decisionFrameId} className="p-3 bg-slate-800/40 rounded-lg">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">

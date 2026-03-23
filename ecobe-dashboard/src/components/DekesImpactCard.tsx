@@ -57,7 +57,7 @@ export function DekesImpactCard() {
         <div>
           <h3 className="text-lg font-semibold text-white">DEKES Workload Routing</h3>
           <p className="text-xs text-slate-500 mt-0.5">
-            DEKES-sourced decisions routed through ECOBE carbon engine
+            DEKES-sourced decisions routed through CO₂Router carbon engine
           </p>
         </div>
         <span className="ml-auto px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">

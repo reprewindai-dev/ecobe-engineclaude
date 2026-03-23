@@ -68,9 +68,11 @@ export function DecisionStream() {
   }
 
   return (
-    <div className="bg-slate-900/50 rounded-xl border border-slate-800 p-6">
+    <div className="glass-card rounded-2xl p-6 relative overflow-hidden">
+      {/* Live indicator line */}
+      <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-emerald-500/30 to-transparent" />
       <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center gap-2">
           <Radio className="w-4 h-4 text-emerald-400" />
           <h3 className="text-lg font-semibold text-white">Decision Stream</h3>
           {!isLoading && !isError && (
@@ -187,7 +189,7 @@ export function DecisionStream() {
 
       {isError && (
         <div className="py-6 text-center">
-          <p className="text-sm text-slate-500">Connect ECOBE Engine to stream decisions</p>
+          <p className="text-sm text-slate-500">Connect CO₂Router Engine to stream decisions</p>
         </div>
       )}
 

@@ -1,14 +1,17 @@
 /** @type {import('next').NextConfig} */
+const ECOBE_ENGINE_URL = process.env.ECOBE_API_URL || 'https://ecobe-engineclaude-production.up.railway.app'
+
 const nextConfig = {
   reactStrictMode: true,
+  output: 'standalone',
   env: {
-    ECOBE_API_URL: process.env.ECOBE_API_URL || 'http://localhost:3000',
+    ECOBE_API_URL: ECOBE_ENGINE_URL,
   },
   async rewrites() {
     return [
       {
         source: '/api/ecobe/:path*',
-        destination: `${process.env.ECOBE_API_URL || 'http://localhost:3000'}/api/v1/:path*`,
+        destination: `${ECOBE_ENGINE_URL}/api/v1/:path*`,
       },
     ]
   },

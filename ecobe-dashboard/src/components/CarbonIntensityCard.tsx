@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { getCarbonLevel, getCarbonColor, getCarbonBgColor } from '@/types'
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { ecobeApi } from '@/lib/api'
 
 interface Props {
   region: {
@@ -12,27 +13,31 @@ interface Props {
 }
 
 export function CarbonIntensityCard({ region }: Props) {
-  // Mock data - in production this would call actual API
   const { data, isLoading, isError } = useQuery({
     queryKey: ['carbon-intensity', region.code],
     queryFn: async () => {
-      // Simulate API call with mock data
-      // In production: return await electricityMapsClient.getCarbonIntensity(region.code)
-      const mockIntensities: Record<string, number> = {
-        'US-CAL-CISO': 180,
-        FR: 58,
-        DE: 320,
-        GB: 240,
-        SE: 45,
-        NO: 28,
-      }
+      try {
+        const summary = await ecobeApi.getGridSummary()
+        const match = summary.regions?.find(
+          (r: any) => r.region === region.code || r.region === region.name
+        )
+        if (match) {
+          return {
+            region: region.code,
+            carbonIntensity: Math.round(match.carbonIntensity ?? 0),
+            timestamp: summary.timestamp || new Date().toISOString(),
+            source: match.source ?? null,
+          }
+        }
+      } catch { /* fall through */ }
       return {
         region: region.code,
-        carbonIntensity: mockIntensities[region.code] || 200,
+        carbonIntensity: null as number | null,
         timestamp: new Date().toISOString(),
+        source: null,
       }
     },
-    refetchInterval: 5 * 60 * 1000, // 5 minutes
+    refetchInterval: 5 * 60 * 1000,
   })
 
   if (isLoading) {
@@ -44,10 +49,12 @@ export function CarbonIntensityCard({ region }: Props) {
     )
   }
 
-  if (isError || !data) {
+  if (isError || !data || data.carbonIntensity === null) {
     return (
-      <div className="bg-slate-900/50 rounded-lg border border-red-500/20 p-6">
-        <p className="text-sm text-red-400">Error loading data</p>
+      <div className="bg-slate-900/50 rounded-lg border border-slate-800/50 p-6">
+        <p className="text-sm text-slate-400">{region.name}</p>
+        <p className="text-xs text-slate-500 mt-1">{region.code}</p>
+        <p className="text-sm text-slate-500 mt-3">No data available</p>
       </div>
     )
   }
@@ -56,14 +63,6 @@ export function CarbonIntensityCard({ region }: Props) {
   const colorClass = getCarbonColor(level)
   const bgColorClass = getCarbonBgColor(level)
 
-  const getTrendIcon = () => {
-    // Mock trend - in production, compare with previous reading
-    const trend = Math.random() > 0.5 ? 'up' : 'down'
-    if (trend === 'up') return <TrendingUp className="w-4 h-4" />
-    if (trend === 'down') return <TrendingDown className="w-4 h-4" />
-    return <Minus className="w-4 h-4" />
-  }
-
   return (
     <div className="bg-slate-900/50 rounded-lg border border-slate-800 p-6 hover:border-slate-700 transition">
       <div className="flex items-center justify-between mb-4">
@@ -71,7 +70,6 @@ export function CarbonIntensityCard({ region }: Props) {
           <p className="text-sm text-slate-400">{region.name}</p>
           <p className="text-xs text-slate-500 mt-1">{region.code}</p>
         </div>
-        <div className={`p-2 rounded-full ${bgColorClass} bg-opacity-10`}>{getTrendIcon()}</div>
       </div>
 
       <div className="space-y-2">
@@ -92,16 +90,19 @@ export function CarbonIntensityCard({ region }: Props) {
         </div>
 
         <p className="text-xs text-slate-500">
-          {level === 'low' && '✓ Excellent time for workloads'}
-          {level === 'medium' && '⚠ Moderate carbon intensity'}
-          {level === 'high' && '⚠ High carbon - consider delay'}
+          {level === 'low' && 'Excellent time for workloads'}
+          {level === 'medium' && 'Moderate carbon intensity'}
+          {level === 'high' && 'High carbon - consider delay'}
         </p>
       </div>
 
-      <div className="mt-4 pt-4 border-t border-slate-800">
+      <div className="mt-4 pt-4 border-t border-slate-800 flex justify-between">
         <p className="text-xs text-slate-500">
           Updated: {new Date(data.timestamp).toLocaleTimeString()}
         </p>
+        {data.source && (
+          <p className="text-xs text-slate-600">{data.source}</p>
+        )}
       </div>
     </div>
   )

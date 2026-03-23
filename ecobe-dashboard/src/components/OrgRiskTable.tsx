@@ -65,7 +65,7 @@ export function OrgRiskTable() {
       {isError && !isLoading && (
         <div className="py-8 text-center">
           <p className="text-sm text-slate-500">
-            Connect ECOBE Engine to view org risk data
+            Connect CO₂Router Engine to view org risk data
           </p>
           <p className="text-xs text-slate-600 mt-1">
             GET /api/v1/integrations/dekes/metrics

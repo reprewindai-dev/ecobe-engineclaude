@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-const DEFAULT_ENGINE_URL = 'http://localhost:3000'
+const DEFAULT_ENGINE_URL = 'https://ecobe-engineclaude-production.up.railway.app'
 
 function getEngineBaseUrl() {
   return process.env.ECOBE_API_URL || DEFAULT_ENGINE_URL
