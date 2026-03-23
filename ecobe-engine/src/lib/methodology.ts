@@ -223,6 +223,14 @@ export function resolvePolicyMode(
   return 'default'
 }
 
+export function getPolicyModeDefinition(policyMode: PolicyMode): PolicyModeDefinition {
+  const definition = POLICY_MODES.find((candidate) => candidate.id === policyMode)
+  if (!definition) {
+    throw new Error(`Unknown policy mode: ${policyMode}`)
+  }
+  return definition
+}
+
 export function inferSignalType(sourceUsed?: string | null): SignalType {
   const source = sourceUsed?.toUpperCase() ?? ''
 

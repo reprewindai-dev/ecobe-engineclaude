@@ -136,5 +136,23 @@ describe('Green Routing', () => {
         })
       ).rejects.toThrow()
     })
+
+    it('should restrict assurance routing to disclosure-safe signal types', async () => {
+      const { providerRouter } = require('../lib/carbon/provider-router')
+
+      await routeGreen({
+        preferredRegions: ['us-east-1'],
+        mode: 'assurance',
+        policyMode: 'sec_disclosure_strict',
+      })
+
+      expect(providerRouter.getRoutingSignal).toHaveBeenCalledWith(
+        'us-east-1',
+        expect.any(Date),
+        expect.objectContaining({
+          allowedSignalTypes: ['average_operational'],
+        })
+      )
+    })
   })
 })

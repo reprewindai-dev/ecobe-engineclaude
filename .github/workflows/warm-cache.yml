@@ -10,6 +10,7 @@ on:
   workflow_dispatch:
 
 env:
+  DEFAULT_ECOBE_ENGINE_URL: https://ecobe-engineclaude-production.up.railway.app
   ECOBE_ENGINE_URL: ${{ secrets.ECOBE_ENGINE_URL }}
   ECOBE_ENGINE_API_KEY: ${{ secrets.ECOBE_ENGINE_API_KEY }}
 
@@ -17,52 +18,52 @@ jobs:
   warm-cache:
     name: Warm Signal Cache
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
+      - name: Resolve engine configuration
+        shell: bash
+        run: |
+          echo "ENGINE_URL=${ECOBE_ENGINE_URL:-$DEFAULT_ECOBE_ENGINE_URL}" >> "$GITHUB_ENV"
+
       - name: Verify engine is up
-        run: curl -sf "${ECOBE_ENGINE_URL}/health" || (echo "Engine is down" && exit 1)
+        run: curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -sf "${ENGINE_URL}/health" || (echo "Engine is down" && exit 1)
 
       - name: Warm - us-east-1
         run: |
-          curl -sf -X POST "${ECOBE_ENGINE_URL}/api/v1/ci/route" \
-            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+          curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 45 -sf -X POST "${ENGINE_URL}/api/v1/ci/route" \
             -H "Content-Type: application/json" \
             -d '{"preferredRegions":["us-east-1"],"carbonWeight":0.7,"jobType":"standard"}'
 
       - name: Warm - us-east-2
         run: |
-          curl -sf -X POST "${ECOBE_ENGINE_URL}/api/v1/ci/route" \
-            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+          curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 45 -sf -X POST "${ENGINE_URL}/api/v1/ci/route" \
             -H "Content-Type: application/json" \
             -d '{"preferredRegions":["us-east-2"],"carbonWeight":0.7,"jobType":"standard"}'
 
       - name: Warm - us-west-2
         run: |
-          curl -sf -X POST "${ECOBE_ENGINE_URL}/api/v1/ci/route" \
-            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+          curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 45 -sf -X POST "${ENGINE_URL}/api/v1/ci/route" \
             -H "Content-Type: application/json" \
             -d '{"preferredRegions":["us-west-2"],"carbonWeight":0.7,"jobType":"standard"}'
 
       - name: Warm - eu-west-1
         run: |
-          curl -sf -X POST "${ECOBE_ENGINE_URL}/api/v1/ci/route" \
-            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+          curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 45 -sf -X POST "${ENGINE_URL}/api/v1/ci/route" \
             -H "Content-Type: application/json" \
             -d '{"preferredRegions":["eu-west-1"],"carbonWeight":0.7,"jobType":"standard"}'
 
       - name: Warm - eu-central-1
         run: |
-          curl -sf -X POST "${ECOBE_ENGINE_URL}/api/v1/ci/route" \
-            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+          curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 45 -sf -X POST "${ENGINE_URL}/api/v1/ci/route" \
             -H "Content-Type: application/json" \
             -d '{"preferredRegions":["eu-central-1"],"carbonWeight":0.7,"jobType":"standard"}'
 
       - name: Warm - ap-southeast-1
         run: |
-          curl -sf -X POST "${ECOBE_ENGINE_URL}/api/v1/ci/route" \
-            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+          curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 45 -sf -X POST "${ENGINE_URL}/api/v1/ci/route" \
             -H "Content-Type: application/json" \
             -d '{"preferredRegions":["ap-southeast-1"],"carbonWeight":0.7,"jobType":"standard"}'
 
       - name: Confirm cache warmed
-        run: curl -sf "${ECOBE_ENGINE_URL}/health" && echo "Cache warming complete"
+        run: curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -sf "${ENGINE_URL}/health" && echo "Cache warming complete"

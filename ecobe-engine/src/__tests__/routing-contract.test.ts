@@ -538,5 +538,40 @@ describe('Routing Contract', () => {
       expect(result.curtailmentProbability).toBeNull()
       expect(result.importCarbonLeakageScore).toBeNull()
     })
+
+    it('should expose disclosure-safe signal types in assurance mode', async () => {
+      const { providerRouter } = require('../lib/carbon/provider-router')
+
+      providerRouter.getRoutingSignal.mockResolvedValue({
+        carbonIntensity: 210,
+        source: 'gridstatus_fuel_mix',
+        isForecast: false,
+        confidence: 0.8,
+        provenance: {
+          sourceUsed: 'EIA930_FUEL_MIX_IPCC',
+          contributingSources: ['eia930_fuel_mix'],
+          referenceTime: new Date().toISOString(),
+          fetchedAt: new Date().toISOString(),
+          fallbackUsed: false,
+          disagreementFlag: false,
+          disagreementPct: 0,
+        }
+      })
+
+      providerRouter.validateSignalQuality.mockResolvedValue({
+        qualityTier: 'high',
+        meetsRequirements: true,
+        reasons: []
+      })
+
+      const result = await routeGreen({
+        preferredRegions: ['us-east-1'],
+        mode: 'assurance',
+        policyMode: 'sec_disclosure_strict'
+      })
+
+      expect(result.signalTypeUsed).toBe('average_operational')
+      expect(result.assurance.accountingIntensityGPerKwh).toBeGreaterThan(0)
+    })
   })
 })

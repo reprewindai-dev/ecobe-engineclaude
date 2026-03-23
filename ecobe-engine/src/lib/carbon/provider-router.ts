@@ -9,6 +9,7 @@ import { getRegionMapping } from '../grid-signals/region-mapping'
 import { FuelMixParser } from '../grid-signals/fuel-mix-parser'
 import { gridStatus } from '../grid-signals/gridstatus-client'
 import { EmberStructuralProfile, type EmberData, type RegionStructuralProfile } from '../ember/structural-profile'
+import { type SignalType } from '../methodology'
 
 
 export interface ProviderSignal {
@@ -82,14 +83,22 @@ export class ProviderRouter {
    * 4. Ember structural baseline — global fallback
    * 5. Static fallback — degraded state
    */
-  async getRoutingSignal(region: string, timestamp: Date): Promise<RoutingSignal> {
+  async getRoutingSignal(
+    region: string,
+    timestamp: Date,
+    options?: { allowedSignalTypes?: SignalType[] }
+  ): Promise<RoutingSignal> {
     const referenceTime = timestamp.toISOString()
     const fetchedAt = new Date().toISOString()
+    const allowedSignalTypes = options?.allowedSignalTypes
+    const allowsSignalType = (signalType: SignalType) =>
+      !allowedSignalTypes?.length || allowedSignalTypes.includes(signalType)
 
     // ── TIER 1a: WattTime MOER — primary causal US signal (locked doctrine) ──
     // WattTime provides real-time marginal emissions (MOER) for US regions.
     // This is the fast-path routing truth for US. EIA-930 is backbone/fallback.
-    const wattTimeSignal = await this.getWattTimeSignal(region, timestamp)
+    const wattTimeSignal =
+      allowsSignalType('marginal_estimate') ? await this.getWattTimeSignal(region, timestamp) : null
     if (wattTimeSignal) {
       const validation = await this.validateWithEmber(wattTimeSignal, region, timestamp, [wattTimeSignal])
 
@@ -112,7 +121,8 @@ export class ProviderRouter {
     }
 
     // ── TIER 1b: GB regions → GB Carbon Intensity API (free, no auth, 96h forecast) ──
-    const gbSignal = await this.getGBCarbonIntensitySignal(region)
+    const gbSignal =
+      allowsSignalType('average_operational') ? await this.getGBCarbonIntensitySignal(region) : null
     if (gbSignal) {
       const validation = await this.validateWithEmber(gbSignal, region, timestamp, [gbSignal])
 
@@ -135,7 +145,8 @@ export class ProviderRouter {
     }
 
     // ── TIER 1c: Denmark regions → Energi Data Service (free, CO2 forecast + realtime) ──
-    const dkSignal = await this.getDenmarkSignal(region)
+    const dkSignal =
+      allowsSignalType('average_operational') ? await this.getDenmarkSignal(region) : null
     if (dkSignal) {
       const validation = await this.validateWithEmber(dkSignal, region, timestamp, [dkSignal])
 
@@ -158,7 +169,8 @@ export class ProviderRouter {
     }
 
     // ── TIER 1d: Finland → Fingrid (free, 3-min realtime, API key) ──
-    const fiSignal = await this.getFinlandSignal(region)
+    const fiSignal =
+      allowsSignalType('consumed_emissions') ? await this.getFinlandSignal(region) : null
     if (fiSignal) {
       const validation = await this.validateWithEmber(fiSignal, region, timestamp, [fiSignal])
 
@@ -183,7 +195,8 @@ export class ProviderRouter {
     // ── TIER 2: EIA-930 fuel mix — US backbone / predictive telemetry ──
     // Used when WattTime is unavailable. Provides average intensity from
     // real fuel mix data using IPCC emission factors.
-    const fuelMixCI = await this.getGridStatusFuelMixCI(region)
+    const fuelMixCI =
+      allowsSignalType('average_operational') ? await this.getGridStatusFuelMixCI(region) : null
     if (fuelMixCI !== null) {
       const primarySignal: ProviderSignal = {
         carbonIntensity: fuelMixCI,
@@ -216,7 +229,8 @@ export class ProviderRouter {
     }
 
     // ── TIER 3: Ember baseline (global, free — structural context only) ──
-    const emberProfile = await this.getStructuralProfile(region)
+    const emberProfile =
+      allowsSignalType('average_operational') ? await this.getStructuralProfile(region) : null
     if (emberProfile?.structuralCarbonBaseline) {
       return {
         carbonIntensity: emberProfile.structuralCarbonBaseline,

@@ -86,8 +86,12 @@ function toDisclosureRecord(decision: ExportDecision): DisclosureRecord {
   const policyMode = (decision.meta?.policyMode ?? 'default') as PolicyMode
   const signalType = (decision.meta?.signalTypeUsed ?? inferSignalType(decision.sourceUsed)) as SignalType
   const assurance = decision.meta?.assurance as
-    | { enabled?: boolean; confidenceLabel?: string }
+    | { enabled?: boolean; confidenceLabel?: string; accountingIntensityGPerKwh?: number }
     | undefined
+  const disclosureIntensity =
+    assurance?.enabled && typeof assurance.accountingIntensityGPerKwh === 'number'
+      ? assurance.accountingIntensityGPerKwh
+      : decision.carbonIntensityChosenGPerKwh
 
   return {
     timestamp: decision.createdAt.toISOString(),
@@ -99,7 +103,7 @@ function toDisclosureRecord(decision: ExportDecision): DisclosureRecord {
     baseline_region: decision.baselineRegion,
     estimated_kwh: decision.estimatedKwh,
     emissions_gco2: decision.co2ChosenG,
-    intensity_gco2_per_kwh: decision.carbonIntensityChosenGPerKwh,
+    intensity_gco2_per_kwh: disclosureIntensity,
     signal_type: signalType,
     source: decision.sourceUsed,
     validation_source: decision.validationSource,

@@ -11,6 +11,7 @@ import {
   DEFAULT_ROUTING_WEIGHTS,
   LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE,
   ROUTING_LEGAL_DISCLAIMER,
+  getPolicyModeDefinition,
   inferSignalType,
   normalizeRoutingWeights,
   resolvePolicyMode,
@@ -81,6 +82,8 @@ export interface RoutingResult {
     disagreementThresholdPct: number
     confidenceLabel: 'high' | 'medium' | 'low'
     conservativeAccounting: boolean
+    accountingIntensityGPerKwh?: number
+    reason?: string
   }
 }
 
@@ -110,6 +113,7 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
   })
   const appliedMode = resolveRoutingMode(mode, policyMode)
   const appliedPolicyMode = resolvePolicyMode(policyMode, appliedMode)
+  const policyDefinition = getPolicyModeDefinition(appliedPolicyMode)
   const assuranceEnabled = appliedMode === 'assurance'
 
   // Get routing signals for all regions from ProviderRouter
@@ -118,8 +122,11 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     preferredRegions.map(async (region) => {
       try {
         // Get routing signal from provider router (uses WattTime + Electricity Maps)
-        const signal = await providerRouter.getRoutingSignal(region, new Date())
+        const signal = await providerRouter.getRoutingSignal(region, new Date(), {
+          allowedSignalTypes: assuranceEnabled ? policyDefinition.preferredSignalTypes : undefined,
+        })
         regionSignals.set(region, signal)
+        const signalTypeUsed = inferSignalType(signal.provenance?.sourceUsed ?? null)
 
         return {
           region,
@@ -132,6 +139,7 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
           latency: latencyMsByRegion[region] ?? 100,
           costIndex: costIndexByRegion[region] ?? 1,
           signal,
+          signalTypeUsed,
         }
       } catch (error) {
         console.error(`Failed to get routing signal for ${region}:`, error)
@@ -143,6 +151,7 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
           latency: latencyMsByRegion[region] ?? 100,
           costIndex: costIndexByRegion[region] ?? 1,
           signal: null,
+          signalTypeUsed: 'unknown' as SignalType,
         }
       }
     })
@@ -184,12 +193,16 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
       doctrine: LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE,
       mode: appliedMode,
       policyMode: appliedPolicyMode,
-      signalTypeUsed: inferSignalType(best.signal?.provenance?.sourceUsed ?? null),
+      signalTypeUsed: best.signalTypeUsed,
       assurance: {
         enabled: assuranceEnabled,
         disagreementThresholdPct: ASSURANCE_DISAGREEMENT_THRESHOLD_PCT,
         confidenceLabel: 'low',
         conservativeAccounting: assuranceEnabled,
+        accountingIntensityGPerKwh: Math.round(best.effectiveCarbonIntensity),
+        reason: assuranceEnabled
+          ? `Policy ${appliedPolicyMode} allows ${policyDefinition.preferredSignalTypes.join(', ')} only.`
+          : undefined,
       },
       alternatives: sorted.slice(1, 3).map((r) => ({
         region: r.region,
@@ -236,7 +249,7 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
 
   const best = scored[0]
   const bestSignal = regionSignals.get(best.region)
-  const signalTypeUsed = inferSignalType(bestSignal?.provenance?.sourceUsed ?? null)
+  const signalTypeUsed = best.signalTypeUsed ?? inferSignalType(bestSignal?.provenance?.sourceUsed ?? null)
 
   // Get grid snapshot for best region
   const gridSnapshot = await getLatestGridSnapshot(best.region)
@@ -266,6 +279,15 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     pct: bestSignal.provenance.disagreementPct
   }) : null
   const confidenceLabel = deriveConfidenceLabel(qualityTier, bestSignal?.provenance.disagreementPct ?? 0)
+  const accountingIntensity = assuranceEnabled
+    ? Math.round(best.effectiveCarbonIntensity)
+    : Math.round(best.carbonIntensity)
+  const baselineAccountingIntensity = assuranceEnabled
+    ? Math.round((scored[scored.length - 1] ?? best).effectiveCarbonIntensity)
+    : Math.round((scored[scored.length - 1] ?? best).carbonIntensity)
+  const assuranceReason = assuranceEnabled
+    ? `Policy ${appliedPolicyMode} restricted routing to ${policyDefinition.preferredSignalTypes.join(', ')}.`
+    : undefined
 
   const decisionFrameId = randomUUID()
 
@@ -282,9 +304,9 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
   if (bestSignal?.provenance.disagreementFlag && (bestSignal.provenance.disagreementPct ?? 0) > 25) {
     governanceWarnings.push(`HIGH_DISAGREEMENT: Provider signals diverge by ${bestSignal.provenance.disagreementPct?.toFixed(1)}%. Decision confidence reduced.`)
   }
-  if (assuranceEnabled && signalTypeUsed !== 'average_operational') {
+  if (assuranceEnabled && !policyDefinition.preferredSignalTypes.includes(signalTypeUsed)) {
     governanceWarnings.push(
-      `ASSURANCE_MODE_SIGNAL_CLASS: Assurance mode selected ${signalTypeUsed}; retain disclosure labels and review against approved average-operational sources.`
+      `ASSURANCE_MODE_SIGNAL_CLASS: Assurance mode selected ${signalTypeUsed}; review policy ${appliedPolicyMode} and provider configuration.`
     )
   }
   if (forecastStability === 'unstable') {
@@ -340,7 +362,7 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
         candidateId: 'best',
         region: best.region,
         startTs: new Date(),
-        carbonEstimateGPerKwh: best.carbonIntensity,
+        carbonEstimateGPerKwh: accountingIntensity,
         latencyEstimateMs: best.latency,
         queueDelayEstimateSec: null,
         costEstimateUsd: null,
@@ -361,7 +383,9 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
         candidateId: 'fallback',
         region: scored[1].region,
         startTs: new Date(),
-        carbonEstimateGPerKwh: scored[1].carbonIntensity,
+        carbonEstimateGPerKwh: assuranceEnabled
+          ? Math.round(scored[1].effectiveCarbonIntensity)
+          : scored[1].carbonIntensity,
         latencyEstimateMs: scored[1].latency,
         queueDelayEstimateSec: null, costEstimateUsd: null,
         confidenceScore: null, retryRiskScore: null,
@@ -377,7 +401,7 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
         candidateId: 'baseline',
         region: scored[scored.length - 1].region,
         startTs: new Date(),
-        carbonEstimateGPerKwh: worstIntensity,
+        carbonEstimateGPerKwh: assuranceEnabled ? baselineAccountingIntensity : worstIntensity,
         latencyEstimateMs: null, queueDelayEstimateSec: null,
         costEstimateUsd: null, confidenceScore: null, retryRiskScore: null,
         balancingAuthority: null, demandRampPct: null,
@@ -407,8 +431,8 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
   }
 
   const baselineCandidate = scored[scored.length - 1] ?? best
-  const baselineIntensity = Math.round(baselineCandidate.carbonIntensity)
-  const chosenIntensity = Math.round(best.carbonIntensity)
+  const baselineIntensity = baselineAccountingIntensity
+  const chosenIntensity = accountingIntensity
   const reason =
     governanceWarnings.length > 0
       ? `${governanceWarnings.join(' | ')} ${LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE}`
@@ -480,6 +504,8 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
             disagreementThresholdPct: ASSURANCE_DISAGREEMENT_THRESHOLD_PCT,
             confidenceLabel,
             conservativeAccounting: assuranceEnabled,
+            accountingIntensityGPerKwh: accountingIntensity,
+            reason: assuranceReason,
           },
           doctrine: LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE,
           legalDisclaimer: ROUTING_LEGAL_DISCLAIMER,
@@ -538,6 +564,8 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
       disagreementThresholdPct: ASSURANCE_DISAGREEMENT_THRESHOLD_PCT,
       confidenceLabel,
       conservativeAccounting: assuranceEnabled,
+      accountingIntensityGPerKwh: accountingIntensity,
+      reason: assuranceReason,
     },
   }
 }

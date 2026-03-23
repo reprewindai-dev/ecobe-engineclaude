@@ -10,6 +10,7 @@ on:
   workflow_dispatch:
 
 env:
+  DEFAULT_ECOBE_ENGINE_URL: https://ecobe-engineclaude-production.up.railway.app
   ECOBE_ENGINE_URL: ${{ secrets.ECOBE_ENGINE_URL }}
   ECOBE_ENGINE_API_KEY: ${{ secrets.ECOBE_ENGINE_API_KEY }}
 
@@ -17,39 +18,49 @@ jobs:
   verify-signals:
     name: Verify Signal Quality
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
+      - name: Resolve engine configuration
+        shell: bash
+        run: |
+          echo "ENGINE_URL=${ECOBE_ENGINE_URL:-$DEFAULT_ECOBE_ENGINE_URL}" >> "$GITHUB_ENV"
+
       - name: Engine health check
         run: |
-          response=$(curl -sf "${ECOBE_ENGINE_URL}/health")
+          response=$(curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -sf "${ENGINE_URL}/health")
           echo "Engine health: $response"
           echo "$response" | grep -q '"status":"ok"' || (echo "Engine degraded" && exit 1)
 
-      - name: CI routing health - exercises full provider stack
+      - name: System status check
         run: |
-          response=$(curl -sf "${ECOBE_ENGINE_URL}/api/v1/ci/health" \
-            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}")
-          echo "CI health: $response"
+          response=$(curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -sf "${ENGINE_URL}/api/v1/system/status")
+          echo "System status: $response"
+          echo "$response" | grep -q '"status":"healthy"' || (echo "System status degraded" && exit 1)
 
-      - name: Live signal - us-east-1
+      - name: Assurance route - us-east-1
         run: |
-          response=$(curl -sf -X POST "${ECOBE_ENGINE_URL}/api/v1/ci/route" \
-            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+          response=$(curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 45 -sf -X POST "${ENGINE_URL}/api/v1/route/green" \
             -H "Content-Type: application/json" \
-            -d '{"preferredRegions":["us-east-1"],"carbonWeight":0.7,"jobType":"standard"}')
+            -d '{"preferredRegions":["us-east-1"],"mode":"assurance","policyMode":"sec_disclosure_strict","carbonWeight":0.7}')
           echo "us-east-1 signal: $response"
-          echo "$response" | grep -q 'carbonIntensity' || (echo "No carbon signal returned" && exit 1)
+          echo "$response" | grep -q '"signalTypeUsed":"average_operational"' || (echo "Assurance mode returned non-disclosure-safe signal" && exit 1)
 
-      - name: Live signal - eu-west-1
+      - name: Optimize route - eu-west-1
         run: |
-          response=$(curl -sf -X POST "${ECOBE_ENGINE_URL}/api/v1/ci/route" \
-            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+          response=$(curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 45 -sf -X POST "${ENGINE_URL}/api/v1/route/green" \
             -H "Content-Type: application/json" \
-            -d '{"preferredRegions":["eu-west-1"],"carbonWeight":0.7,"jobType":"standard"}')
+            -d '{"preferredRegions":["eu-west-1"],"mode":"optimize","carbonWeight":0.7}')
           echo "eu-west-1 signal: $response"
+          echo "$response" | grep -q '"selectedRegion":"eu-west-1"' || (echo "No route selected for eu-west-1" && exit 1)
+
+      - name: Disclosure export check
+        run: |
+          response=$(curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -sf "${ENGINE_URL}/api/v1/disclosure/export?format=json&mode=assurance")
+          echo "Disclosure export: $response"
+          echo "$response" | grep -q '"batch_id"' || (echo "Disclosure export missing batch metadata" && exit 1)
 
       - name: Forecast accuracy check
         run: |
-          curl -sf "${ECOBE_ENGINE_URL}/api/v1/forecasting/accuracy" \
-            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}"
+          curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -sf "${ENGINE_URL}/api/v1/forecasting/accuracy"
           echo "Signal verification complete"

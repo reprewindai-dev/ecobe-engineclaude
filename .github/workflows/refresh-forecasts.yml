@@ -9,6 +9,7 @@ on:
   workflow_dispatch:
 
 env:
+  DEFAULT_ECOBE_ENGINE_URL: https://ecobe-engineclaude-production.up.railway.app
   ECOBE_ENGINE_URL: ${{ secrets.ECOBE_ENGINE_URL }}
   ECOBE_ENGINE_API_KEY: ${{ secrets.ECOBE_ENGINE_API_KEY }}
 
@@ -16,33 +17,34 @@ jobs:
   refresh-forecasts:
     name: Refresh Carbon Forecasts
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
+      - name: Resolve engine configuration
+        shell: bash
+        run: |
+          echo "ENGINE_URL=${ECOBE_ENGINE_URL:-$DEFAULT_ECOBE_ENGINE_URL}" >> "$GITHUB_ENV"
+
       - name: Verify engine is up
-        run: curl -sf "${ECOBE_ENGINE_URL}/health" || (echo "Engine is down" && exit 1)
+        run: curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -sf "${ENGINE_URL}/health" || (echo "Engine is down" && exit 1)
 
       - name: Refresh forecasts - us-east-1
         run: |
-          curl -sf "${ECOBE_ENGINE_URL}/api/v1/forecasting/us-east-1/forecasts?hoursAhead=24" \
-            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}"
+          curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 45 -sf "${ENGINE_URL}/api/v1/forecasting/us-east-1/forecasts?hoursAhead=24"
 
       - name: Refresh forecasts - us-west-2
         run: |
-          curl -sf "${ECOBE_ENGINE_URL}/api/v1/forecasting/us-west-2/forecasts?hoursAhead=24" \
-            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}"
+          curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 45 -sf "${ENGINE_URL}/api/v1/forecasting/us-west-2/forecasts?hoursAhead=24"
 
       - name: Refresh forecasts - eu-west-1
         run: |
-          curl -sf "${ECOBE_ENGINE_URL}/api/v1/forecasting/eu-west-1/forecasts?hoursAhead=24" \
-            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}"
+          curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 45 -sf "${ENGINE_URL}/api/v1/forecasting/eu-west-1/forecasts?hoursAhead=24"
 
       - name: Refresh forecasts - ap-southeast-1
         run: |
-          curl -sf "${ECOBE_ENGINE_URL}/api/v1/forecasting/ap-southeast-1/forecasts?hoursAhead=24" \
-            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}"
+          curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 45 -sf "${ENGINE_URL}/api/v1/forecasting/ap-southeast-1/forecasts?hoursAhead=24"
 
       - name: Check forecast accuracy
         run: |
-          curl -sf "${ECOBE_ENGINE_URL}/api/v1/forecasting/accuracy" \
-            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}"
+          curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -sf "${ENGINE_URL}/api/v1/forecasting/accuracy"
           echo "Forecast refresh cycle complete"
