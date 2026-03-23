@@ -70,6 +70,10 @@ describe('Routing Contract', () => {
       expect(result).toHaveProperty('syntheticFlag')
       expect(result).toHaveProperty('predicted_clean_window')
       expect(result).toHaveProperty('decisionFrameId')
+      expect(result).toHaveProperty('confidenceBand')
+      expect(result).toHaveProperty('weights')
+      expect(result).toHaveProperty('legalDisclaimer')
+      expect(result).toHaveProperty('doctrine')
       expect(result).toHaveProperty('alternatives')
     })
 

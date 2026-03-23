@@ -1,6 +1,14 @@
 import { Router } from 'express'
+import { readFile } from 'fs/promises'
+import path from 'path'
 import { env } from '../config/env'
 import { getIntegrationMetricsSummary, computeIntegrationSuccessRate } from '../lib/integration-metrics'
+import {
+  DEFAULT_ROUTING_WEIGHTS,
+  LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE,
+  METHODOLOGY_TIERS,
+  ROUTING_LEGAL_DISCLAIMER,
+} from '../lib/methodology'
 
 const router = Router()
 
@@ -53,6 +61,17 @@ const PROVIDERS: ProviderConfig[] = [
   },
 ]
 
+async function readMethodologyMarkdown() {
+  const methodologyPath = path.resolve(
+    process.cwd(),
+    'ecobe-engine',
+    'ecobe-engine',
+    'METHODOLOGY.md'
+  )
+
+  return readFile(methodologyPath, 'utf8')
+}
+
 function getProviderStatus(metric?: {
   successCount: number
   failureCount: number
@@ -98,6 +117,44 @@ router.get('/providers', async (_req, res) => {
   } catch (error) {
     console.error('Methodology providers error:', error)
     res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+router.get('/', async (_req, res) => {
+  try {
+    const markdown = await readMethodologyMarkdown()
+
+    return res.json({
+      title: 'Ecobe Methodology',
+      slug: 'lowest-defensible-signal',
+      lastUpdated: '2026-03-23',
+      doctrine: {
+        name: 'Lowest Defensible Signal',
+        summary: LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE,
+        legalDisclaimer: ROUTING_LEGAL_DISCLAIMER,
+      },
+      scoring: {
+        formula:
+          'score = w_carbon * carbon_score + w_latency * latency_score + w_cost * cost_score',
+        defaultWeights: DEFAULT_ROUTING_WEIGHTS,
+      },
+      tiers: METHODOLOGY_TIERS,
+      markdown,
+    })
+  } catch (error) {
+    console.error('Methodology card error:', error)
+    return res.status(500).json({ error: 'Failed to load methodology' })
+  }
+})
+
+router.get('/markdown', async (_req, res) => {
+  try {
+    const markdown = await readMethodologyMarkdown()
+    res.type('text/markdown')
+    return res.send(markdown)
+  } catch (error) {
+    console.error('Methodology markdown error:', error)
+    return res.status(500).send('Failed to load methodology')
   }
 })
 

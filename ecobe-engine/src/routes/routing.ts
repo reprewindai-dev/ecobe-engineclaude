@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { routeGreen } from '../lib/green-routing'
 import { prisma } from '../lib/db'
+import { DEFAULT_ROUTING_WEIGHTS } from '../lib/methodology'
 import {
   requireActiveOrganization,
   getOrCreateUsageCounter,
@@ -17,6 +18,7 @@ const routingRequestSchema = z.object({
   preferredRegions: z.array(z.string()).min(1),
   maxCarbonGPerKwh: z.number().positive().optional(),
   latencyMsByRegion: z.record(z.number()).optional(),
+  costIndexByRegion: z.record(z.number().positive()).optional(),
   carbonWeight: z.number().min(0).max(1).optional(),
   latencyWeight: z.number().min(0).max(1).optional(),
   costWeight: z.number().min(0).max(1).optional(),
@@ -97,7 +99,11 @@ router.get('/:decisionFrameId/replay', async (req, res) => {
         targetTime: null,
         durationMinutes: null,
         maxCarbonGPerKwh: null,
-        weights: { carbon: 0.5, latency: 0.3, cost: 0.2 }
+        weights: {
+          carbon: (decision.meta as any)?.weights?.carbon ?? DEFAULT_ROUTING_WEIGHTS.carbon,
+          latency: (decision.meta as any)?.weights?.latency ?? DEFAULT_ROUTING_WEIGHTS.latency,
+          cost: (decision.meta as any)?.weights?.cost ?? DEFAULT_ROUTING_WEIGHTS.cost,
+        }
       },
       signals: {
         [decision.baselineRegion]: {

@@ -5,11 +5,19 @@ import { wattTime } from './watttime'
 import { randomUUID } from 'crypto'
 import { classifyJob, recordLedgerEntry, storeProviderSnapshot } from './routing'
 import { generateLease, retryAsync } from './governance'
+import {
+  DEFAULT_ROUTING_WEIGHTS,
+  LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE,
+  ROUTING_LEGAL_DISCLAIMER,
+  normalizeRoutingWeights,
+  type RoutingWeightSet,
+} from './methodology'
 
 export interface RoutingRequest {
   preferredRegions: string[]
   maxCarbonGPerKwh?: number
   latencyMsByRegion?: Record<string, number>
+  costIndexByRegion?: Record<string, number>
   costWeight?: number  // 0-1, default 0.3
   carbonWeight?: number  // 0-1, default 0.5
   latencyWeight?: number  // 0-1, default 0.2
@@ -50,6 +58,9 @@ export interface RoutingResult {
   forecastAvailable?: boolean
   confidenceBand?: { low: number; mid: number; high: number; empirical: boolean }
   dataResolutionMinutes?: number
+  weights: RoutingWeightSet
+  legalDisclaimer: string
+  doctrine: string
 }
 
 export async function routeGreen(request: RoutingRequest): Promise<RoutingResult> {
@@ -57,16 +68,21 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     preferredRegions,
     maxCarbonGPerKwh,
     latencyMsByRegion = {},
-    carbonWeight = 0.5,
-    latencyWeight = 0.2,
-    costWeight = 0.3,
+    costIndexByRegion = {},
+    carbonWeight = DEFAULT_ROUTING_WEIGHTS.carbon,
+    latencyWeight = DEFAULT_ROUTING_WEIGHTS.latency,
+    costWeight = DEFAULT_ROUTING_WEIGHTS.cost,
   } = request
 
-  // Normalize weights
-  const totalWeight = carbonWeight + latencyWeight + costWeight
-  const normalizedCarbon = carbonWeight / totalWeight
-  const normalizedLatency = latencyWeight / totalWeight
-  const normalizedCost = costWeight / totalWeight
+  if (preferredRegions.length === 0) {
+    throw new Error('At least one preferred region is required')
+  }
+
+  const normalizedWeights = normalizeRoutingWeights({
+    carbon: carbonWeight,
+    latency: latencyWeight,
+    cost: costWeight,
+  })
 
   // Get routing signals for all regions from ProviderRouter
   const regionSignals = new Map<string, any>()
@@ -81,6 +97,7 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
           region,
           carbonIntensity: signal.carbonIntensity,
           latency: latencyMsByRegion[region] ?? 100,
+          costIndex: costIndexByRegion[region] ?? 1,
           signal,
         }
       } catch (error) {
@@ -90,6 +107,7 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
           region,
           carbonIntensity: 400,
           latency: latencyMsByRegion[region] ?? 100,
+          costIndex: costIndexByRegion[region] ?? 1,
           signal: null,
         }
       }
@@ -127,6 +145,9 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
       syntheticFlag: null,
       predicted_clean_window: null,
       decisionFrameId: randomUUID(),
+      weights: normalizedWeights,
+      legalDisclaimer: ROUTING_LEGAL_DISCLAIMER,
+      doctrine: LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE,
       alternatives: sorted.slice(1, 3).map((r) => ({
         region: r.region,
         carbonIntensity: r.carbonIntensity,
@@ -146,14 +167,17 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     const maxLatency = Math.max(...filtered.map((x) => x.latency))
     const latencyScore = 1 - r.latency / maxLatency
 
-    // Cost score (assume cost proportional to carbon for now)
-    const costScore = carbonScore
+    // Cost score (lower cost index is better; neutral when no differentiation exists)
+    const maxCost = Math.max(...filtered.map((x) => x.costIndex))
+    const minCost = Math.min(...filtered.map((x) => x.costIndex))
+    const costScore =
+      maxCost === minCost ? 1 : 1 - (r.costIndex - minCost) / (maxCost - minCost)
 
     // Overall score
     const score =
-      normalizedCarbon * carbonScore +
-      normalizedLatency * latencyScore +
-      normalizedCost * costScore
+      normalizedWeights.carbon * carbonScore +
+      normalizedWeights.latency * latencyScore +
+      normalizedWeights.cost * costScore
 
     return {
       ...r,
@@ -362,13 +386,20 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     must_revalidate_after: mustRevalidateAfter,
     // Governance: Warnings and explanation
     explanation: governanceWarnings.length > 0
-      ? governanceWarnings.join(' | ')
-      : `Routed to ${best.region} with ${qualityTier} confidence. Lease valid for ${leaseMinutes}m.`,
+      ? `${governanceWarnings.join(' | ')} ${LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE}`
+      : `Routed to ${best.region} with ${qualityTier} confidence under the lowest defensible signal doctrine. Lease valid for ${leaseMinutes}m.`,
     alternatives: scored.slice(1, 3).map((r) => ({
       region: r.region,
       carbonIntensity: r.carbonIntensity,
       score: r.score,
     })),
+    confidenceBand: bestSignal
+      ? deriveConfidenceBand(best.carbonIntensity, bestSignal.confidence, bestSignal.provenance.disagreementPct ?? 0)
+      : deriveConfidenceBand(best.carbonIntensity, 0.25, 0),
+    dataResolutionMinutes: bestSignal?.isForecast ? 60 : 5,
+    weights: normalizedWeights,
+    legalDisclaimer: ROUTING_LEGAL_DISCLAIMER,
+    doctrine: LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE,
   }
 }
 
@@ -404,4 +435,21 @@ function deriveStability(confidence: number, providerDisagreement?: { flag: bool
   if (score >= 75) return 'stable'
   if (score >= 45) return 'medium'
   return 'unstable'
+}
+
+function deriveConfidenceBand(
+  carbonIntensity: number,
+  confidence: number,
+  disagreementPct: number
+): { low: number; mid: number; high: number; empirical: boolean } {
+  const disagreementSpread = Math.max(0, disagreementPct / 100)
+  const confidenceSpread = Math.max(0.06, (1 - confidence) * 0.28)
+  const spread = Math.min(0.45, confidenceSpread + disagreementSpread * 0.35)
+
+  return {
+    low: Math.max(1, Math.round(carbonIntensity * (1 - spread))),
+    mid: Math.round(carbonIntensity),
+    high: Math.max(1, Math.round(carbonIntensity * (1 + spread))),
+    empirical: disagreementPct > 0,
+  }
 }
