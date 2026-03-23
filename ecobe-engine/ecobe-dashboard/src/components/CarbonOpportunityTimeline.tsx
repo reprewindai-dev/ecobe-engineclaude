@@ -184,7 +184,7 @@ export function CarbonOpportunityTimeline() {
 
       {forecasts.isError && (
         <div className="py-12 text-center">
-          <p className="text-sm text-slate-500">Connect ECOBE Engine to view forecast data</p>
+          <p className="text-sm text-slate-500">Connect CO₂Router Engine to view forecast data</p>
           <p className="text-xs text-slate-600 mt-1">GET /api/v1/forecasting/:region/forecasts</p>
         </div>
       )}

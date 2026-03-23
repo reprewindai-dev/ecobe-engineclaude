@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { CarbonReductionMultiplier } from '@/components/CarbonReductionMultiplier'
 import { DecisionEngineStatus } from '@/components/DecisionEngineStatus'
 import { CarbonOpportunityTimeline } from '@/components/CarbonOpportunityTimeline'
@@ -30,128 +30,149 @@ import { OrgRiskTable } from '@/components/OrgRiskTable'
 
 type Tab = 'console' | 'signals' | 'routing' | 'energy' | 'analytics' | 'dekes' | 'patterns' | 'integration'
 
-const TABS: { id: Tab; label: string; sub: string }[] = [
-  { id: 'console', label: 'Console', sub: 'State · Events · Impact' },
-  { id: 'signals', label: 'Signals', sub: 'Regions · Forecast accuracy' },
-  { id: 'routing', label: 'Routing', sub: 'Route · Schedule · Replay' },
-  { id: 'energy', label: 'Energy', sub: 'Carbon equation' },
-  { id: 'analytics', label: 'Analytics', sub: 'Confidence · System · Sources' },
-  { id: 'dekes', label: 'DEKES', sub: 'Workload optimization' },
-  { id: 'patterns', label: 'Patterns', sub: 'Weekly heat calendar' },
-  { id: 'integration', label: 'Integration', sub: 'DEKES · Handoffs · Business activation' },
+const TABS: { id: Tab; label: string; icon: string; sub: string }[] = [
+  { id: 'console', label: 'Console', icon: '⚡', sub: 'State · Events · Impact' },
+  { id: 'signals', label: 'Signals', icon: '📡', sub: 'Regions · Forecast' },
+  { id: 'routing', label: 'Routing', icon: '🔀', sub: 'Route · Schedule · Replay' },
+  { id: 'energy', label: 'Energy', icon: '⚛', sub: 'Carbon equation' },
+  { id: 'analytics', label: 'Analytics', icon: '📊', sub: 'Confidence · System' },
+  { id: 'dekes', label: 'DEKES', icon: '🎯', sub: 'Workload optimization' },
+  { id: 'patterns', label: 'Patterns', icon: '🗓', sub: 'Weekly heat calendar' },
+  { id: 'integration', label: 'Integration', icon: '🔗', sub: 'Handoffs · Business' },
 ]
 
 export default function DashboardPage() {
   const [tab, setTab] = useState<Tab>('console')
+  const [indicatorStyle, setIndicatorStyle] = useState({ left: 0, width: 0 })
+  const tabRefs = useRef<Map<string, HTMLButtonElement>>(new Map())
+  const navRef = useRef<HTMLDivElement>(null)
+
+  // Animate tab indicator
+  useEffect(() => {
+    const el = tabRefs.current.get(tab)
+    if (el && navRef.current) {
+      const navRect = navRef.current.getBoundingClientRect()
+      const tabRect = el.getBoundingClientRect()
+      setIndicatorStyle({
+        left: tabRect.left - navRect.left,
+        width: tabRect.width,
+      })
+    }
+  }, [tab])
 
   return (
-    <div className="space-y-5">
-      {/* Tab navigation */}
-      <div className="border-b border-slate-800">
-        <nav className="flex space-x-1 overflow-x-auto">
+    <div className="space-y-6 animate-fade-in">
+      {/* Tab navigation — futuristic pill style */}
+      <div className="relative" ref={navRef}>
+        <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-none">
           {TABS.map((t) => (
             <button
               key={t.id}
+              ref={(el) => { if (el) tabRefs.current.set(t.id, el) }}
               onClick={() => setTab(t.id)}
-              className={`flex-shrink-0 py-2.5 px-4 border-b-2 transition text-left ${
+              className={`relative flex-shrink-0 py-2 px-4 rounded-lg transition-all duration-300 text-left group ${
                 tab === t.id
-                  ? 'border-emerald-500 text-emerald-400'
-                  : 'border-transparent text-slate-500 hover:text-slate-300'
+                  ? 'bg-emerald-500/10 text-emerald-400'
+                  : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/30'
               }`}
             >
-              <span className="text-sm font-medium block">{t.label}</span>
-              <span className="text-xs block mt-0.5 opacity-50">{t.sub}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-sm">{t.icon}</span>
+                <span className="text-sm font-semibold">{t.label}</span>
+              </div>
+              <span className={`text-[10px] block mt-0.5 transition-opacity ${
+                tab === t.id ? 'opacity-60' : 'opacity-0 group-hover:opacity-40'
+              }`}>
+                {t.sub}
+              </span>
+              {tab === t.id && (
+                <div className="absolute bottom-0 left-2 right-2 h-[2px] bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-full" />
+              )}
             </button>
           ))}
-        </nav>
+        </div>
+        {/* Gradient fade edges for horizontal scroll */}
+        <div className="absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-slate-950 to-transparent pointer-events-none" />
       </div>
 
-      {/* ── CONSOLE ── Control-plane layout (infrastructure pattern) */}
-      {tab === 'console' && (
-        <div className="space-y-5">
-          {/* Layer 1 — System State */}
-          <CarbonReductionMultiplier />
-          <DecisionEngineStatus />
-
-          {/* Layer 2 — Signature visualization */}
-          <CarbonOpportunityTimeline />
-
-          {/* Layer 3 — Live activity */}
-          <DecisionStream />
-
-          {/* Layer 4 — Impact + Budget */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <CarbonSavingsDashboard />
-            <CarbonBudgetPanel />
+      {/* Tab content with entrance animation */}
+      <div key={tab} className="animate-slide-up">
+        {/* ── CONSOLE ── */}
+        {tab === 'console' && (
+          <div className="space-y-5 stagger-children">
+            <CarbonReductionMultiplier />
+            <DecisionEngineStatus />
+            <CarbonOpportunityTimeline />
+            <DecisionStream />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <CarbonSavingsDashboard />
+              <CarbonBudgetPanel />
+            </div>
+            <ExecutionIntegrityPanel />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <ProviderHealthMonitor />
+              <PolicyEnforcementPanel />
+            </div>
           </div>
+        )}
 
-          {/* Layer 5 — Execution integrity */}
-          <ExecutionIntegrityPanel />
-
-          {/* Layer 6 — Governance */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <ProviderHealthMonitor />
-            <PolicyEnforcementPanel />
+        {/* ── SIGNALS ── */}
+        {tab === 'signals' && (
+          <div className="space-y-5 stagger-children">
+            <CarbonOpportunityMap />
+            <GridIntelligencePanel />
+            <EmberStructuralPanel />
+            <ForecastAccuracyTracker />
           </div>
-        </div>
-      )}
+        )}
 
-      {/* ── SIGNALS ── Regional data + accuracy */}
-      {tab === 'signals' && (
-        <div className="space-y-5">
-          <CarbonOpportunityMap />
-          <GridIntelligencePanel />
-          <EmberStructuralPanel />
-          <ForecastAccuracyTracker />
-        </div>
-      )}
-
-      {/* ── ROUTING ── Route workloads + scheduling + debug replay */}
-      {tab === 'routing' && (
-        <div className="space-y-10">
-          <GreenRoutingForm />
-          <div className="border-t border-slate-800 pt-8">
-            <BestWindowPanel />
+        {/* ── ROUTING ── */}
+        {tab === 'routing' && (
+          <div className="space-y-8 stagger-children">
+            <GreenRoutingForm />
+            <div className="border-t border-slate-800/50 pt-6">
+              <BestWindowPanel />
+            </div>
+            <div className="border-t border-slate-800/50 pt-6">
+              <DecisionReplay />
+            </div>
           </div>
-          <div className="border-t border-slate-800 pt-8">
-            <DecisionReplay />
+        )}
+
+        {/* ── ENERGY ── */}
+        {tab === 'energy' && <EnergyCalculator />}
+
+        {/* ── ANALYTICS ── */}
+        {tab === 'analytics' && (
+          <div className="space-y-5 stagger-children">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <DecisionConfidencePanel />
+              <SystemHealth />
+            </div>
+            <IntegrationSourcesPanel />
+            <WorkloadImpactGraph />
           </div>
-        </div>
-      )}
+        )}
 
-      {/* ── ENERGY ── Carbon equation calculator */}
-      {tab === 'energy' && <EnergyCalculator />}
-
-      {/* ── ANALYTICS ── Confidence breakdown + system metrics + integration sources */}
-      {tab === 'analytics' && (
-        <div className="space-y-5">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <DecisionConfidencePanel />
-            <SystemHealth />
+        {/* ── DEKES ── */}
+        {tab === 'dekes' && (
+          <div className="space-y-5 stagger-children">
+            <DekesImpactCard />
+            <DekesStats />
           </div>
-          <IntegrationSourcesPanel />
-          <WorkloadImpactGraph />
-        </div>
-      )}
+        )}
 
-      {/* ── DEKES ── DEKES workload impact + analytics */}
-      {tab === 'dekes' && (
-        <div className="space-y-5">
-          <DekesImpactCard />
-          <DekesStats />
-        </div>
-      )}
+        {/* ── PATTERNS ── */}
+        {tab === 'patterns' && <CarbonHeatCalendar />}
 
-      {/* ── PATTERNS ── Weekly heat calendar */}
-      {tab === 'patterns' && <CarbonHeatCalendar />}
-
-      {/* ── INTEGRATION ── DEKES handoff events + org risk */}
-      {tab === 'integration' && (
-        <div className="space-y-5">
-          <DekesHandoffPanel />
-          <OrgRiskTable />
-        </div>
-      )}
+        {/* ── INTEGRATION ── */}
+        {tab === 'integration' && (
+          <div className="space-y-5 stagger-children">
+            <DekesHandoffPanel />
+            <OrgRiskTable />
+          </div>
+        )}
+      </div>
     </div>
   )
 }

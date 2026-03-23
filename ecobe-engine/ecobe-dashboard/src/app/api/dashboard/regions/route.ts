@@ -86,8 +86,10 @@ export async function GET(request: Request) {
     return NextResponse.json(regionData)
   } catch (error) {
     console.error('Regions API error:', error)
+    const message = error instanceof Error ? error.message : 'Failed to fetch regions data'
+    const updatedMessage = message.replace('ECOBE Engine', 'CO₂Router Engine')
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to fetch regions data' },
+      { error: updatedMessage },
       { status: 500 }
     )
   }

@@ -42,8 +42,10 @@ export async function GET(request: Request) {
     return NextResponse.json(data)
   } catch (error) {
     console.error('KPIs API error:', error)
+    const message = error instanceof Error ? error.message : 'Failed to fetch KPI data'
+    const updatedMessage = message.replace('ECOBE Engine', 'CO₂Router Engine')
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to fetch KPI data' },
+      { error: updatedMessage },
       { status: 500 }
     )
   }

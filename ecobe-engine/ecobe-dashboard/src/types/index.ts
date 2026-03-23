@@ -543,7 +543,7 @@ export function getStabilityColor(stability: ForecastStability | null): string {
 
 // ─── DEKES Integration ────────────────────────────────────────────────────────
 // All types below are READ-ONLY from the dashboard's perspective.
-// Handoffs are emitted by the ECOBE engine — never written by the dashboard.
+// Handoffs are emitted by the CO₂Router engine — never written by the dashboard.
 
 export type DekesHandoffEventType =
   | 'BUDGET_WARNING'

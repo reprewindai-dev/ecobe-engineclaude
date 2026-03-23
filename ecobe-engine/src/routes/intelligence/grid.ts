@@ -97,10 +97,18 @@ router.get('/summary', async (req, res) => {
 
     const summaryData = await Promise.all(
       targetRegions.map(async (region) => {
+        // Map cloud region → balancing authority for EIA lookup
+        const { getRegionMapping } = await import('../../lib/grid-signals/region-mapping')
+        const mapping = getRegionMapping(region)
+        const baCode = mapping?.balancingAuthority ?? null
+
         // Try EIA snapshots first (cache then DB)
-        const cached = await GridSignalCache.getCachedSnapshots(region)
+        // Query by BA code (how EIA worker stores data), fallback to cloud region
+        const cached = baCode
+          ? (await GridSignalCache.getCachedSnapshots(baCode) || await GridSignalCache.getCachedSnapshots(region))
+          : await GridSignalCache.getCachedSnapshots(region)
         const snapshots = cached || await prisma.gridSignalSnapshot.findMany({
-          where: { region },
+          where: { region: baCode || region },
           orderBy: { timestamp: 'desc' },
           take: 1
         })
@@ -108,8 +116,8 @@ router.get('/summary', async (req, res) => {
         if (snapshots.length > 0) {
           const latest = snapshots[0]
           return {
-            region: latest.region,
-            balancingAuthority: latest.balancingAuthority,
+            region,  // Always return the cloud region, not the BA code
+            balancingAuthority: latest.balancingAuthority || baCode,
             carbonIntensity: null as number | null,
             source: 'eia-930' as string | null,
             demandRampPct: latest.demandChangePct,
@@ -233,11 +241,23 @@ router.get('/region/:region', async (req, res) => {
     const { region } = req.params
     const hours = parseInt(req.query.hours as string) || 24
 
-    // Fetch latest snapshot
-    const latestSnapshot = await prisma.gridSignalSnapshot.findFirst({
-      where: { region },
+    // Map cloud region → BA code for EIA lookup
+    const { getRegionMapping } = await import('../../lib/grid-signals/region-mapping')
+    const mapping = getRegionMapping(region)
+    const baCode = mapping?.balancingAuthority ?? null
+    const queryRegion = baCode || region
+
+    // Fetch latest snapshot (try BA code first, then raw region)
+    let latestSnapshot = await prisma.gridSignalSnapshot.findFirst({
+      where: { region: queryRegion },
       orderBy: { timestamp: 'desc' }
     })
+    if (!latestSnapshot && baCode) {
+      latestSnapshot = await prisma.gridSignalSnapshot.findFirst({
+        where: { region },
+        orderBy: { timestamp: 'desc' }
+      })
+    }
 
     if (!latestSnapshot) {
       return res.status(404).json({ error: 'Region not found' })
@@ -245,8 +265,8 @@ router.get('/region/:region', async (req, res) => {
 
     // Fetch historical data
     const history = await prisma.gridSignalSnapshot.findMany({
-      where: { 
-        region,
+      where: {
+        region: queryRegion,
         timestamp: {
           gte: new Date(Date.now() - hours * 60 * 60 * 1000)
         }
@@ -256,7 +276,7 @@ router.get('/region/:region', async (req, res) => {
     })
 
     const response = {
-      region: latestSnapshot.region,
+      region,  // Return cloud region, not BA code
       balancingAuthority: latestSnapshot.balancingAuthority,
       latest: {
         timestamp: latestSnapshot.timestamp.toISOString(),

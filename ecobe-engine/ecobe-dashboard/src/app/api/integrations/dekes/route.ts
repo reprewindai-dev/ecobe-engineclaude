@@ -59,10 +59,12 @@ export async function GET(request: Request) {
       timestamp: new Date().toISOString(),
     })
   } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    const updatedMessage = message.replace('ECOBE Engine', 'CO₂Router Engine')
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: updatedMessage,
         timestamp: new Date().toISOString(),
       },
       { status: 500 }

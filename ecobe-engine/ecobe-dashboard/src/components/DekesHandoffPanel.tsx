@@ -163,7 +163,7 @@ export function DekesHandoffPanel() {
         {/* Error */}
         {isError && !isLoading && (
           <div className="py-10 text-center">
-            <p className="text-sm text-slate-500">Connect ECOBE Engine to view integration data</p>
+            <p className="text-sm text-slate-500">Connect CO₂Router Engine to view integration data</p>
             <p className="text-xs text-slate-600 mt-1">
               GET /api/v1/integrations/dekes/summary
             </p>
@@ -368,7 +368,7 @@ export function DekesHandoffPanel() {
                   </table>
                 </div>
                 <p className="text-xs text-slate-600 text-right mt-2">
-                  {handoffs.length} handoffs shown · data from ECOBE engine · click row for detail
+                  {handoffs.length} handoffs shown · data from CO₂Router engine · click row for detail
                 </p>
               </section>
             )}

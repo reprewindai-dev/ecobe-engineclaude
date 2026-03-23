@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import axios from 'axios'
+import { CO2RouterLogo } from '@/components/CO2RouterLogo'
 
 interface RegionData {
   id: string
@@ -148,34 +149,29 @@ export default function LandingPage() {
   if (!isMounted) return null
 
   return (
-    <div className="bg-gray-950 text-gray-100">
+    <div className="bg-gray-950 text-gray-100 bg-grid-mesh">
       {/* Navigation */}
-      <nav className="border-b border-gray-800 bg-gray-950/80 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
-              <span className="text-white font-bold text-xl">🌱</span>
-            </div>
-            <span className="text-lg font-bold text-white">ECOBE</span>
-          </div>
-          <div className="flex items-center space-x-6">
+      <nav className="border-b border-gray-800/50 bg-gray-950/80 backdrop-blur-xl sticky top-0 z-50">
+        <div className="container mx-auto px-6 py-3 flex items-center justify-between">
+          <CO2RouterLogo size="md" />
+          <div className="flex items-center gap-4">
             <a
               href="#pricing"
-              className="text-sm text-gray-400 hover:text-emerald-400 transition"
+              className="text-sm text-gray-400 hover:text-emerald-400 transition-colors duration-200"
             >
               Pricing
             </a>
             <a
               href="#signals"
-              className="text-sm text-gray-400 hover:text-emerald-400 transition"
+              className="text-sm text-gray-400 hover:text-emerald-400 transition-colors duration-200"
             >
               How It Works
             </a>
             <Link
               href="/console"
-              className="px-4 py-2 bg-emerald-500 text-gray-950 font-medium rounded-lg hover:bg-emerald-400 transition"
+              className="px-5 py-2 bg-gradient-to-r from-emerald-500 to-cyan-500 text-gray-950 font-semibold rounded-lg hover:from-emerald-400 hover:to-cyan-400 transition-all duration-200 shadow-lg shadow-emerald-500/20"
             >
-              Sign In
+              Open Console
             </Link>
           </div>
         </div>
@@ -183,18 +179,23 @@ export default function LandingPage() {
 
       {/* Hero Section */}
       <section className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-emerald-500/10 via-gray-950 to-gray-950" />
-        <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/5 rounded-full blur-3xl" />
-        <div className="absolute bottom-0 left-0 w-96 h-96 bg-cyan-500/5 rounded-full blur-3xl" />
+        <div className="absolute inset-0 bg-gradient-to-b from-emerald-500/8 via-gray-950 to-gray-950" />
+        <div className="absolute top-20 right-20 w-[500px] h-[500px] bg-emerald-500/5 rounded-full blur-[100px] animate-breathe" />
+        <div className="absolute bottom-0 left-10 w-[400px] h-[400px] bg-cyan-500/5 rounded-full blur-[80px]" />
+        <div className="absolute top-40 left-1/2 w-[300px] h-[300px] bg-blue-500/3 rounded-full blur-[60px]" />
 
-        <div className="relative container mx-auto px-6 py-24">
-          <div className="text-center max-w-3xl mx-auto">
-            <h1 className="text-5xl md:text-6xl font-bold text-white mb-6 leading-tight">
-              Route Compute to Clean Energy.
-              <span className="block text-emerald-400">Automatically.</span>
+        <div className="relative container mx-auto px-6 py-28">
+          <div className="text-center max-w-4xl mx-auto">
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 mb-8">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 pulse-glow" />
+              <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">Live — 6 Regions Active</span>
+            </div>
+            <h1 className="text-5xl md:text-7xl font-black text-white mb-6 leading-[1.1] tracking-tight">
+              Route Compute to
+              <span className="block gradient-text">Clean Energy.</span>
             </h1>
-            <p className="text-xl text-gray-400 mb-8 leading-relaxed">
-              ECOBE is the world&apos;s most accurate carbon-aware routing engine. Cut your cloud
+            <p className="text-xl text-gray-400 mb-10 leading-relaxed max-w-2xl mx-auto">
+              CO₂Router is the world&apos;s most accurate carbon-aware routing engine. Cut your cloud
               carbon footprint by 40–70% with zero code changes.
             </p>
 
@@ -441,13 +442,13 @@ export default function LandingPage() {
                 step: '1',
                 title: 'Connect',
                 description: 'Drop-in SDK, 3 lines of code. No infrastructure changes.',
-                code: 'const ecobe = new CarbonRouter()',
+                code: 'const router = new CO2Router()',
               },
               {
                 step: '2',
                 title: 'Route',
                 description: 'AI selects the cleanest region in real-time based on live grid signals.',
-                code: 'await ecobe.route(workload)',
+                code: 'await router.route(workload)',
               },
               {
                 step: '3',
@@ -674,11 +675,8 @@ export default function LandingPage() {
         <div className="container mx-auto px-6 py-12">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-8">
             <div>
-              <div className="flex items-center space-x-3 mb-4">
-                <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
-                  <span className="text-white font-bold text-lg">🌱</span>
-                </div>
-                <span className="text-lg font-bold text-white">CO₂Router</span>
+              <div className="mb-4">
+                <CO2RouterLogo size="sm" animated={false} />
               </div>
               <p className="text-gray-500 text-sm">
                 Carbon-aware compute routing engine built for a sustainable future.

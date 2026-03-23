@@ -89,7 +89,7 @@ export function WorkloadImpactGraph() {
         <div>
           <h3 className="text-lg font-semibold text-white">Carbon Avoided by Source</h3>
           <p className="text-xs text-slate-500 mt-0.5">
-            CO₂ reduction attributed to each workload source — from ECOBE decision log
+            CO₂ reduction attributed to each workload source — from CO₂Router decision log
           </p>
         </div>
       </div>
@@ -102,7 +102,7 @@ export function WorkloadImpactGraph() {
 
       {isError && (
         <p className="text-sm text-slate-500 py-8 text-center">
-          Connect ECOBE Engine to view workload impact
+          Connect CO₂Router Engine to view workload impact
         </p>
       )}
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Activity, AlertCircle, BarChart3, CheckCircle, RefreshCw, Zap } from 'lucide-react'
 
 interface DksSummary {
@@ -117,7 +117,7 @@ export default function DksIntegrationDashboard() {
         <div>
           <h2 className="text-3xl font-semibold text-white">DEKES Integration</h2>
           <p className="text-sm text-slate-400">
-            Live ECOBE engine telemetry for routed DEKES workloads.
+            Live CO₂Router engine telemetry for routed DEKES workloads.
           </p>
         </div>
         <div className="flex items-center gap-3">

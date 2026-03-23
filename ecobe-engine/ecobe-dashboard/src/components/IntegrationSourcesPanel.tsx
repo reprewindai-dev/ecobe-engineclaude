@@ -58,7 +58,7 @@ export function IntegrationSourcesPanel() {
         <div>
           <h3 className="text-lg font-semibold text-white">Integration Sources</h3>
           <p className="text-xs text-slate-500 mt-0.5">
-            All workload sources routing through ECOBE — read from decision log
+            All workload sources routing through CO₂Router — read from decision log
           </p>
         </div>
       </div>
@@ -71,7 +71,7 @@ export function IntegrationSourcesPanel() {
 
       {isError && (
         <p className="text-sm text-slate-500 py-4 text-center">
-          Connect ECOBE Engine to view integration sources
+          Connect CO₂Router Engine to view integration sources
         </p>
       )}
 
@@ -140,7 +140,7 @@ export function IntegrationSourcesPanel() {
 
       {!isLoading && !isError && decisions.length > 0 && (
         <p className="text-xs text-slate-600 text-right">
-          {decisions.length} decisions analysed · Data from ECOBE decision log
+          {decisions.length} decisions analysed · Data from CO₂Router decision log
         </p>
       )}
     </div>

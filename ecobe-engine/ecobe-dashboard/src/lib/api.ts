@@ -64,19 +64,19 @@ api.interceptors.response.use(
 
       if (serverMsg) {
         const normalized = new Error(serverMsg)
-        normalized.name = 'EcobeAPIError'
+        normalized.name = 'CO2RouterAPIError'
         return Promise.reject(normalized)
       }
 
       if (err.code === 'ECONNABORTED') {
         return Promise.reject(
-          new Error('Request timed out — ECOBE Engine did not respond in time')
+          new Error('Request timed out — CO₂Router Engine did not respond in time')
         )
       }
 
       if (!err.response) {
         return Promise.reject(
-          new Error('Cannot reach ECOBE Engine — check NEXT_PUBLIC_ECOBE_API_URL')
+          new Error('Cannot reach CO₂Router Engine — check NEXT_PUBLIC_ECOBE_API_URL')
         )
       }
 
@@ -85,7 +85,7 @@ api.interceptors.response.use(
       if (status === 401 || status === 403)
         return Promise.reject(new Error('Unauthorized — check API credentials'))
       if (status >= 500)
-        return Promise.reject(new Error(`ECOBE Engine error (${status}) — check server logs`))
+        return Promise.reject(new Error(`CO₂Router Engine error (${status}) — check server logs`))
     }
     return Promise.reject(err)
   }
