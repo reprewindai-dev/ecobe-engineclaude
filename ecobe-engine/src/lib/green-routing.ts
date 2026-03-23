@@ -5,6 +5,7 @@ import { wattTime } from './watttime'
 import { randomUUID } from 'crypto'
 import { classifyJob, recordLedgerEntry, storeProviderSnapshot } from './routing'
 import { generateLease, retryAsync } from './governance'
+import { prisma } from './db'
 import {
   DEFAULT_ROUTING_WEIGHTS,
   LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE,
@@ -356,6 +357,75 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     }), 'provider-snapshot')
   }
 
+  const baselineCandidate = scored[scored.length - 1] ?? best
+  const baselineIntensity = Math.round(baselineCandidate.carbonIntensity)
+  const chosenIntensity = Math.round(best.carbonIntensity)
+  const reason =
+    governanceWarnings.length > 0
+      ? `${governanceWarnings.join(' | ')} ${LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE}`
+      : `Routed to ${best.region} with ${qualityTier} confidence under the lowest defensible signal doctrine. Lease valid for ${leaseMinutes}m.`
+
+  if ((prisma as any)?.dashboardRoutingDecision?.create) {
+    await prisma.dashboardRoutingDecision.create({
+      data: {
+        workloadName: null,
+        opName: 'route-green',
+        baselineRegion: baselineCandidate.region,
+        chosenRegion: best.region,
+        zoneBaseline: baselineCandidate.region,
+        zoneChosen: best.region,
+        carbonIntensityBaselineGPerKwh: baselineIntensity,
+        carbonIntensityChosenGPerKwh: chosenIntensity,
+        estimatedKwh: 0.05,
+        co2BaselineG: baselineIntensity * 0.05,
+        co2ChosenG: chosenIntensity * 0.05,
+        reason,
+        latencyEstimateMs: Math.round(best.latency),
+        fallbackUsed: bestSignal?.provenance.fallbackUsed ?? false,
+        balancingAuthority: gridSnapshot?.balancingAuthority ?? null,
+        demandRampPct: gridSnapshot?.demandChangePct ?? null,
+        carbonSpikeProbability: gridSnapshot?.carbonSpikeProbability ?? null,
+        curtailmentProbability: gridSnapshot?.curtailmentProbability ?? null,
+        importCarbonLeakageScore: gridSnapshot?.importCarbonLeakageScore ?? null,
+        sourceUsed: bestSignal?.provenance.sourceUsed ?? null,
+        validationSource:
+          (bestSignal?.provenance.contributingSources.length ?? 0) > 1 ? 'ember' : null,
+        referenceTime: bestSignal?.provenance.referenceTime
+          ? new Date(bestSignal.provenance.referenceTime)
+          : null,
+        disagreementFlag: bestSignal?.provenance.disagreementFlag ?? false,
+        disagreementPct: bestSignal?.provenance.disagreementPct ?? null,
+        estimatedFlag: bestSignal?.isForecast ?? false,
+        syntheticFlag: bestSignal?.source === 'fallback',
+        meta: {
+          decisionFrameId,
+          leaseId,
+          leaseExpiresAt,
+          mustRevalidateAfter,
+          qualityTier,
+          forecast_stability: forecastStability,
+          score: best.score,
+          source: bestSignal?.provenance.sourceUsed ?? null,
+          weights: normalizedWeights,
+          alternatives: scored.slice(1, 3).map((r) => ({
+            region: r.region,
+            carbonIntensity: r.carbonIntensity,
+            score: r.score,
+          })),
+          confidenceBand: bestSignal
+            ? deriveConfidenceBand(
+                best.carbonIntensity,
+                bestSignal.confidence,
+                bestSignal.provenance.disagreementPct ?? 0
+              )
+            : deriveConfidenceBand(best.carbonIntensity, 0.25, 0),
+          doctrine: LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE,
+          legalDisclaimer: ROUTING_LEGAL_DISCLAIMER,
+        },
+      },
+    })
+  }
+
   return {
     selectedRegion: best.region,
     carbonIntensity: best.carbonIntensity,
@@ -385,9 +455,7 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     lease_expires_at: leaseExpiresAt,
     must_revalidate_after: mustRevalidateAfter,
     // Governance: Warnings and explanation
-    explanation: governanceWarnings.length > 0
-      ? `${governanceWarnings.join(' | ')} ${LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE}`
-      : `Routed to ${best.region} with ${qualityTier} confidence under the lowest defensible signal doctrine. Lease valid for ${leaseMinutes}m.`,
+    explanation: reason,
     alternatives: scored.slice(1, 3).map((r) => ({
       region: r.region,
       carbonIntensity: r.carbonIntensity,
