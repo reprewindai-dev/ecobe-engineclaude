@@ -3,12 +3,18 @@ import type { NextFunction, Request, Response } from 'express'
 import { env } from '../config/env'
 
 function extractToken(req: Request) {
+  const explicitInternalToken =
+    req.header('x-ecobe-internal-key')?.trim() || req.header('x-api-key')?.trim()
+  if (explicitInternalToken) {
+    return explicitInternalToken
+  }
+
   const authorization = req.header('authorization')
   if (authorization?.startsWith('Bearer ')) {
     return authorization.slice('Bearer '.length).trim()
   }
 
-  return req.header('x-ecobe-internal-key')?.trim()
+  return undefined
 }
 
 export function internalServiceGuard(req: Request, res: Response, next: NextFunction) {
