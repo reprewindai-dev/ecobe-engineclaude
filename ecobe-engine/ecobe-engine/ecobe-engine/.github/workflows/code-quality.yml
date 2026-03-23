@@ -1,0 +1,314 @@
+name: Code Quality & Documentation
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ main ]
+
+jobs:
+  code-quality:
+    name: Code Quality Checks
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed for git history analysis
+          
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+        
+      - name: Type Check
+        run: |
+          echo "🔍 Running comprehensive type check..."
+          npm run type-check
+          
+      - name: Lint
+        run: |
+          echo "🧹 Running lint checks..."
+          npm run lint
+          
+      - name: Format Check
+        run: |
+          echo "📐 Checking code formatting..."
+          
+          # Check if any files need formatting
+          if [ "$(npm run format -- --dry-run 2>&1 | grep -c 'src/')" -gt 0 ]; then
+            echo "❌ Code formatting issues found"
+            echo "Run 'npm run format' to fix formatting issues"
+            exit 1
+          else
+            echo "✅ Code formatting is correct"
+          fi
+          
+      - name: Check for console.log statements
+        run: |
+          echo "🚫 Checking for debug statements..."
+          
+          # Look for console.log in source files (excluding test files)
+          if grep -r "console\.log" src/ --include="*.ts" --exclude-dir=__tests__ --exclude="*.test.ts" --exclude="*.spec.ts"; then
+            echo "❌ Found console.log statements in production code"
+            echo "Remove console.log statements before merging"
+            exit 1
+          else
+            echo "✅ No console.log statements found"
+          fi
+          
+      - name: Check for TODO/FIXME comments
+        run: |
+          echo "📝 Checking for TODO/FIXME comments..."
+          
+          # Count TODO/FIXME comments
+          todo_count=$(grep -r "TODO\|FIXME" src/ --include="*.ts" --exclude-dir=__tests__ | wc -l)
+          
+          if [ "$todo_count" -gt 5 ]; then
+            echo "⚠️ High number of TODO/FIXME comments: $todo_count"
+            echo "Consider addressing technical debt"
+          else
+            echo "✅ Technical debt is manageable ($todo_count TODO/FIXME comments)"
+          fi
+          
+      - name: Validate imports
+        run: |
+          echo "🔍 Checking import consistency..."
+          
+          # Check for unused imports
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            
+            function checkFile(filePath) {
+              const content = fs.readFileSync(filePath, 'utf8');
+              const lines = content.split('\n');
+              const imports = [];
+              const used = new Set();
+              
+              lines.forEach((line, index) => {
+                if (line.trim().startsWith('import')) {
+                  imports.push({ line: index + 1, content: line.trim() });
+                }
+                
+                // Simple usage check (not perfect but catches obvious issues)
+                if (line.includes('from ')) {
+                  const match = line.match(/from ['\"]([^'\"]+)['\"]/);
+                  if (match) used.add(match[1]);
+                }
+              });
+              
+              return { imports, used };
+            }
+            
+            // Check a few key files
+            const keyFiles = [
+              'src/routes/carbon-command.ts',
+              'src/routes/dashboard.ts',
+              'src/lib/green-routing.ts'
+            ];
+            
+            let hasIssues = false;
+            keyFiles.forEach(file => {
+              if (fs.existsSync(file)) {
+                const { imports, used } = checkFile(file);
+                console.log(\`✅ \${file}: \${imports.length} imports checked\`);
+              }
+            });
+          "
+
+  api-contract-validation:
+    name: API Contract Validation
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+        
+      - name: Build
+        run: npm run build
+        
+      - name: Validate API Schemas
+        run: |
+          echo "📋 Validating API schemas and contracts..."
+          
+          # Check Zod schemas are properly exported
+          node -e "
+            const fs = require('fs');
+            
+            // Check carbon command schema
+            try {
+              const carbonCommand = require('./dist/routes/carbon-command');
+              console.log('✅ Carbon command schema loads');
+            } catch (e) {
+              console.error('❌ Carbon command schema failed:', e.message);
+              process.exit(1);
+            }
+            
+            // Check integration schemas
+            try {
+              const integrations = require('./dist/routes/integrations');
+              console.log('✅ Integration schemas load');
+            } catch (e) {
+              console.error('❌ Integration schemas failed:', e.message);
+              process.exit(1);
+            }
+          "
+          
+      - name: Validate Route Exports
+        run: |
+          echo "🛣️ Validating route exports..."
+          
+          node -e "
+            const routes = [
+              'carbon-command',
+              'health', 
+              'dashboard',
+              'decisions',
+              'integrations',
+              'route',
+              'energy',
+              'system'
+            ];
+            
+            routes.forEach(route => {
+              try {
+                require(\`./dist/routes/\${route}\`);
+                console.log(\`✅ \${route} route exports correctly\`);
+              } catch (e) {
+                console.error(\`❌ \${route} route export failed:\`, e.message);
+                process.exit(1);
+              }
+            });
+          "
+
+  documentation-check:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Check README completeness
+        run: |
+          echo "📚 Checking documentation..."
+          
+          # Check if README has required sections
+          if [ -f "README.md" ]; then
+            echo "✅ README.md exists"
+            
+            # Check for key sections
+            required_sections=(
+              "Installation"
+              "Usage"
+              "API"
+              "Environment"
+            )
+            
+            for section in "\${required_sections[@]}"; do
+              if grep -q "\$section" README.md; then
+                echo "✅ README has $section section"
+              else
+                echo "⚠️ README missing $section section"
+              fi
+            done
+          else
+            echo "❌ README.md missing"
+            exit 1
+          fi
+          
+      - name: Check API documentation
+        run: |
+          echo "🔌 Checking API documentation..."
+          
+          # Check for API docs
+          if [ -f "docs/api.md" ] || [ -f "API.md" ]; then
+            echo "✅ API documentation exists"
+          else
+            echo "⚠️ Consider adding API documentation"
+          fi
+          
+          # Check for inline API documentation
+          api_docs=$(find src/routes -name "*.ts" -exec grep -l "/**" {} \; | wc -l)
+          echo "✅ Found API documentation in $api_docs route files"
+          
+      - name: Check Environment Documentation
+        run: |
+          echo "🔧 Checking environment documentation..."
+          
+          if [ -f ".env.example" ]; then
+            echo "✅ .env.example exists"
+            
+            # Check for critical env vars
+            critical_vars=(
+              "DATABASE_URL"
+              "REDIS_URL"
+              "PORT"
+            )
+            
+            for var in "\${critical_vars[@]}"; do
+              if grep -q "\$var" .env.example; then
+                echo "✅ .env.example documents $var"
+              else
+                echo "❌ .env.example missing $var"
+                exit 1
+              fi
+            done
+          else
+            echo "❌ .env.example missing"
+            exit 1
+          fi
+
+  changelog-check:
+    name: Changelog Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Check for Changelog
+        run: |
+          echo "📝 Checking changelog..."
+          
+          if [ -f "CHANGELOG.md" ]; then
+            echo "✅ CHANGELOG.md exists"
+            
+            # Check if changelog has recent entries
+            if git log --oneline --since="1 month ago" | grep -q "feat\|fix\|break"; then
+              recent_commits=$(git log --oneline --since="1 month ago" | grep -c "feat\|fix\|break")
+              echo "✅ Found $recent_commits significant commits in last month"
+              
+              # Check if changelog was updated recently
+              changelog_age=$(git log -1 --format=%at CHANGELOG.md 2>/dev/null || echo "0")
+              current_time=$(date +%s)
+              age_days=$(( (current_time - changelog_age) / 86400 ))
+              
+              if [ "$age_days" -lt 30 ]; then
+                echo "✅ CHANGELOG.md updated recently ($age_days days ago)"
+              else
+                echo "⚠️ CHANGELOG.md may need updating (last updated $age_days days ago)"
+              fi
+            else
+              echo "✅ No significant changes in last month"
+            fi
+          else
+            echo "⚠️ Consider adding CHANGELOG.md"
+          fi

@@ -1,0 +1,96 @@
+# Production Fixes Patch - 2026-03-22
+# Apply from the ecobe-engineclaude root directory
+# 
+# CHANGES:
+# 1. DEKES Prisma schema: binaryTargets + directUrl (fixes Alpine runtime crash)
+# 2. DEKES Dockerfile: prisma migrate via node_modules, healthcheck, explicit build
+# 3. Engine Prisma schema: binaryTargets + directUrl (fixes advisory lock timeout)
+# 4. Engine Dockerfile: dynamic PORT in healthcheck
+# 5. Engine QStash: remove colons from deduplicationId
+
+--- a/dekes-saas/dekes-saas/prisma/schema.prisma
++++ b/dekes-saas/dekes-saas/prisma/schema.prisma
+@@ -1,9 +1,9 @@
+ generator client {
+-  provider = "prisma-client-js"
++  provider      = "prisma-client-js"
++  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+ }
+ 
+ datasource db {
+-  provider = "postgresql"
+-  url      = env("DATABASE_URL")
+-  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
++  provider  = "postgresql"
++  url       = env("DATABASE_URL")
++  directUrl = env("DIRECT_DATABASE_URL")
+ }
+
+--- a/dekes-saas/dekes-saas/Dockerfile
++++ b/dekes-saas/dekes-saas/Dockerfile
+@@ -16,7 +16,7 @@
+ 
+ ENV NEXT_TELEMETRY_DISABLED=1
+ 
+-RUN npm run build
++RUN npx prisma generate && npm run build
+ 
+ # Production image, copy all the files and run next
+ FROM base AS runner
+@@ -33,6 +33,7 @@
+ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
++COPY --from=builder --chown=nextjs:nodejs /app/public ./.next/static
+ 
+ # Copy prisma schema + migrations + engine binaries + CLI for runtime migrate deploy
+ COPY --from=builder /app/prisma ./prisma
+@@ -45,4 +46,10 @@
+ 
+ ENV HOSTNAME="0.0.0.0"
++EXPOSE 3000
+ 
+-CMD ["node", "server.js"]
++HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
++  CMD node -e "const http = require('http'); const req = http.get('http://localhost:3000/api/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }); req.on('error', () => process.exit(1)); req.setTimeout(5000, () => process.exit(1));"
++
++CMD ["sh", "-c", "node node_modules/prisma/build/index.js migrate deploy --schema=./prisma/schema.prisma || echo 'Migration skipped, continuing...'; node server.js"]
+
+--- a/ecobe-engine/prisma/schema.prisma
++++ b/ecobe-engine/prisma/schema.prisma
+@@ -1,9 +1,10 @@
+ generator client {
+-  provider       = "prisma-client-js"
+-  previewFeatures = ["tracing"]
++  provider        = "prisma-client-js"
++  previewFeatures = ["tracing"]
++  binaryTargets   = ["native", "linux-musl-openssl-3.0.x"]
+ }
+ 
+ datasource db {
+-  provider = "postgresql"
+-  url      = env("DATABASE_URL")
++  provider  = "postgresql"
++  url       = env("DATABASE_URL")
++  directUrl = env("DIRECT_DATABASE_URL")
+ }
+
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -43,10 +43,10 @@
+ 
+-EXPOSE 3000
++EXPOSE ${PORT:-3000}
+ 
+ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+-  CMD node -e "const http = require('http'); const req = http.get('http://localhost:3000/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }); req.on('error', () => process.exit(1)); req.setTimeout(5000, () => process.exit(1));"
++  CMD node -e "const port = process.env.PORT || 3000; const http = require('http'); const req = http.get('http://localhost:' + port + '/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }); req.on('error', () => process.exit(1)); req.setTimeout(5000, () => process.exit(1));"
+
+--- a/ecobe-engine/src/workers/intelligence-scheduler.ts
++++ b/ecobe-engine/src/workers/intelligence-scheduler.ts
+@@ -51,7 +51,7 @@
+       url: destination,
+       body: { job: job.name },
+       cron: job.cron,
+-      deduplicationId: `intelligence:${job.name}`,
++      deduplicationId: `intelligence-${job.name}`,
+     })
