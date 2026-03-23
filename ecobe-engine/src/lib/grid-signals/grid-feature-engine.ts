@@ -171,9 +171,9 @@ export class GridFeatureEngine {
     if (metadata.providerDisagreement === 'high') qualityScore -= 1
     if (metadata.providerDisagreement === 'severe') qualityScore -= 2
 
-    if (qualityScore >= 3) return 'HIGH'
-    if (qualityScore >= 2) return 'MEDIUM'
-    return 'LOW'
+    if (qualityScore >= 3) return 'high'
+    if (qualityScore >= 2) return 'medium'
+    return 'low'
   }
 
   /**

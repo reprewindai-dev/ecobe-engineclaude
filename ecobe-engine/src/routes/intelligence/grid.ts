@@ -118,7 +118,7 @@ router.get('/summary', async (req, res) => {
             carbonSpikeProbability: latest.carbonSpikeProbability,
             curtailmentProbability: latest.curtailmentProbability,
             importCarbonLeakageScore: latest.importCarbonLeakageScore,
-            signalQuality: latest.signalQuality as 'high' | 'medium' | 'low'
+            signalQuality: (latest.signalQuality?.toLowerCase() || 'medium') as 'high' | 'medium' | 'low'
           }
         }
 
