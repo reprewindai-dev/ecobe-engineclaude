@@ -410,29 +410,46 @@ export class EIAIngestionWorker {
   private async storeProcessedSnapshots(snapshots: any[]): Promise<void> {
     if (snapshots.length === 0) return
 
-    await prisma.gridSignalSnapshot.createMany({
-      data: snapshots.map(snapshot => ({
-        region: snapshot.region,
-        balancingAuthority: snapshot.balancingAuthority,
-        timestamp: new Date(snapshot.timestamp),
-        demandMwh: snapshot.demandMwh,
-        demandChangeMwh: snapshot.demandChangeMwh,
-        demandChangePct: snapshot.demandChangePct,
-        netGenerationMwh: snapshot.netGenerationMwh,
-        netInterchangeMwh: snapshot.netInterchangeMwh,
-        renewableRatio: snapshot.renewableRatio,
-        fossilRatio: snapshot.fossilRatio,
-        carbonSpikeProbability: snapshot.carbonSpikeProbability,
-        curtailmentProbability: snapshot.curtailmentProbability,
-        importCarbonLeakageScore: snapshot.importCarbonLeakageScore,
-        signalQuality: snapshot.signalQuality,
-        estimatedFlag: snapshot.estimatedFlag,
-        syntheticFlag: snapshot.syntheticFlag,
-        source: snapshot.source,
-        metadata: snapshot.metadata
-      })),
-      skipDuplicates: true
-    })
+    try {
+      // Normalize signalQuality to Prisma enum (uppercase)
+      const normalizeQuality = (q: string | undefined): string => {
+        const upper = (q || 'MEDIUM').toUpperCase()
+        if (['HIGH', 'MEDIUM', 'LOW'].includes(upper)) return upper
+        return 'MEDIUM'
+      }
+
+      const result = await prisma.gridSignalSnapshot.createMany({
+        data: snapshots.map(snapshot => ({
+          region: snapshot.region,
+          balancingAuthority: snapshot.balancingAuthority,
+          timestamp: new Date(snapshot.timestamp),
+          demandMwh: snapshot.demandMwh,
+          demandChangeMwh: snapshot.demandChangeMwh,
+          demandChangePct: snapshot.demandChangePct,
+          netGenerationMwh: snapshot.netGenerationMwh,
+          netInterchangeMwh: snapshot.netInterchangeMwh,
+          renewableRatio: snapshot.renewableRatio,
+          fossilRatio: snapshot.fossilRatio,
+          carbonSpikeProbability: snapshot.carbonSpikeProbability,
+          curtailmentProbability: snapshot.curtailmentProbability,
+          importCarbonLeakageScore: snapshot.importCarbonLeakageScore,
+          signalQuality: normalizeQuality(snapshot.signalQuality) as any,
+          estimatedFlag: snapshot.estimatedFlag ?? false,
+          syntheticFlag: snapshot.syntheticFlag ?? false,
+          source: snapshot.source || 'eia930',
+          metadata: snapshot.metadata || {}
+        })),
+        skipDuplicates: true
+      })
+      console.log(`Stored ${result.count} GridSignalSnapshots for ${snapshots[0]?.region}`)
+    } catch (error: any) {
+      console.error(`Failed to store GridSignalSnapshots:`, error.message)
+      // Log first snapshot for debugging
+      if (snapshots[0]) {
+        console.error('Sample snapshot:', JSON.stringify(snapshots[0], null, 2).slice(0, 500))
+      }
+      throw error
+    }
   }
 
   /**
