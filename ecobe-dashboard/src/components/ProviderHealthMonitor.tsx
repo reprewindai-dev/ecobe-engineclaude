@@ -38,10 +38,10 @@ export function ProviderHealthMonitor() {
 
       {isError && (
         <div className="space-y-3">
-          {/* Fallback: show Electricity Maps (internal) status from metrics */}
+          {/* Fallback: show carbon signal provider status from metrics */}
           {metrics?.electricityMaps && (
             <ProviderRow
-              name="Electricity Maps (internal)"
+              name="Carbon Signal Provider"
               status={metrics.electricityMaps.successRate != null && metrics.electricityMaps.successRate > 0.8 ? 'healthy' : 'degraded'}
               latencyMs={metrics.p95LatencyDeltaMs}
               lastSuccessAt={metrics.electricityMaps.lastSuccessAt}
