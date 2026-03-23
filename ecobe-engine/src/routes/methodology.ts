@@ -4,10 +4,14 @@ import path from 'path'
 import { env } from '../config/env'
 import { getIntegrationMetricsSummary, computeIntegrationSuccessRate } from '../lib/integration-metrics'
 import {
+  ASSURANCE_DISAGREEMENT_THRESHOLD_PCT,
+  ASSURANCE_MODE_SUMMARY,
   DEFAULT_ROUTING_WEIGHTS,
   LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE,
   METHODOLOGY_TIERS,
+  POLICY_MODES,
   ROUTING_LEGAL_DISCLAIMER,
+  STANDARDS_MAPPING,
 } from '../lib/methodology'
 
 const router = Router()
@@ -147,6 +151,13 @@ router.get('/', async (_req, res) => {
           'score = w_carbon * carbon_score + w_latency * latency_score + w_cost * cost_score',
         defaultWeights: DEFAULT_ROUTING_WEIGHTS,
       },
+      assuranceMode: {
+        summary: ASSURANCE_MODE_SUMMARY,
+        disagreementThresholdPct: ASSURANCE_DISAGREEMENT_THRESHOLD_PCT,
+        exportPath: '/api/v1/disclosure/export',
+      },
+      policyModes: POLICY_MODES,
+      standardsMapping: STANDARDS_MAPPING,
       tiers: METHODOLOGY_TIERS,
       markdown,
     })

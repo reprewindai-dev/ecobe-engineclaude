@@ -4,6 +4,10 @@ export interface RoutingWeightSet {
   cost: number
 }
 
+export type RoutingMode = 'optimize' | 'assurance'
+export type PolicyMode = 'default' | 'sec_disclosure_strict' | 'eu_24x7_ready'
+export type SignalType = 'average_operational' | 'marginal_estimate' | 'consumed_emissions' | 'unknown'
+
 export interface MethodologyTier {
   id: string
   name: string
@@ -15,17 +19,106 @@ export interface MethodologyTier {
   }>
 }
 
+export interface PolicyModeDefinition {
+  id: PolicyMode
+  name: string
+  summary: string
+  assuranceMode: boolean
+  conservativeDisagreement: boolean
+  preferredSignalTypes: SignalType[]
+}
+
+export interface StandardsMappingRow {
+  framework: string
+  ecobeField: string
+  standardField: string
+  note: string
+}
+
 export const DEFAULT_ROUTING_WEIGHTS: RoutingWeightSet = {
   carbon: 0.5,
   latency: 0.2,
   cost: 0.3,
 }
 
+export const ASSURANCE_DISAGREEMENT_THRESHOLD_PCT = 15
+
+export const ASSURANCE_MODE_SUMMARY =
+  'Assurance mode is a disclosure-ready routing policy that favors conservative treatment of provider disagreement, explicit uncertainty bands, and audit-grade export metadata over aggressive optimization.'
+
 export const LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE =
   'Ecobe bases routing decisions on the lowest defensible signal: the freshest, best-quality emissions signal that is traceable, validated where possible, and auditable after the fact.'
 
 export const ROUTING_LEGAL_DISCLAIMER =
   'Ecobe recommends execution targets using best-available grid signals. Providers can diverge or degrade, and final execution responsibility remains with the operator. Every decision is logged with provenance for later review.'
+
+export const POLICY_MODES: PolicyModeDefinition[] = [
+  {
+    id: 'default',
+    name: 'Default Optimize',
+    summary: 'Balances carbon, latency, and cost for normal production routing.',
+    assuranceMode: false,
+    conservativeDisagreement: false,
+    preferredSignalTypes: ['average_operational', 'marginal_estimate', 'consumed_emissions'],
+  },
+  {
+    id: 'sec_disclosure_strict',
+    name: 'SEC Disclosure Strict',
+    summary:
+      'Uses assurance mode defaults, conservative disagreement handling, and disclosure-ready decision metadata for audit and filing support.',
+    assuranceMode: true,
+    conservativeDisagreement: true,
+    preferredSignalTypes: ['average_operational'],
+  },
+  {
+    id: 'eu_24x7_ready',
+    name: 'EU 24/7 Ready',
+    summary:
+      'Uses assurance mode with hourly provenance, confidence bands, and granular-certificate-oriented export fields.',
+    assuranceMode: true,
+    conservativeDisagreement: true,
+    preferredSignalTypes: ['average_operational', 'consumed_emissions'],
+  },
+]
+
+export const STANDARDS_MAPPING: StandardsMappingRow[] = [
+  {
+    framework: 'GHG Protocol Scope 2',
+    ecobeField: 'intensity_gco2_per_kwh',
+    standardField: 'location-based emission factor',
+    note: 'Supports reproducible location-based Scope 2 calculations for digital workloads.',
+  },
+  {
+    framework: 'GHG Protocol Scope 2',
+    ecobeField: 'emissions_gco2',
+    standardField: 'reported Scope 2 emissions',
+    note: 'Derived from estimated kWh and intensity used at decision time.',
+  },
+  {
+    framework: 'EnergyTag / Granular Certificates',
+    ecobeField: 'timestamp',
+    standardField: 'time interval',
+    note: 'Hourly or sub-hourly decision timestamp used for granular clean-energy matching.',
+  },
+  {
+    framework: 'EnergyTag / Granular Certificates',
+    ecobeField: 'region',
+    standardField: 'location',
+    note: 'Cloud region or balancing-area mapping for certificate alignment.',
+  },
+  {
+    framework: 'EnergyTag / Granular Certificates',
+    ecobeField: 'estimated_kwh',
+    standardField: 'volume',
+    note: 'Energy volume assigned to the routed workload record.',
+  },
+  {
+    framework: 'SEC / CSRD audit support',
+    ecobeField: 'source_used, signal_type, policy_mode, batch_hash',
+    standardField: 'methodology / provenance / integrity evidence',
+    note: 'Explains which signal drove the decision and proves the export batch was not altered.',
+  },
+]
 
 export const METHODOLOGY_TIERS: MethodologyTier[] = [
   {
@@ -112,3 +205,40 @@ export function normalizeRoutingWeights(
   }
 }
 
+export function resolveRoutingMode(
+  mode?: RoutingMode | null,
+  policyMode?: PolicyMode | null
+): RoutingMode {
+  if (mode) return mode
+  if (policyMode && policyMode !== 'default') return 'assurance'
+  return 'optimize'
+}
+
+export function resolvePolicyMode(
+  policyMode?: PolicyMode | null,
+  mode?: RoutingMode | null
+): PolicyMode {
+  if (policyMode) return policyMode
+  if (mode === 'assurance') return 'sec_disclosure_strict'
+  return 'default'
+}
+
+export function inferSignalType(sourceUsed?: string | null): SignalType {
+  const source = sourceUsed?.toUpperCase() ?? ''
+
+  if (!source) return 'unknown'
+  if (source.includes('WATTTIME')) return 'marginal_estimate'
+  if (
+    source.includes('GRIDSTATUS') ||
+    source.includes('EIA') ||
+    source.includes('EMBER') ||
+    source.includes('GB_CARBON') ||
+    source.includes('DK_CARBON') ||
+    source.includes('FI_CARBON') ||
+    source.includes('STATIC')
+  ) {
+    return 'average_operational'
+  }
+
+  return 'unknown'
+}

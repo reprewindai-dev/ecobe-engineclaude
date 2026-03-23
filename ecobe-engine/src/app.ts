@@ -32,6 +32,7 @@ import testPostRoutes from './routes/test-post'
 import routeDebugRoutes from './routes/route-debug'
 import ciRoutes from './routes/ci'
 import methodologyRoutes from './routes/methodology'
+import disclosureRoutes from './routes/disclosure'
 
 function rawBodySaver(_req: express.Request, _res: express.Response, buf: Buffer) {
   if (buf?.length) {
@@ -315,6 +316,7 @@ function attachApiRoutes(app: express.Express) {
   app.use('/api/v1/health-ext', healthRoutes)
   app.use('/api/v1/metrics', metricsRoutes)
   app.use('/api/v1/methodology', methodologyRoutes)
+  app.use('/api/v1/disclosure', disclosureRoutes)
   app.use('/api/v1/region-mapping', regionMappingRoutes)
   app.use('/api/v1/patterns', patternsRoutes)
   app.use('/api/v1/dks', dksRoutes)

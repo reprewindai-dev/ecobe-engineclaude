@@ -7,10 +7,17 @@ import { classifyJob, recordLedgerEntry, storeProviderSnapshot } from './routing
 import { generateLease, retryAsync } from './governance'
 import { prisma } from './db'
 import {
+  ASSURANCE_DISAGREEMENT_THRESHOLD_PCT,
   DEFAULT_ROUTING_WEIGHTS,
   LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE,
   ROUTING_LEGAL_DISCLAIMER,
+  inferSignalType,
   normalizeRoutingWeights,
+  resolvePolicyMode,
+  resolveRoutingMode,
+  type PolicyMode,
+  type RoutingMode,
+  type SignalType,
   type RoutingWeightSet,
 } from './methodology'
 
@@ -22,6 +29,10 @@ export interface RoutingRequest {
   costWeight?: number  // 0-1, default 0.3
   carbonWeight?: number  // 0-1, default 0.5
   latencyWeight?: number  // 0-1, default 0.2
+  mode?: RoutingMode
+  policyMode?: PolicyMode
+  targetTime?: string
+  durationMinutes?: number
 }
 
 export interface RoutingResult {
@@ -62,6 +73,15 @@ export interface RoutingResult {
   weights: RoutingWeightSet
   legalDisclaimer: string
   doctrine: string
+  mode: RoutingMode
+  policyMode: PolicyMode
+  signalTypeUsed: SignalType
+  assurance: {
+    enabled: boolean
+    disagreementThresholdPct: number
+    confidenceLabel: 'high' | 'medium' | 'low'
+    conservativeAccounting: boolean
+  }
 }
 
 export async function routeGreen(request: RoutingRequest): Promise<RoutingResult> {
@@ -73,6 +93,10 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     carbonWeight = DEFAULT_ROUTING_WEIGHTS.carbon,
     latencyWeight = DEFAULT_ROUTING_WEIGHTS.latency,
     costWeight = DEFAULT_ROUTING_WEIGHTS.cost,
+    mode,
+    policyMode,
+    targetTime,
+    durationMinutes,
   } = request
 
   if (preferredRegions.length === 0) {
@@ -84,6 +108,9 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     latency: latencyWeight,
     cost: costWeight,
   })
+  const appliedMode = resolveRoutingMode(mode, policyMode)
+  const appliedPolicyMode = resolvePolicyMode(policyMode, appliedMode)
+  const assuranceEnabled = appliedMode === 'assurance'
 
   // Get routing signals for all regions from ProviderRouter
   const regionSignals = new Map<string, any>()
@@ -97,6 +124,11 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
         return {
           region,
           carbonIntensity: signal.carbonIntensity,
+          effectiveCarbonIntensity: computeEffectiveCarbonIntensity(
+            signal.carbonIntensity,
+            signal,
+            appliedMode
+          ),
           latency: latencyMsByRegion[region] ?? 100,
           costIndex: costIndexByRegion[region] ?? 1,
           signal,
@@ -107,6 +139,7 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
         return {
           region,
           carbonIntensity: 400,
+          effectiveCarbonIntensity: computeEffectiveCarbonIntensity(400, null, appliedMode),
           latency: latencyMsByRegion[region] ?? 100,
           costIndex: costIndexByRegion[region] ?? 1,
           signal: null,
@@ -122,7 +155,7 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
 
   if (filtered.length === 0) {
     // All regions exceed carbon budget - pick lowest carbon anyway
-    const sorted = [...regionData].sort((a, b) => a.carbonIntensity - b.carbonIntensity)
+    const sorted = [...regionData].sort((a, b) => a.effectiveCarbonIntensity - b.effectiveCarbonIntensity)
     const best = sorted[0]
 
     return {
@@ -149,6 +182,15 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
       weights: normalizedWeights,
       legalDisclaimer: ROUTING_LEGAL_DISCLAIMER,
       doctrine: LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE,
+      mode: appliedMode,
+      policyMode: appliedPolicyMode,
+      signalTypeUsed: inferSignalType(best.signal?.provenance?.sourceUsed ?? null),
+      assurance: {
+        enabled: assuranceEnabled,
+        disagreementThresholdPct: ASSURANCE_DISAGREEMENT_THRESHOLD_PCT,
+        confidenceLabel: 'low',
+        conservativeAccounting: assuranceEnabled,
+      },
       alternatives: sorted.slice(1, 3).map((r) => ({
         region: r.region,
         carbonIntensity: r.carbonIntensity,
@@ -161,8 +203,8 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
   // Score each region
   const scored = filtered.map((r) => {
     // Carbon score (lower is better, normalize to 0-1)
-    const maxCarbon = Math.max(...filtered.map((x) => x.carbonIntensity))
-    const carbonScore = 1 - r.carbonIntensity / maxCarbon
+    const maxCarbon = Math.max(...filtered.map((x) => x.effectiveCarbonIntensity))
+    const carbonScore = maxCarbon === 0 ? 1 : 1 - r.effectiveCarbonIntensity / maxCarbon
 
     // Latency score (lower is better, normalize to 0-1)
     const maxLatency = Math.max(...filtered.map((x) => x.latency))
@@ -194,6 +236,7 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
 
   const best = scored[0]
   const bestSignal = regionSignals.get(best.region)
+  const signalTypeUsed = inferSignalType(bestSignal?.provenance?.sourceUsed ?? null)
 
   // Get grid snapshot for best region
   const gridSnapshot = await getLatestGridSnapshot(best.region)
@@ -222,6 +265,7 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     flag: bestSignal.provenance.disagreementFlag,
     pct: bestSignal.provenance.disagreementPct
   }) : null
+  const confidenceLabel = deriveConfidenceLabel(qualityTier, bestSignal?.provenance.disagreementPct ?? 0)
 
   const decisionFrameId = randomUUID()
 
@@ -237,6 +281,11 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
   }
   if (bestSignal?.provenance.disagreementFlag && (bestSignal.provenance.disagreementPct ?? 0) > 25) {
     governanceWarnings.push(`HIGH_DISAGREEMENT: Provider signals diverge by ${bestSignal.provenance.disagreementPct?.toFixed(1)}%. Decision confidence reduced.`)
+  }
+  if (assuranceEnabled && signalTypeUsed !== 'average_operational') {
+    governanceWarnings.push(
+      `ASSURANCE_MODE_SIGNAL_CLASS: Assurance mode selected ${signalTypeUsed}; retain disclosure labels and review against approved average-operational sources.`
+    )
   }
   if (forecastStability === 'unstable') {
     governanceWarnings.push('UNSTABLE_FORECAST: Grid conditions are volatile. Recommend shorter execution windows.')
@@ -403,15 +452,22 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
           leaseExpiresAt,
           mustRevalidateAfter,
           qualityTier,
+          confidenceLabel,
           forecast_stability: forecastStability,
           score: best.score,
           source: bestSignal?.provenance.sourceUsed ?? null,
+          mode: appliedMode,
+          policyMode: appliedPolicyMode,
+          signalTypeUsed,
           weights: normalizedWeights,
+          targetTime: targetTime ?? null,
+          durationMinutes: durationMinutes ?? null,
           alternatives: scored.slice(1, 3).map((r) => ({
             region: r.region,
             carbonIntensity: r.carbonIntensity,
             score: r.score,
           })),
+          dataResolutionMinutes: bestSignal?.isForecast ? 60 : 5,
           confidenceBand: bestSignal
             ? deriveConfidenceBand(
                 best.carbonIntensity,
@@ -419,6 +475,12 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
                 bestSignal.provenance.disagreementPct ?? 0
               )
             : deriveConfidenceBand(best.carbonIntensity, 0.25, 0),
+          assurance: {
+            enabled: assuranceEnabled,
+            disagreementThresholdPct: ASSURANCE_DISAGREEMENT_THRESHOLD_PCT,
+            confidenceLabel,
+            conservativeAccounting: assuranceEnabled,
+          },
           doctrine: LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE,
           legalDisclaimer: ROUTING_LEGAL_DISCLAIMER,
         },
@@ -468,6 +530,15 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     weights: normalizedWeights,
     legalDisclaimer: ROUTING_LEGAL_DISCLAIMER,
     doctrine: LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE,
+    mode: appliedMode,
+    policyMode: appliedPolicyMode,
+    signalTypeUsed,
+    assurance: {
+      enabled: assuranceEnabled,
+      disagreementThresholdPct: ASSURANCE_DISAGREEMENT_THRESHOLD_PCT,
+      confidenceLabel,
+      conservativeAccounting: assuranceEnabled,
+    },
   }
 }
 
@@ -520,4 +591,41 @@ function deriveConfidenceBand(
     high: Math.max(1, Math.round(carbonIntensity * (1 + spread))),
     empirical: disagreementPct > 0,
   }
+}
+
+function computeEffectiveCarbonIntensity(
+  carbonIntensity: number,
+  signal: any,
+  mode: RoutingMode
+): number {
+  if (mode !== 'assurance') {
+    return carbonIntensity
+  }
+
+  const confidence = signal?.confidence ?? 0.25
+  const disagreementPct = signal?.provenance?.disagreementPct ?? 0
+  const fallbackUsed = Boolean(signal?.provenance?.fallbackUsed || signal?.source === 'fallback')
+  const conservativeBand = deriveConfidenceBand(carbonIntensity, confidence, disagreementPct)
+
+  let effective = conservativeBand.high
+  if (fallbackUsed) {
+    effective = Math.max(effective, Math.round(carbonIntensity * 1.35))
+  }
+  if (disagreementPct >= ASSURANCE_DISAGREEMENT_THRESHOLD_PCT) {
+    effective = Math.max(effective, Math.round(carbonIntensity * (1 + disagreementPct / 100)))
+  }
+
+  return effective
+}
+
+function deriveConfidenceLabel(
+  qualityTier: 'high' | 'medium' | 'low',
+  disagreementPct: number
+): 'high' | 'medium' | 'low' {
+  if (disagreementPct >= ASSURANCE_DISAGREEMENT_THRESHOLD_PCT) {
+    return 'low'
+  }
+  if (qualityTier === 'high') return 'high'
+  if (qualityTier === 'medium') return 'medium'
+  return 'low'
 }

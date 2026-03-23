@@ -1,7 +1,9 @@
 import { Router, Request, Response } from 'express'
+import { env } from '../config/env'
 import { redis } from '../lib/redis'
 import { prisma } from '../lib/db'
 import { GridSignalCache } from '../lib/grid-signals/grid-signal-cache'
+import { getScheduledIntelligenceJobs } from '../workers/intelligence-scheduler'
 
 const router = Router()
 
@@ -68,6 +70,16 @@ router.get('/status', async (req: Request, res: Response) => {
       console.warn('Failed to get cache stats:', error)
     }
 
+    let scheduledJobsCount = 0
+    let scheduledJobsHealthy = false
+    try {
+      const schedules = await getScheduledIntelligenceJobs()
+      scheduledJobsCount = schedules.length
+      scheduledJobsHealthy = schedules.length > 0 || !env.QSTASH_TOKEN
+    } catch (error) {
+      console.warn('Failed to get scheduled intelligence jobs:', error)
+    }
+
     // Get memory usage
     const memUsage = process.memoryUsage()
 
@@ -92,6 +104,35 @@ router.get('/status', async (req: Request, res: Response) => {
         redis: {
           healthy: redisHealthy,
           latencyMs: redisLatency >= 0 ? redisLatency : null
+        },
+        qstash: {
+          configured: Boolean(env.QSTASH_TOKEN),
+          healthy: scheduledJobsHealthy,
+          scheduledJobsCount
+        },
+        vectorStore: {
+          configured: Boolean(env.UPSTASH_VECTOR_REST_URL && env.UPSTASH_VECTOR_REST_TOKEN),
+          indexName: env.UPSTASH_VECTOR_INDEX_NAME || null
+        },
+        embeddings: {
+          configured: Boolean(env.OPENAI_API_KEY),
+          model: env.OPENAI_EMBEDDING_MODEL
+        }
+      },
+      configuration: {
+        providers: {
+          watttime: Boolean(env.WATTTIME_USERNAME && env.WATTTIME_PASSWORD),
+          gridstatus: Boolean(env.GRIDSTATUS_API_KEY || env.EIA_API_KEY),
+          ember: Boolean(env.EMBER_API_KEY),
+          fingrid: Boolean(env.FINGRID_API_KEY)
+        },
+        dekesIntegration: {
+          configured: Boolean(env.DEKES_API_KEY && env.DEKES_WEBHOOK_URL)
+        },
+        workerMode: {
+          backgroundWorkersEnabled: env.ENGINE_BACKGROUND_WORKERS_ENABLED,
+          forecastRefreshEnabled: env.FORECAST_REFRESH_ENABLED,
+          uiEnabled: env.UI_ENABLED
         }
       },
       cache: cacheStats ? {

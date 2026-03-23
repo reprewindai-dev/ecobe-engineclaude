@@ -22,6 +22,10 @@ const routingRequestSchema = z.object({
   carbonWeight: z.number().min(0).max(1).optional(),
   latencyWeight: z.number().min(0).max(1).optional(),
   costWeight: z.number().min(0).max(1).optional(),
+  mode: z.enum(['optimize', 'assurance']).optional(),
+  policyMode: z.enum(['default', 'sec_disclosure_strict', 'eu_24x7_ready']).optional(),
+  targetTime: z.string().datetime().optional(),
+  durationMinutes: z.number().int().positive().optional(),
   orgId: z.string().optional(), // Governance: when present, enforces quota
 })
 
@@ -96,8 +100,8 @@ router.get('/:decisionFrameId/replay', async (req, res) => {
       source: (decision.meta as any)?.source ?? null,
       request: {
         regions: [decision.baselineRegion, decision.chosenRegion],
-        targetTime: null,
-        durationMinutes: null,
+        targetTime: (decision.meta as any)?.targetTime ?? null,
+        durationMinutes: (decision.meta as any)?.durationMinutes ?? null,
         maxCarbonGPerKwh: null,
         weights: {
           carbon: (decision.meta as any)?.weights?.carbon ?? DEFAULT_ROUTING_WEIGHTS.carbon,
@@ -124,6 +128,9 @@ router.get('/:decisionFrameId/replay', async (req, res) => {
       baselineIntensity: decision.carbonIntensityBaselineGPerKwh ?? 0,
       carbon_delta_g_per_kwh: (decision.carbonIntensityBaselineGPerKwh ?? 0) - (decision.carbonIntensityChosenGPerKwh ?? 0),
       qualityTier: (decision.meta as any)?.qualityTier ?? 'medium',
+      mode: (decision.meta as any)?.mode ?? 'optimize',
+      policyMode: (decision.meta as any)?.policyMode ?? 'default',
+      signalTypeUsed: (decision.meta as any)?.signalTypeUsed ?? 'unknown',
       forecast_stability: (decision.meta as any)?.forecast_stability ?? null,
       score: (decision.meta as any)?.score ?? 0,
       explanation: decision.reason ?? '',
@@ -141,7 +148,8 @@ router.get('/:decisionFrameId/replay', async (req, res) => {
       estimatedFlag: decision.estimatedFlag ?? false,
       syntheticFlag: decision.syntheticFlag ?? false,
       validationSource: decision.validationSource ?? null,
-      disagreementPct: decision.disagreementPct ?? null
+      disagreementPct: decision.disagreementPct ?? null,
+      assurance: (decision.meta as any)?.assurance ?? null,
     }
 
     res.json(replayResult)
