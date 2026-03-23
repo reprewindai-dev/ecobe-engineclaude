@@ -1,5 +1,5 @@
 import express from 'express'
-import cors from 'cors'
+import cors, { type CorsOptions } from 'cors'
 
 import { env } from './config/env'
 import { prisma } from './lib/db'
@@ -39,6 +39,34 @@ function rawBodySaver(_req: express.Request, _res: express.Response, buf: Buffer
     const rawReq = _req as { rawBody?: string }
     rawReq.rawBody = buf.toString('utf8')
   }
+}
+
+function buildCorsOptions() {
+  const defaultOrigins =
+    env.NODE_ENV === 'production'
+      ? env.CORS_ALLOWED_ORIGINS
+      : ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000']
+
+  const allowedOrigins = new Set(defaultOrigins)
+
+  return {
+    origin(origin: string | undefined, callback: (error: Error | null, allow?: boolean) => void) {
+      if (!origin) {
+        callback(null, true)
+        return
+      }
+
+      if (allowedOrigins.has(origin)) {
+        callback(null, true)
+        return
+      }
+
+      callback(new Error('Origin not allowed by CORS'))
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Ecobe-Internal-Key', 'X-Api-Key', 'X-Request-Id'],
+  } satisfies CorsOptions
 }
 
 function attachHealthRoutes(app: express.Express) {
@@ -340,7 +368,7 @@ export function createApp() {
   const app = express()
 
   app.set('trust proxy', 1)
-  app.use(cors())
+  app.use(cors(buildCorsOptions()))
   app.use(express.json({ limit: '1mb', verify: rawBodySaver }))
   app.use(express.urlencoded({ extended: true, limit: '1mb', verify: rawBodySaver }))
 

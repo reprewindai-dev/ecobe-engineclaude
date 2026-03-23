@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { createHash, randomUUID } from 'crypto'
 import { z } from 'zod'
 import { prisma } from '../lib/db'
+import { internalServiceGuard } from '../middleware/internal-auth'
 import {
   inferSignalType,
   POLICY_MODES,
@@ -12,6 +13,7 @@ import {
 } from '../lib/methodology'
 
 const router = Router()
+router.use(internalServiceGuard)
 
 const exportQuerySchema = z.object({
   from: z.string().datetime().optional(),
@@ -201,13 +203,15 @@ router.get('/export', async (req, res) => {
       const payload = {
         batch_id: batchId,
         hash: '',
+        hash_scope: 'canonical_payload_excluding_hash',
         generated_at: generatedAt,
         record_count: records.length,
         standards_mapping: STANDARDS_MAPPING,
         policy_modes: POLICY_MODES,
         records,
       }
-      const unsigned = JSON.stringify(payload, null, 2)
+      const canonicalPayload = { ...payload }
+      const unsigned = JSON.stringify(canonicalPayload, null, 2)
       const hash = createHash('sha256').update(unsigned).digest('hex')
       payload.hash = hash
       await persistExportBatch(batchId, hash, generatedAt, records.length, format, start, end, mode, policyMode)

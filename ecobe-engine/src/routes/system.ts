@@ -3,9 +3,11 @@ import { env } from '../config/env'
 import { redis } from '../lib/redis'
 import { prisma } from '../lib/db'
 import { GridSignalCache } from '../lib/grid-signals/grid-signal-cache'
+import { internalServiceGuard } from '../middleware/internal-auth'
 import { getScheduledIntelligenceJobs } from '../workers/intelligence-scheduler'
 
 const router = Router()
+router.use(internalServiceGuard)
 
 // Track worker status in memory
 let workerStatus = {
