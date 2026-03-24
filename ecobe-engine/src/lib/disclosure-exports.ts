@@ -51,6 +51,24 @@ export interface LedgerDisclosureEntry {
   confidenceBandHigh?: number | null
   lowerHalfBenchmarkGPerKwh?: number | null
   lowerHalfQualified?: boolean | null
+  baselineWaterL?: number | null
+  chosenWaterL?: number | null
+  waterSavedL?: number | null
+  baselineWaterScarcityImpact?: number | null
+  chosenWaterScarcityImpact?: number | null
+  baselineWaterIntensityLPerKwh?: number | null
+  chosenWaterIntensityLPerKwh?: number | null
+  waterStressIndex?: number | null
+  waterQualityIndex?: number | null
+  droughtRiskIndex?: number | null
+  waterConfidenceScore?: number | null
+  waterSource?: string | null
+  waterSignalType?: string | null
+  waterDatasetVersion?: string | null
+  waterPolicyProfile?: string | null
+  waterGuardrailTriggered?: boolean | null
+  waterFallbackUsed?: boolean | null
+  waterReferenceTime?: Date | null
   metadata?: Record<string, unknown> | null
 }
 
@@ -93,6 +111,24 @@ export interface DisclosureRecord {
   accounting_method: string
   lower_half_benchmark_gco2_per_kwh: number | null
   lower_half_qualified: boolean | null
+  water_liters: number | null
+  baseline_water_liters: number | null
+  water_saved_liters: number | null
+  water_scarcity_impact: number | null
+  baseline_water_scarcity_impact: number | null
+  water_intensity_l_per_kwh: number | null
+  baseline_water_intensity_l_per_kwh: number | null
+  water_stress_index: number | null
+  water_quality_index: number | null
+  drought_risk_index: number | null
+  water_confidence_score: number | null
+  water_source: string | null
+  water_signal_type: string | null
+  water_dataset_version: string | null
+  water_policy_profile: string | null
+  water_guardrail_triggered: boolean
+  water_fallback_used: boolean
+  water_reference_time: string | null
 }
 
 export interface DisclosureEnvelope {
@@ -192,6 +228,35 @@ export function toDisclosureRecord(entry: LedgerDisclosureEntry): DisclosureReco
     lower_half_benchmark_gco2_per_kwh:
       entry.lowerHalfBenchmarkGPerKwh != null ? round3(entry.lowerHalfBenchmarkGPerKwh) : null,
     lower_half_qualified: entry.lowerHalfQualified ?? null,
+    water_liters: entry.chosenWaterL != null ? round3(entry.chosenWaterL) : null,
+    baseline_water_liters: entry.baselineWaterL != null ? round3(entry.baselineWaterL) : null,
+    water_saved_liters: entry.waterSavedL != null ? round3(entry.waterSavedL) : null,
+    water_scarcity_impact:
+      entry.chosenWaterScarcityImpact != null ? round3(entry.chosenWaterScarcityImpact) : null,
+    baseline_water_scarcity_impact:
+      entry.baselineWaterScarcityImpact != null
+        ? round3(entry.baselineWaterScarcityImpact)
+        : null,
+    water_intensity_l_per_kwh:
+      entry.chosenWaterIntensityLPerKwh != null ? round3(entry.chosenWaterIntensityLPerKwh) : null,
+    baseline_water_intensity_l_per_kwh:
+      entry.baselineWaterIntensityLPerKwh != null
+        ? round3(entry.baselineWaterIntensityLPerKwh)
+        : null,
+    water_stress_index: entry.waterStressIndex != null ? round3(entry.waterStressIndex) : null,
+    water_quality_index:
+      entry.waterQualityIndex != null ? round3(entry.waterQualityIndex) : null,
+    drought_risk_index:
+      entry.droughtRiskIndex != null ? round3(entry.droughtRiskIndex) : null,
+    water_confidence_score:
+      entry.waterConfidenceScore != null ? round3(entry.waterConfidenceScore) : null,
+    water_source: entry.waterSource ?? null,
+    water_signal_type: entry.waterSignalType ?? null,
+    water_dataset_version: entry.waterDatasetVersion ?? null,
+    water_policy_profile: entry.waterPolicyProfile ?? null,
+    water_guardrail_triggered: entry.waterGuardrailTriggered ?? false,
+    water_fallback_used: entry.waterFallbackUsed ?? false,
+    water_reference_time: entry.waterReferenceTime?.toISOString() ?? null,
   }
 }
 
@@ -271,6 +336,24 @@ export function buildDisclosureCsv(records: DisclosureRecord[]): string {
     'accounting_method',
     'lower_half_benchmark_gco2_per_kwh',
     'lower_half_qualified',
+    'water_liters',
+    'baseline_water_liters',
+    'water_saved_liters',
+    'water_scarcity_impact',
+    'baseline_water_scarcity_impact',
+    'water_intensity_l_per_kwh',
+    'baseline_water_intensity_l_per_kwh',
+    'water_stress_index',
+    'water_quality_index',
+    'drought_risk_index',
+    'water_confidence_score',
+    'water_source',
+    'water_signal_type',
+    'water_dataset_version',
+    'water_policy_profile',
+    'water_guardrail_triggered',
+    'water_fallback_used',
+    'water_reference_time',
   ]
 
   const escape = (value: unknown) => {

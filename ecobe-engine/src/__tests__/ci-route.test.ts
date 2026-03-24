@@ -220,6 +220,80 @@ describe('CI routing control layer', () => {
     )
   })
 
+  it('throttles critical execution when water guardrails remain active', async () => {
+    routeGreen.mockResolvedValue({
+      selectedRegion: 'eastus',
+      carbonIntensity: 118,
+      score: 0.88,
+      alternatives: [{ region: 'westus2', carbonIntensity: 140, score: 0.52 }],
+      evaluatedCandidates: [
+        { region: 'eastus', carbonIntensity: 118, score: 0.88 },
+        { region: 'westus2', carbonIntensity: 140, score: 0.52 },
+      ],
+      decisionFrameId: 'decision-water-throttle',
+      doctrine: 'lowest defensible signal',
+      legalDisclaimer: 'routing disclaimer',
+      mode: 'assurance',
+      policyMode: 'sec_disclosure_strict',
+      signalTypeUsed: 'average_operational',
+      assurance: { confidenceLabel: 'high' },
+      source_used: 'GRIDSTATUS_EIA930',
+      validation_source: null,
+      fallback_used: false,
+      provider_disagreement: { flag: false, pct: 0 },
+      confidenceBand: { low: 105, mid: 118, high: 130, empirical: true },
+      budgetStatus: [],
+      water: {
+        policyProfile: 'high_water_sensitivity',
+        selectedWaterLiters: 1.1,
+        baselineWaterLiters: 1.4,
+        selectedWaterScarcityImpact: 0.42,
+        baselineWaterScarcityImpact: 0.61,
+        selectedWaterIntensityLPerKwh: 1.5,
+        baselineWaterIntensityLPerKwh: 1.8,
+        waterStressIndex: 4.6,
+        waterQualityIndex: 2.2,
+        droughtRiskIndex: 3.7,
+        confidence: 0.81,
+        source: 'aqueduct+aware_2_0+nrel',
+        signalType: 'scarcity_weighted_operational',
+        datasetVersion: 'aqueduct_4_0_2023_08_16|aware_2_0_2025_07_24|nrel_water_factor_library_v1',
+        fallbackUsed: false,
+        guardrailTriggered: true,
+        referenceTime: new Date().toISOString(),
+      },
+    })
+
+    const response = await postWithAuth('/api/v1/ci/carbon-route').send({
+      workloadId: 'water-guardrail-build',
+      candidateRegions: ['eastus', 'westus2'],
+      criticality: 'critical',
+      matrixSize: 6,
+      waterPolicyProfile: 'high_water_sensitivity',
+    })
+
+    expect(response.status).toBe(200)
+    expect(response.body.decision).toBe('throttle')
+    expect(response.body.reasonCode).toBe('WATER_GUARDRAIL_THROTTLED')
+    expect(response.body.maxParallel).toBe(1)
+    expect(response.body.water.guardrailTriggered).toBe(true)
+    expect(response.body.workflowOutputs.water_stress_index).toBe('4.6')
+    expect(prisma.cIDecision.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          metadata: expect.objectContaining({
+            decision: 'throttle',
+            reasonCode: 'WATER_GUARDRAIL_THROTTLED',
+            water: expect.objectContaining({
+              guardrailTriggered: true,
+              policyProfile: 'high_water_sensitivity',
+            }),
+          }),
+        }),
+      })
+    )
+  })
+
   it('returns a deny decision when a carbon budget policy blocks the request', async () => {
     routeGreen.mockRejectedValue(new CarbonBudgetViolationError([]))
 

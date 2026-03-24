@@ -154,5 +154,33 @@ describe('Green Routing', () => {
         })
       )
     })
+
+    it('should deny non-critical work when water guardrails hard-block all candidates', async () => {
+      await expect(
+        routeGreen({
+          preferredRegions: ['FR'],
+          energyEstimateKwh: 10,
+          criticality: 'standard',
+          waterPolicyProfile: 'high_water_sensitivity',
+          waterSignalsByRegion: {
+            FR: {
+              region: 'FR',
+              waterIntensityLPerKwh: 3,
+              waterStressIndex: 5,
+              waterQualityIndex: 4,
+              droughtRiskIndex: 4.5,
+              scarcityCfAnnual: 125,
+              source: 'test-water-signal',
+              referenceTime: new Date().toISOString(),
+              dataQuality: 'high',
+              signalType: 'scarcity_weighted_operational',
+              confidence: 0.95,
+            },
+          },
+        })
+      ).rejects.toMatchObject({
+        code: 'WATER_GUARDRAIL_TRIGGERED',
+      })
+    })
   })
 })

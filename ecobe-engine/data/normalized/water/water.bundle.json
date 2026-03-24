@@ -1,0 +1,1350 @@
+{
+  "us-east-1": {
+    "waterStressScore": 5,
+    "waterStressRawRatio": 1.3458,
+    "overallWaterRiskScore": 3.6,
+    "waterQualityIndex": 1.27,
+    "droughtRiskScore": 2.52,
+    "scarcityFactorAnnual": 11.3,
+    "scarcityFactorMonthly": {
+      "10": 12.4,
+      "11": 12.3,
+      "12": 8.27,
+      "01": 7.98,
+      "02": 6.66,
+      "03": 6.51,
+      "04": 8.06,
+      "05": 9.46,
+      "06": 14.9,
+      "07": 16.8,
+      "08": 17.9,
+      "09": 14.4
+    },
+    "waterIntensityLPerKwh": 1.5794,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "AWS us-east-1 mapped to United States country-level hydrology and a thermal-mixed grid profile."
+      ],
+      "nrelMix": {
+        "ngcc_closed_loop": 0.45,
+        "coal_closed_loop": 0.3,
+        "nuclear_closed_loop": 0.15,
+        "wind_onshore": 0.05,
+        "solar_pv_operational": 0.05
+      }
+    }
+  },
+  "us-east-2": {
+    "waterStressScore": 5,
+    "waterStressRawRatio": 1.3458,
+    "overallWaterRiskScore": 3.6,
+    "waterQualityIndex": 1.27,
+    "droughtRiskScore": 2.52,
+    "scarcityFactorAnnual": 11.3,
+    "scarcityFactorMonthly": {
+      "10": 12.4,
+      "11": 12.3,
+      "12": 8.27,
+      "01": 7.98,
+      "02": 6.66,
+      "03": 6.51,
+      "04": 8.06,
+      "05": 9.46,
+      "06": 14.9,
+      "07": 16.8,
+      "08": 17.9,
+      "09": 14.4
+    },
+    "waterIntensityLPerKwh": 1.5794,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "AWS us-east-2 mapped to United States country-level hydrology and a thermal-mixed grid profile."
+      ],
+      "nrelMix": {
+        "ngcc_closed_loop": 0.45,
+        "coal_closed_loop": 0.3,
+        "nuclear_closed_loop": 0.15,
+        "wind_onshore": 0.05,
+        "solar_pv_operational": 0.05
+      }
+    }
+  },
+  "us-west-1": {
+    "waterStressScore": 5,
+    "waterStressRawRatio": 1.3458,
+    "overallWaterRiskScore": 3.6,
+    "waterQualityIndex": 1.27,
+    "droughtRiskScore": 2.52,
+    "scarcityFactorAnnual": 11.3,
+    "scarcityFactorMonthly": {
+      "10": 12.4,
+      "11": 12.3,
+      "12": 8.27,
+      "01": 7.98,
+      "02": 6.66,
+      "03": 6.51,
+      "04": 8.06,
+      "05": 9.46,
+      "06": 14.9,
+      "07": 16.8,
+      "08": 17.9,
+      "09": 14.4
+    },
+    "waterIntensityLPerKwh": 0.8505,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "AWS us-west-1 uses a gas-dominant profile to reflect California-style thermal balancing in the first pass bundle."
+      ],
+      "nrelMix": {
+        "ngcc_closed_loop": 0.75,
+        "wind_onshore": 0.1,
+        "solar_pv_operational": 0.1,
+        "nuclear_closed_loop": 0.05
+      }
+    }
+  },
+  "us-west-2": {
+    "waterStressScore": 5,
+    "waterStressRawRatio": 1.3458,
+    "overallWaterRiskScore": 3.6,
+    "waterQualityIndex": 1.27,
+    "droughtRiskScore": 2.52,
+    "scarcityFactorAnnual": 11.3,
+    "scarcityFactorMonthly": {
+      "10": 12.4,
+      "11": 12.3,
+      "12": 8.27,
+      "01": 7.98,
+      "02": 6.66,
+      "03": 6.51,
+      "04": 8.06,
+      "05": 9.46,
+      "06": 14.9,
+      "07": 16.8,
+      "08": 17.9,
+      "09": 14.4
+    },
+    "waterIntensityLPerKwh": 0.1878,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "AWS us-west-2 mapped to a renewables-heavy profile for BPA-style hydro and wind heavy supply."
+      ],
+      "nrelMix": {
+        "wind_onshore": 0.5,
+        "solar_pv_operational": 0.3,
+        "ngcc_closed_loop": 0.2
+      }
+    }
+  },
+  "us-central1": {
+    "waterStressScore": 5,
+    "waterStressRawRatio": 1.3458,
+    "overallWaterRiskScore": 3.6,
+    "waterQualityIndex": 1.27,
+    "droughtRiskScore": 2.52,
+    "scarcityFactorAnnual": 11.3,
+    "scarcityFactorMonthly": {
+      "10": 12.4,
+      "11": 12.3,
+      "12": 8.27,
+      "01": 7.98,
+      "02": 6.66,
+      "03": 6.51,
+      "04": 8.06,
+      "05": 9.46,
+      "06": 14.9,
+      "07": 16.8,
+      "08": 17.9,
+      "09": 14.4
+    },
+    "waterIntensityLPerKwh": 1.5794,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "GCP us-central1 uses a thermal-mixed US grid profile."
+      ],
+      "nrelMix": {
+        "ngcc_closed_loop": 0.45,
+        "coal_closed_loop": 0.3,
+        "nuclear_closed_loop": 0.15,
+        "wind_onshore": 0.05,
+        "solar_pv_operational": 0.05
+      }
+    }
+  },
+  "us-east4": {
+    "waterStressScore": 5,
+    "waterStressRawRatio": 1.3458,
+    "overallWaterRiskScore": 3.6,
+    "waterQualityIndex": 1.27,
+    "droughtRiskScore": 2.52,
+    "scarcityFactorAnnual": 11.3,
+    "scarcityFactorMonthly": {
+      "10": 12.4,
+      "11": 12.3,
+      "12": 8.27,
+      "01": 7.98,
+      "02": 6.66,
+      "03": 6.51,
+      "04": 8.06,
+      "05": 9.46,
+      "06": 14.9,
+      "07": 16.8,
+      "08": 17.9,
+      "09": 14.4
+    },
+    "waterIntensityLPerKwh": 1.5794,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "GCP us-east4 uses a thermal-mixed US grid profile."
+      ],
+      "nrelMix": {
+        "ngcc_closed_loop": 0.45,
+        "coal_closed_loop": 0.3,
+        "nuclear_closed_loop": 0.15,
+        "wind_onshore": 0.05,
+        "solar_pv_operational": 0.05
+      }
+    }
+  },
+  "us-west1": {
+    "waterStressScore": 5,
+    "waterStressRawRatio": 1.3458,
+    "overallWaterRiskScore": 3.6,
+    "waterQualityIndex": 1.27,
+    "droughtRiskScore": 2.52,
+    "scarcityFactorAnnual": 11.3,
+    "scarcityFactorMonthly": {
+      "10": 12.4,
+      "11": 12.3,
+      "12": 8.27,
+      "01": 7.98,
+      "02": 6.66,
+      "03": 6.51,
+      "04": 8.06,
+      "05": 9.46,
+      "06": 14.9,
+      "07": 16.8,
+      "08": 17.9,
+      "09": 14.4
+    },
+    "waterIntensityLPerKwh": 0.1878,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "GCP us-west1 uses a renewables-heavy profile for BPA-style supply."
+      ],
+      "nrelMix": {
+        "wind_onshore": 0.5,
+        "solar_pv_operational": 0.3,
+        "ngcc_closed_loop": 0.2
+      }
+    }
+  },
+  "eastus": {
+    "waterStressScore": 5,
+    "waterStressRawRatio": 1.3458,
+    "overallWaterRiskScore": 3.6,
+    "waterQualityIndex": 1.27,
+    "droughtRiskScore": 2.52,
+    "scarcityFactorAnnual": 11.3,
+    "scarcityFactorMonthly": {
+      "10": 12.4,
+      "11": 12.3,
+      "12": 8.27,
+      "01": 7.98,
+      "02": 6.66,
+      "03": 6.51,
+      "04": 8.06,
+      "05": 9.46,
+      "06": 14.9,
+      "07": 16.8,
+      "08": 17.9,
+      "09": 14.4
+    },
+    "waterIntensityLPerKwh": 1.5794,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "Azure eastus uses a thermal-mixed US grid profile."
+      ],
+      "nrelMix": {
+        "ngcc_closed_loop": 0.45,
+        "coal_closed_loop": 0.3,
+        "nuclear_closed_loop": 0.15,
+        "wind_onshore": 0.05,
+        "solar_pv_operational": 0.05
+      }
+    }
+  },
+  "eastus2": {
+    "waterStressScore": 5,
+    "waterStressRawRatio": 1.3458,
+    "overallWaterRiskScore": 3.6,
+    "waterQualityIndex": 1.27,
+    "droughtRiskScore": 2.52,
+    "scarcityFactorAnnual": 11.3,
+    "scarcityFactorMonthly": {
+      "10": 12.4,
+      "11": 12.3,
+      "12": 8.27,
+      "01": 7.98,
+      "02": 6.66,
+      "03": 6.51,
+      "04": 8.06,
+      "05": 9.46,
+      "06": 14.9,
+      "07": 16.8,
+      "08": 17.9,
+      "09": 14.4
+    },
+    "waterIntensityLPerKwh": 1.5794,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "Azure eastus2 uses a thermal-mixed US grid profile."
+      ],
+      "nrelMix": {
+        "ngcc_closed_loop": 0.45,
+        "coal_closed_loop": 0.3,
+        "nuclear_closed_loop": 0.15,
+        "wind_onshore": 0.05,
+        "solar_pv_operational": 0.05
+      }
+    }
+  },
+  "westus2": {
+    "waterStressScore": 5,
+    "waterStressRawRatio": 1.3458,
+    "overallWaterRiskScore": 3.6,
+    "waterQualityIndex": 1.27,
+    "droughtRiskScore": 2.52,
+    "scarcityFactorAnnual": 11.3,
+    "scarcityFactorMonthly": {
+      "10": 12.4,
+      "11": 12.3,
+      "12": 8.27,
+      "01": 7.98,
+      "02": 6.66,
+      "03": 6.51,
+      "04": 8.06,
+      "05": 9.46,
+      "06": 14.9,
+      "07": 16.8,
+      "08": 17.9,
+      "09": 14.4
+    },
+    "waterIntensityLPerKwh": 0.1878,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "Azure westus2 uses a renewables-heavy US West profile."
+      ],
+      "nrelMix": {
+        "wind_onshore": 0.5,
+        "solar_pv_operational": 0.3,
+        "ngcc_closed_loop": 0.2
+      }
+    }
+  },
+  "centralus": {
+    "waterStressScore": 5,
+    "waterStressRawRatio": 1.3458,
+    "overallWaterRiskScore": 3.6,
+    "waterQualityIndex": 1.27,
+    "droughtRiskScore": 2.52,
+    "scarcityFactorAnnual": 11.3,
+    "scarcityFactorMonthly": {
+      "10": 12.4,
+      "11": 12.3,
+      "12": 8.27,
+      "01": 7.98,
+      "02": 6.66,
+      "03": 6.51,
+      "04": 8.06,
+      "05": 9.46,
+      "06": 14.9,
+      "07": 16.8,
+      "08": 17.9,
+      "09": 14.4
+    },
+    "waterIntensityLPerKwh": 1.5794,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "Azure centralus uses a thermal-mixed US grid profile."
+      ],
+      "nrelMix": {
+        "ngcc_closed_loop": 0.45,
+        "coal_closed_loop": 0.3,
+        "nuclear_closed_loop": 0.15,
+        "wind_onshore": 0.05,
+        "solar_pv_operational": 0.05
+      }
+    }
+  },
+  "southcentralus": {
+    "waterStressScore": 5,
+    "waterStressRawRatio": 1.3458,
+    "overallWaterRiskScore": 3.6,
+    "waterQualityIndex": 1.27,
+    "droughtRiskScore": 2.52,
+    "scarcityFactorAnnual": 11.3,
+    "scarcityFactorMonthly": {
+      "10": 12.4,
+      "11": 12.3,
+      "12": 8.27,
+      "01": 7.98,
+      "02": 6.66,
+      "03": 6.51,
+      "04": 8.06,
+      "05": 9.46,
+      "06": 14.9,
+      "07": 16.8,
+      "08": 17.9,
+      "09": 14.4
+    },
+    "waterIntensityLPerKwh": 0.8505,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "Azure southcentralus uses a gas-dominant US grid profile."
+      ],
+      "nrelMix": {
+        "ngcc_closed_loop": 0.75,
+        "wind_onshore": 0.1,
+        "solar_pv_operational": 0.1,
+        "nuclear_closed_loop": 0.05
+      }
+    }
+  },
+  "eu-west-1": {
+    "waterStressScore": 1.07,
+    "waterStressRawRatio": 0.1049,
+    "overallWaterRiskScore": 1.17,
+    "waterQualityIndex": 2,
+    "droughtRiskScore": 2.89,
+    "scarcityFactorAnnual": 1.17,
+    "scarcityFactorMonthly": {
+      "10": 1.08,
+      "11": 0.493,
+      "12": 0.408,
+      "01": 0.377,
+      "02": 0.442,
+      "03": 0.478,
+      "04": 0.628,
+      "05": 0.822,
+      "06": 1.31,
+      "07": 2.12,
+      "08": 2.67,
+      "09": 3.19
+    },
+    "waterIntensityLPerKwh": 0.8505,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "AWS eu-west-1 mapped to Ireland and a gas-dominant European profile."
+      ],
+      "nrelMix": {
+        "ngcc_closed_loop": 0.75,
+        "wind_onshore": 0.1,
+        "solar_pv_operational": 0.1,
+        "nuclear_closed_loop": 0.05
+      }
+    }
+  },
+  "eu-west-2": {
+    "waterStressScore": 1.49,
+    "waterStressRawRatio": 0.1406,
+    "overallWaterRiskScore": 1.17,
+    "waterQualityIndex": 1.07,
+    "droughtRiskScore": 3.3,
+    "scarcityFactorAnnual": 2.29,
+    "scarcityFactorMonthly": {
+      "10": 4.4,
+      "11": 1.33,
+      "12": 0.803,
+      "01": 0.643,
+      "02": 0.767,
+      "03": 0.822,
+      "04": 1.07,
+      "05": 1.32,
+      "06": 1.91,
+      "07": 3.02,
+      "08": 4.6,
+      "09": 6.73
+    },
+    "waterIntensityLPerKwh": 0.8505,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "AWS eu-west-2 mapped to Great Britain and a gas-dominant European profile."
+      ],
+      "nrelMix": {
+        "ngcc_closed_loop": 0.75,
+        "wind_onshore": 0.1,
+        "solar_pv_operational": 0.1,
+        "nuclear_closed_loop": 0.05
+      }
+    }
+  },
+  "eu-central-1": {
+    "waterStressScore": 3.45,
+    "waterStressRawRatio": 0.5475,
+    "overallWaterRiskScore": 1.82,
+    "waterQualityIndex": 0.9,
+    "droughtRiskScore": 3.06,
+    "scarcityFactorAnnual": 2.09,
+    "scarcityFactorMonthly": {
+      "10": 3.99,
+      "11": 2.15,
+      "12": 1.4,
+      "01": 0.976,
+      "02": 1.04,
+      "03": 0.913,
+      "04": 1.11,
+      "05": 1.34,
+      "06": 1.62,
+      "07": 2.26,
+      "08": 3.45,
+      "09": 4.81
+    },
+    "waterIntensityLPerKwh": 1.5794,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "AWS eu-central-1 mapped to Germany and a thermal-mixed profile."
+      ],
+      "nrelMix": {
+        "ngcc_closed_loop": 0.45,
+        "coal_closed_loop": 0.3,
+        "nuclear_closed_loop": 0.15,
+        "wind_onshore": 0.05,
+        "solar_pv_operational": 0.05
+      }
+    }
+  },
+  "eu-north-1": {
+    "waterStressScore": 1.41,
+    "waterStressRawRatio": 0.133,
+    "overallWaterRiskScore": 1.08,
+    "waterQualityIndex": 0.85,
+    "droughtRiskScore": 2.42,
+    "scarcityFactorAnnual": 2.17,
+    "scarcityFactorMonthly": {
+      "10": 2.87,
+      "11": 2.02,
+      "12": 1.72,
+      "01": 1.58,
+      "02": 1.71,
+      "03": 1.46,
+      "04": 1.47,
+      "05": 1.6,
+      "06": 1.93,
+      "07": 2.45,
+      "08": 3.37,
+      "09": 3.81
+    },
+    "waterIntensityLPerKwh": 0.1878,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "AWS eu-north-1 mapped to Sweden and a renewables-heavy Nordic profile."
+      ],
+      "nrelMix": {
+        "wind_onshore": 0.5,
+        "solar_pv_operational": 0.3,
+        "ngcc_closed_loop": 0.2
+      }
+    }
+  },
+  "ap-southeast-1": {
+    "waterStressScore": 0,
+    "waterStressRawRatio": 0.0428,
+    "overallWaterRiskScore": 0.78,
+    "waterQualityIndex": 0.95,
+    "droughtRiskScore": 2.85,
+    "scarcityFactorAnnual": 0.867,
+    "scarcityFactorMonthly": {
+      "10": 1.48,
+      "11": 0.907,
+      "12": 0.403,
+      "01": 0.383,
+      "02": 0.621,
+      "03": 0.663,
+      "04": 0.689,
+      "05": 0.726,
+      "06": 0.836,
+      "07": 1.02,
+      "08": 1.26,
+      "09": 1.42
+    },
+    "waterIntensityLPerKwh": 0.8505,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "AWS ap-southeast-1 mapped to Singapore and a gas-dominant profile."
+      ],
+      "nrelMix": {
+        "ngcc_closed_loop": 0.75,
+        "wind_onshore": 0.1,
+        "solar_pv_operational": 0.1,
+        "nuclear_closed_loop": 0.05
+      }
+    }
+  },
+  "ap-northeast-1": {
+    "waterStressScore": 2.59,
+    "waterStressRawRatio": 0.3003,
+    "overallWaterRiskScore": 1.86,
+    "waterQualityIndex": 1.92,
+    "droughtRiskScore": 2.32,
+    "scarcityFactorAnnual": 0.637,
+    "scarcityFactorMonthly": {
+      "10": 0.369,
+      "11": 0.59,
+      "12": 0.636,
+      "01": 0.837,
+      "02": 0.815,
+      "03": 0.504,
+      "04": 0.501,
+      "05": 0.573,
+      "06": 0.756,
+      "07": 0.486,
+      "08": 1.09,
+      "09": 0.492
+    },
+    "waterIntensityLPerKwh": 0.8505,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "AWS ap-northeast-1 mapped to Japan and a gas-dominant profile."
+      ],
+      "nrelMix": {
+        "ngcc_closed_loop": 0.75,
+        "wind_onshore": 0.1,
+        "solar_pv_operational": 0.1,
+        "nuclear_closed_loop": 0.05
+      }
+    }
+  },
+  "ap-south-1": {
+    "waterStressScore": 5,
+    "waterStressRawRatio": 6.2463,
+    "overallWaterRiskScore": 4.61,
+    "waterQualityIndex": 4.76,
+    "droughtRiskScore": 4.35,
+    "scarcityFactorAnnual": 37.8,
+    "scarcityFactorMonthly": {
+      "10": 11.1,
+      "11": 8.99,
+      "12": 51.1,
+      "01": 61.8,
+      "02": 67.1,
+      "03": 66.6,
+      "04": 64.7,
+      "05": 59.2,
+      "06": 17.3,
+      "07": 17.6,
+      "08": 15,
+      "09": 14.1
+    },
+    "waterIntensityLPerKwh": 1.9906,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "AWS ap-south-1 mapped to India and a coal-heavy profile."
+      ],
+      "nrelMix": {
+        "coal_closed_loop": 0.65,
+        "ngcc_closed_loop": 0.2,
+        "nuclear_closed_loop": 0.1,
+        "wind_onshore": 0.025,
+        "solar_pv_operational": 0.025
+      }
+    }
+  },
+  "europe-west1": {
+    "waterStressScore": 5,
+    "waterStressRawRatio": 1.73,
+    "overallWaterRiskScore": 3.15,
+    "waterQualityIndex": 1.65,
+    "droughtRiskScore": 2.89,
+    "scarcityFactorAnnual": 3.52,
+    "scarcityFactorMonthly": {
+      "10": 11.8,
+      "11": 1.43,
+      "12": 0.838,
+      "01": 0.595,
+      "02": 0.704,
+      "03": 0.723,
+      "04": 1.03,
+      "05": 1.28,
+      "06": 1.72,
+      "07": 3.07,
+      "08": 7.08,
+      "09": 11.7
+    },
+    "waterIntensityLPerKwh": 2.417,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "GCP europe-west1 mapped to Belgium and a nuclear-heavy profile."
+      ],
+      "nrelMix": {
+        "nuclear_closed_loop": 0.7,
+        "ngcc_closed_loop": 0.2,
+        "wind_onshore": 0.05,
+        "solar_pv_operational": 0.05
+      }
+    }
+  },
+  "europe-north1": {
+    "waterStressScore": 1.57,
+    "waterStressRawRatio": 0.1484,
+    "overallWaterRiskScore": 1.2,
+    "waterQualityIndex": 0.8,
+    "droughtRiskScore": 2.36,
+    "scarcityFactorAnnual": 2.17,
+    "scarcityFactorMonthly": {
+      "10": 2.48,
+      "11": 1.79,
+      "12": 1.52,
+      "01": 1.77,
+      "02": 2.06,
+      "03": 1.46,
+      "04": 0.975,
+      "05": 1.34,
+      "06": 1.71,
+      "07": 2.36,
+      "08": 3.57,
+      "09": 5.08
+    },
+    "waterIntensityLPerKwh": 0.1878,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "GCP europe-north1 mapped to Finland and a renewables-heavy Nordic profile."
+      ],
+      "nrelMix": {
+        "wind_onshore": 0.5,
+        "solar_pv_operational": 0.3,
+        "ngcc_closed_loop": 0.2
+      }
+    }
+  },
+  "northeurope": {
+    "waterStressScore": 1.07,
+    "waterStressRawRatio": 0.1049,
+    "overallWaterRiskScore": 1.17,
+    "waterQualityIndex": 2,
+    "droughtRiskScore": 2.89,
+    "scarcityFactorAnnual": 1.17,
+    "scarcityFactorMonthly": {
+      "10": 1.08,
+      "11": 0.493,
+      "12": 0.408,
+      "01": 0.377,
+      "02": 0.442,
+      "03": 0.478,
+      "04": 0.628,
+      "05": 0.822,
+      "06": 1.31,
+      "07": 2.12,
+      "08": 2.67,
+      "09": 3.19
+    },
+    "waterIntensityLPerKwh": 0.8505,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "Azure northeurope mapped to Ireland and a gas-dominant profile."
+      ],
+      "nrelMix": {
+        "ngcc_closed_loop": 0.75,
+        "wind_onshore": 0.1,
+        "solar_pv_operational": 0.1,
+        "nuclear_closed_loop": 0.05
+      }
+    }
+  },
+  "norwayeast": {
+    "waterStressScore": 0,
+    "waterStressRawRatio": 0.0161,
+    "overallWaterRiskScore": 0.55,
+    "waterQualityIndex": 0.72,
+    "droughtRiskScore": 1,
+    "scarcityFactorAnnual": 0.744,
+    "scarcityFactorMonthly": {
+      "10": 0.638,
+      "11": 0.538,
+      "12": 0.552,
+      "01": 0.711,
+      "02": 0.954,
+      "03": 0.726,
+      "04": 0.467,
+      "05": 0.54,
+      "06": 0.734,
+      "07": 1.01,
+      "08": 1.16,
+      "09": 0.901
+    },
+    "waterIntensityLPerKwh": 0.1878,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "Azure norwayeast mapped to Norway and a renewables-heavy Nordic profile."
+      ],
+      "nrelMix": {
+        "wind_onshore": 0.5,
+        "solar_pv_operational": 0.3,
+        "ngcc_closed_loop": 0.2
+      }
+    }
+  },
+  "uksouth": {
+    "waterStressScore": 1.49,
+    "waterStressRawRatio": 0.1406,
+    "overallWaterRiskScore": 1.17,
+    "waterQualityIndex": 1.07,
+    "droughtRiskScore": 3.3,
+    "scarcityFactorAnnual": 2.29,
+    "scarcityFactorMonthly": {
+      "10": 4.4,
+      "11": 1.33,
+      "12": 0.803,
+      "01": 0.643,
+      "02": 0.767,
+      "03": 0.822,
+      "04": 1.07,
+      "05": 1.32,
+      "06": 1.91,
+      "07": 3.02,
+      "08": 4.6,
+      "09": 6.73
+    },
+    "waterIntensityLPerKwh": 0.8505,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "Azure uksouth mapped to Great Britain and a gas-dominant profile."
+      ],
+      "nrelMix": {
+        "ngcc_closed_loop": 0.75,
+        "wind_onshore": 0.1,
+        "solar_pv_operational": 0.1,
+        "nuclear_closed_loop": 0.05
+      }
+    }
+  },
+  "FR": {
+    "waterStressScore": 3.35,
+    "waterStressRawRatio": 0.5112,
+    "overallWaterRiskScore": 2.2,
+    "waterQualityIndex": 1.62,
+    "droughtRiskScore": 3.45,
+    "scarcityFactorAnnual": 4.99,
+    "scarcityFactorMonthly": {
+      "10": 7.07,
+      "11": 1.32,
+      "12": 0.795,
+      "01": 0.617,
+      "02": 0.779,
+      "03": 0.843,
+      "04": 1.09,
+      "05": 1.47,
+      "06": 5.46,
+      "07": 11.1,
+      "08": 15.6,
+      "09": 13.4
+    },
+    "waterIntensityLPerKwh": 2.417,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "Routing test region FR mapped to France and a nuclear-heavy profile."
+      ],
+      "nrelMix": {
+        "nuclear_closed_loop": 0.7,
+        "ngcc_closed_loop": 0.2,
+        "wind_onshore": 0.05,
+        "solar_pv_operational": 0.05
+      }
+    }
+  },
+  "DE": {
+    "waterStressScore": 3.45,
+    "waterStressRawRatio": 0.5475,
+    "overallWaterRiskScore": 1.82,
+    "waterQualityIndex": 0.9,
+    "droughtRiskScore": 3.06,
+    "scarcityFactorAnnual": 2.09,
+    "scarcityFactorMonthly": {
+      "10": 3.99,
+      "11": 2.15,
+      "12": 1.4,
+      "01": 0.976,
+      "02": 1.04,
+      "03": 0.913,
+      "04": 1.11,
+      "05": 1.34,
+      "06": 1.62,
+      "07": 2.26,
+      "08": 3.45,
+      "09": 4.81
+    },
+    "waterIntensityLPerKwh": 1.5794,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "Routing test region DE mapped to Germany and a thermal-mixed profile."
+      ],
+      "nrelMix": {
+        "ngcc_closed_loop": 0.45,
+        "coal_closed_loop": 0.3,
+        "nuclear_closed_loop": 0.15,
+        "wind_onshore": 0.05,
+        "solar_pv_operational": 0.05
+      }
+    }
+  },
+  "GB": {
+    "waterStressScore": 1.49,
+    "waterStressRawRatio": 0.1406,
+    "overallWaterRiskScore": 1.17,
+    "waterQualityIndex": 1.07,
+    "droughtRiskScore": 3.3,
+    "scarcityFactorAnnual": 2.29,
+    "scarcityFactorMonthly": {
+      "10": 4.4,
+      "11": 1.33,
+      "12": 0.803,
+      "01": 0.643,
+      "02": 0.767,
+      "03": 0.822,
+      "04": 1.07,
+      "05": 1.32,
+      "06": 1.91,
+      "07": 3.02,
+      "08": 4.6,
+      "09": 6.73
+    },
+    "waterIntensityLPerKwh": 0.8505,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "Routing test region GB mapped to Great Britain and a gas-dominant profile."
+      ],
+      "nrelMix": {
+        "ngcc_closed_loop": 0.75,
+        "wind_onshore": 0.1,
+        "solar_pv_operational": 0.1,
+        "nuclear_closed_loop": 0.05
+      }
+    }
+  },
+  "US-CAL-CISO": {
+    "waterStressScore": 5,
+    "waterStressRawRatio": 1.3458,
+    "overallWaterRiskScore": 3.6,
+    "waterQualityIndex": 1.27,
+    "droughtRiskScore": 2.52,
+    "scarcityFactorAnnual": 11.3,
+    "scarcityFactorMonthly": {
+      "10": 12.4,
+      "11": 12.3,
+      "12": 8.27,
+      "01": 7.98,
+      "02": 6.66,
+      "03": 6.51,
+      "04": 8.06,
+      "05": 9.46,
+      "06": 14.9,
+      "07": 16.8,
+      "08": 17.9,
+      "09": 14.4
+    },
+    "waterIntensityLPerKwh": 0.8505,
+    "confidence": 0.8033,
+    "sources": [
+      "aqueduct",
+      "aware_2_0",
+      "nrel"
+    ],
+    "datasetVersions": {
+      "aqueduct": "aqueduct_4_0_2023_08_16",
+      "aware": "aware_2_0_2025_07_24",
+      "nrel": "nrel_water_factor_library_v1"
+    },
+    "dataQuality": "high",
+    "signalType": "scarcity_weighted_operational",
+    "referenceTime": "2026-03-24T19:28:33.395Z",
+    "metadata": {
+      "mappingNotes": [
+        "Routing test region US-CAL-CISO uses the United States country baseline and a gas-dominant California profile."
+      ],
+      "nrelMix": {
+        "ngcc_closed_loop": 0.75,
+        "wind_onshore": 0.1,
+        "solar_pv_operational": 0.1,
+        "nuclear_closed_loop": 0.05
+      }
+    }
+  }
+}

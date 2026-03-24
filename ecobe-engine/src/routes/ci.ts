@@ -11,14 +11,20 @@ import { z } from 'zod'
 
 import { findOptimalWindow } from '../lib/carbon-forecasting'
 import { prisma } from '../lib/db'
-import { routeGreen } from '../lib/green-routing'
+import { routeGreen, type RoutingResult } from '../lib/green-routing'
 import { CarbonBudgetViolationError } from '../lib/routing'
+import { WaterGuardrailViolationError } from '../lib/water/signals'
 import { internalServiceGuard } from '../middleware/internal-auth'
 
 const router = Router()
 
 type SignalProfileId = 'us_official' | 'forecast_research' | 'marginal_when_available'
 type Criticality = 'critical' | 'standard' | 'deferable'
+type WaterPolicyProfileId =
+  | 'default'
+  | 'drought_sensitive'
+  | 'eu_data_center_reporting'
+  | 'high_water_sensitivity'
 
 const RUNNER_REGIONS: Record<string, string[]> = {
   eastus: ['ubuntu-latest', 'windows-latest'],
@@ -44,32 +50,60 @@ const SIGNAL_PROFILES: Record<
     mode: 'optimize' | 'assurance'
     policyMode: 'default' | 'sec_disclosure_strict' | 'eu_24x7_ready'
     carbonWeight: number
+    waterWeight: number
     latencyWeight: number
     costWeight: number
+    waterPolicyProfile: WaterPolicyProfileId
   }
 > = {
   us_official: {
     mode: 'assurance',
     policyMode: 'sec_disclosure_strict',
     carbonWeight: 0.72,
+    waterWeight: 0.12,
     latencyWeight: 0.2,
     costWeight: 0.08,
+    waterPolicyProfile: 'eu_data_center_reporting',
   },
   forecast_research: {
     mode: 'optimize',
     policyMode: 'eu_24x7_ready',
     carbonWeight: 0.7,
+    waterWeight: 0.1,
     latencyWeight: 0.15,
     costWeight: 0.15,
+    waterPolicyProfile: 'default',
   },
   marginal_when_available: {
     mode: 'optimize',
     policyMode: 'default',
     carbonWeight: 0.8,
+    waterWeight: 0.05,
     latencyWeight: 0.15,
     costWeight: 0.05,
+    waterPolicyProfile: 'default',
   },
 }
+
+const waterSignalSchema = z.object({
+  region: z.string().min(1),
+  waterIntensityLPerKwh: z.number().nonnegative(),
+  waterStressIndex: z.number().nonnegative(),
+  waterQualityIndex: z.number().nonnegative().optional().nullable(),
+  droughtRiskIndex: z.number().nonnegative().optional().nullable(),
+  scarcityCfMonthly: z.number().nonnegative().optional().nullable(),
+  scarcityCfAnnual: z.number().nonnegative().optional().nullable(),
+  siteWaterIntensityLPerKwh: z.number().nonnegative().optional().nullable(),
+  source: z.string().min(1),
+  referenceTime: z.string().datetime().optional().nullable(),
+  dataQuality: z.enum(['high', 'medium', 'low']).optional(),
+  signalType: z
+    .enum(['average_operational', 'scarcity_weighted_operational', 'site_measured', 'unknown'])
+    .optional(),
+  confidence: z.number().min(0).max(1).optional().nullable(),
+  datasetVersion: z.string().optional().nullable(),
+  metadata: z.record(z.unknown()).optional(),
+})
 
 const canonicalCiRoutingRequestSchema = z.object({
   workloadId: z.string().min(1),
@@ -86,12 +120,17 @@ const canonicalCiRoutingRequestSchema = z.object({
   delayToleranceMinutes: z.number().int().min(0).max(24 * 60).default(0),
   deadline: z.string().datetime().optional(),
   carbonWeight: z.number().min(0).max(1).optional(),
+  waterWeight: z.number().min(0).max(1).optional(),
   latencyWeight: z.number().min(0).max(1).optional(),
   costWeight: z.number().min(0).max(1).optional(),
   signalProfile: z
     .enum(['us_official', 'forecast_research', 'marginal_when_available'])
     .default('us_official'),
   criticality: z.enum(['critical', 'standard', 'deferable']).default('standard'),
+  waterPolicyProfile: z
+    .enum(['default', 'drought_sensitive', 'eu_data_center_reporting', 'high_water_sensitivity'])
+    .optional(),
+  waterSignalsByRegion: z.record(waterSignalSchema).optional(),
   matrixSize: z.number().int().positive().max(256).default(1),
   jobType: z.enum(['standard', 'heavy', 'light']).default('standard'),
   assuranceMode: z.boolean().default(false),
@@ -101,6 +140,7 @@ const canonicalCiRoutingRequestSchema = z.object({
 const legacyCiRoutingRequestSchema = z.object({
   preferredRegions: z.array(z.string().min(1)).min(1),
   carbonWeight: z.number().min(0).max(1).optional(),
+  waterWeight: z.number().min(0).max(1).optional(),
   latencyWeight: z.number().min(0).max(1).optional(),
   costWeight: z.number().min(0).max(1).optional(),
   workloadId: z.string().min(1).optional(),
@@ -115,6 +155,10 @@ const legacyCiRoutingRequestSchema = z.object({
     .enum(['us_official', 'forecast_research', 'marginal_when_available'])
     .default('us_official'),
   criticality: z.enum(['critical', 'standard', 'deferable']).default('standard'),
+  waterPolicyProfile: z
+    .enum(['default', 'drought_sensitive', 'eu_data_center_reporting', 'high_water_sensitivity'])
+    .optional(),
+  waterSignalsByRegion: z.record(waterSignalSchema).optional(),
   matrixSize: z.number().int().positive().max(256).default(1),
   jobType: z.enum(['standard', 'heavy', 'light']).default('standard'),
   assuranceMode: z.boolean().default(false),
@@ -127,6 +171,7 @@ type NormalizedCIRoutingRequest = CanonicalCiRoutingRequest & {
   legacyRouteInput: boolean
   weightsOverride: {
     carbonWeight?: number
+    waterWeight?: number
     latencyWeight?: number
     costWeight?: number
   } | null
@@ -140,10 +185,12 @@ function parseCiRoutingRequest(body: unknown, allowLegacy: boolean): NormalizedC
       legacyRouteInput: false,
       weightsOverride:
         canonical.data.carbonWeight != null ||
+        canonical.data.waterWeight != null ||
         canonical.data.latencyWeight != null ||
         canonical.data.costWeight != null
           ? {
               carbonWeight: canonical.data.carbonWeight,
+              waterWeight: canonical.data.waterWeight,
               latencyWeight: canonical.data.latencyWeight,
               costWeight: canonical.data.costWeight,
             }
@@ -168,6 +215,8 @@ function parseCiRoutingRequest(body: unknown, allowLegacy: boolean): NormalizedC
     deadline: legacy.deadline,
     signalProfile: legacy.signalProfile,
     criticality: legacy.criticality,
+    waterPolicyProfile: legacy.waterPolicyProfile,
+    waterSignalsByRegion: legacy.waterSignalsByRegion,
     matrixSize: legacy.matrixSize,
     jobType: legacy.jobType,
     assuranceMode: legacy.assuranceMode,
@@ -178,6 +227,7 @@ function parseCiRoutingRequest(body: unknown, allowLegacy: boolean): NormalizedC
     legacyRouteInput: true,
     weightsOverride: {
       carbonWeight: legacy.carbonWeight,
+      waterWeight: legacy.waterWeight,
       latencyWeight: legacy.latencyWeight,
       costWeight: legacy.costWeight,
     },
@@ -209,6 +259,23 @@ type CiResponse = {
     label: 'high' | 'medium' | 'low'
     score: number
   } | null
+  water: {
+    policyProfile: WaterPolicyProfileId
+    selectedWaterLiters: number | null
+    baselineWaterLiters: number | null
+    selectedWaterScarcityImpact: number | null
+    baselineWaterScarcityImpact: number | null
+    waterIntensityLPerKwh: number | null
+    baselineWaterIntensityLPerKwh: number | null
+    waterStressIndex: number | null
+    waterQualityIndex: number | null
+    droughtRiskIndex: number | null
+    confidence: number | null
+    fallbackUsed: boolean
+    guardrailTriggered: boolean
+    source: string | null
+    datasetVersion: string | null
+  }
   policyTrace: string[]
   selectedRunner: string
   selectedRegion: string
@@ -244,6 +311,7 @@ function resolveSignalProfile(
   signalProfile: SignalProfileId,
   assuranceMode: boolean,
   jobType: 'standard' | 'heavy' | 'light',
+  waterPolicyProfile: WaterPolicyProfileId | undefined,
   weightsOverride: NormalizedCIRoutingRequest['weightsOverride']
 ) {
   const base = SIGNAL_PROFILES[signalProfile]
@@ -259,8 +327,10 @@ function resolveSignalProfile(
     mode: assuranceMode ? 'assurance' : base.mode,
     policyMode: assuranceMode ? 'sec_disclosure_strict' : base.policyMode,
     carbonWeight,
+    waterWeight: weightsOverride?.waterWeight ?? base.waterWeight,
     latencyWeight: weightsOverride?.latencyWeight ?? base.latencyWeight,
     costWeight: weightsOverride?.costWeight ?? base.costWeight,
+    waterPolicyProfile: waterPolicyProfile ?? base.waterPolicyProfile,
   }
 }
 
@@ -385,6 +455,49 @@ function shouldFailClosedOnSignals(
   fallbackUsed: boolean | null
 ) {
   return assuranceMode && confidenceLabel === 'low' && fallbackUsed === true
+}
+
+function buildWaterResponse(
+  routingWater: RoutingResult['water'] | undefined,
+  policyProfile: WaterPolicyProfileId
+): CiResponse['water'] {
+  if (!routingWater) {
+    return {
+      policyProfile,
+      selectedWaterLiters: null,
+      baselineWaterLiters: null,
+      selectedWaterScarcityImpact: null,
+      baselineWaterScarcityImpact: null,
+      waterIntensityLPerKwh: null,
+      baselineWaterIntensityLPerKwh: null,
+      waterStressIndex: null,
+      waterQualityIndex: null,
+      droughtRiskIndex: null,
+      confidence: null,
+      fallbackUsed: true,
+      guardrailTriggered: false,
+      source: null,
+      datasetVersion: null,
+    }
+  }
+
+  return {
+    policyProfile: routingWater.policyProfile ?? policyProfile,
+    selectedWaterLiters: routingWater.selectedWaterLiters ?? null,
+    baselineWaterLiters: routingWater.baselineWaterLiters ?? null,
+    selectedWaterScarcityImpact: routingWater.selectedWaterScarcityImpact ?? null,
+    baselineWaterScarcityImpact: routingWater.baselineWaterScarcityImpact ?? null,
+    waterIntensityLPerKwh: routingWater.selectedWaterIntensityLPerKwh ?? null,
+    baselineWaterIntensityLPerKwh: routingWater.baselineWaterIntensityLPerKwh ?? null,
+    waterStressIndex: routingWater.waterStressIndex ?? null,
+    waterQualityIndex: routingWater.waterQualityIndex ?? null,
+    droughtRiskIndex: routingWater.droughtRiskIndex ?? null,
+    confidence: routingWater.confidence ?? null,
+    fallbackUsed: routingWater.fallbackUsed ?? false,
+    guardrailTriggered: routingWater.guardrailTriggered ?? false,
+    source: routingWater.source ?? null,
+    datasetVersion: routingWater.datasetVersion ?? null,
+  }
 }
 
 async function persistCiDecision(params: {
@@ -528,6 +641,7 @@ async function handleCarbonRoute(req: Request, res: Response, allowLegacy: boole
       data.signalProfile,
       data.assuranceMode,
       data.jobType,
+      data.waterPolicyProfile,
       data.weightsOverride
     )
     const energyEstimateKwh = estimateCiEnergyKwh(data.jobType, data.durationMinutes)
@@ -538,6 +652,7 @@ async function handleCarbonRoute(req: Request, res: Response, allowLegacy: boole
       routingResult = await routeGreen({
         preferredRegions: data.candidateRegions,
         carbonWeight: profile.carbonWeight,
+        waterWeight: profile.waterWeight,
         latencyWeight: profile.latencyWeight,
         costWeight: profile.costWeight,
         mode: profile.mode,
@@ -546,6 +661,9 @@ async function handleCarbonRoute(req: Request, res: Response, allowLegacy: boole
         workloadType: `ci/${data.jobType}`,
         workloadName: data.workloadName ?? data.workloadId,
         energyEstimateKwh,
+        criticality: data.criticality,
+        waterPolicyProfile: profile.waterPolicyProfile,
+        waterSignalsByRegion: data.waterSignalsByRegion,
       })
     } catch (error) {
       if (error instanceof CarbonBudgetViolationError) {
@@ -575,6 +693,23 @@ async function handleCarbonRoute(req: Request, res: Response, allowLegacy: boole
           selectedCarbonIntensity: null,
           estimatedSavingsPercent: null,
           signalConfidence: null,
+          water: {
+            policyProfile: profile.waterPolicyProfile,
+            selectedWaterLiters: null,
+            baselineWaterLiters: null,
+            selectedWaterScarcityImpact: null,
+            baselineWaterScarcityImpact: null,
+            waterIntensityLPerKwh: null,
+            baselineWaterIntensityLPerKwh: null,
+            waterStressIndex: null,
+            waterQualityIndex: null,
+            droughtRiskIndex: null,
+            confidence: null,
+            fallbackUsed: false,
+            guardrailTriggered: false,
+            source: null,
+            datasetVersion: null,
+          },
           policyTrace,
           selectedRunner: deniedRunner,
           selectedRegion: deniedRegion,
@@ -636,6 +771,118 @@ async function handleCarbonRoute(req: Request, res: Response, allowLegacy: boole
         return res.json(denyResponse)
       }
 
+      if (error instanceof WaterGuardrailViolationError) {
+        const deniedRegion = requestBaselineRegion
+        const deniedRunner = pickRunner(
+          RUNNER_REGIONS[deniedRegion] ?? ['ubuntu-latest'],
+          data.candidateRunners
+        )
+        const decisionFrameId = randomUUID()
+        const policyTrace = [
+          'request_validated=true',
+          `signal_profile=${data.signalProfile}`,
+          `policy_mode=${profile.policyMode}`,
+          `water_policy_profile=${profile.waterPolicyProfile}`,
+          'water_guardrail_blocked=true',
+          `criticality=${data.criticality}`,
+        ]
+        const recommendation =
+          'Execution denied because all candidate regions were blocked by water guardrails or lacked sufficient trusted water signals for this policy.'
+        const denyResponse: CiResponse = {
+          decision: 'deny',
+          reasonCode: 'WATER_GUARDRAIL_TRIGGERED',
+          approvedRegion: deniedRegion,
+          approvedRunnerLabel: deniedRunner,
+          delaySeconds: 0,
+          maxParallel: 0,
+          shouldRun: false,
+          startTime: new Date().toISOString(),
+          decisionId: decisionFrameId,
+          baselineRegion: requestBaselineRegion,
+          baselineCarbonIntensity: null,
+          selectedCarbonIntensity: null,
+          estimatedSavingsPercent: null,
+          signalConfidence: null,
+          water: {
+            policyProfile: profile.waterPolicyProfile,
+            selectedWaterLiters: null,
+            baselineWaterLiters: null,
+            selectedWaterScarcityImpact: null,
+            baselineWaterScarcityImpact: null,
+            waterIntensityLPerKwh: null,
+            baselineWaterIntensityLPerKwh: null,
+            waterStressIndex: error.evaluations[0]?.waterStressIndex ?? null,
+            waterQualityIndex: null,
+            droughtRiskIndex: null,
+            confidence: null,
+            fallbackUsed: true,
+            guardrailTriggered: true,
+            source: null,
+            datasetVersion: null,
+          },
+          policyTrace,
+          selectedRunner: deniedRunner,
+          selectedRegion: deniedRegion,
+          carbonIntensity: 0,
+          baseline: 0,
+          savings: 0,
+          mode: profile.mode,
+          policyMode: profile.policyMode,
+          signalType: 'average_operational',
+          confidence: 'low',
+          decisionFrameId,
+          recommendation,
+          deadlineHandling: deadlineConstraint,
+          alternatives: [],
+          deferredWindow: null,
+          provenance: {
+            waterEvaluations: error.evaluations,
+            doctrine: 'lowest defensible signal',
+            failClosed: true,
+          },
+          workflowOutputs: {
+            decision: 'deny',
+            approved_region: deniedRegion,
+            approved_runner_label: deniedRunner,
+            delay_seconds: '0',
+            max_parallel: '0',
+            should_run: 'false',
+            decision_id: decisionFrameId,
+            reason_code: 'WATER_GUARDRAIL_TRIGGERED',
+            water_guardrail_triggered: 'true',
+          },
+        }
+
+        await persistCiDecision({
+          decisionFrameId,
+          selectedRunner: deniedRunner,
+          selectedRegion: deniedRegion,
+          selectedCarbonIntensity: null,
+          baselineCarbonIntensity: null,
+          estimatedSavingsPercent: null,
+          jobType: data.jobType,
+          preferredRegions: data.candidateRegions,
+          carbonWeight: profile.carbonWeight,
+          recommendation,
+          metadata: {
+            workloadId: data.workloadId,
+            signalProfile: data.signalProfile,
+            criticality: data.criticality,
+            waterPolicyProfile: profile.waterPolicyProfile,
+            decision: denyResponse.decision,
+            reasonCode: denyResponse.reasonCode,
+            policyTrace,
+            legacyRouteInput: data.legacyRouteInput,
+            deadlineHandling: deadlineConstraint,
+            provenance: denyResponse.provenance,
+            matrixSize: data.matrixSize,
+            metadata: data.metadata ?? {},
+          },
+        })
+
+        return res.json(denyResponse)
+      }
+
       throw error
     }
 
@@ -675,14 +922,26 @@ async function handleCarbonRoute(req: Request, res: Response, allowLegacy: boole
         : data.criticality
     )
 
-    const selectedCarbonIntensity = shouldDelay ? deferredWindow!.window.avgCarbonIntensity : routingResult.carbonIntensity
+    const responseWater = buildWaterResponse(
+      (routingResult as Awaited<ReturnType<typeof routeGreen>>).water,
+      profile.waterPolicyProfile
+    )
+    const selectedCarbonIntensity = shouldDelay
+      ? deferredWindow!.window.avgCarbonIntensity
+      : routingResult.carbonIntensity
     const estimatedSavingsPercent = calculateEstimatedSavingsPercent(
       baselineCarbonIntensity,
       selectedCarbonIntensity
     )
     const requestedMatrixSize = data.matrixSize
-    const maxParallel = shouldDelay ? 0 : immediatePlan.maxParallel
-    const matrixThrottled = !shouldDelay && requestedMatrixSize > maxParallel
+    const waterThrottleRequired =
+      responseWater.guardrailTriggered && data.criticality === 'critical' && !shouldDelay
+    const computedMaxParallel = shouldDelay
+      ? 0
+      : waterThrottleRequired
+        ? Math.min(immediatePlan.maxParallel, 1)
+        : immediatePlan.maxParallel
+    const matrixThrottled = !shouldDelay && requestedMatrixSize > computedMaxParallel
     const failClosed = shouldFailClosedOnSignals(
       data.assuranceMode,
       routingResult.assurance.confidenceLabel,
@@ -706,29 +965,48 @@ async function handleCarbonRoute(req: Request, res: Response, allowLegacy: boole
       decision = 'delay'
       reasonCode = 'CLEANER_FUTURE_WINDOW_AVAILABLE'
       recommendation = `Delay execution until ${deferredWindow!.window.startTime.toISOString()}; cleaner capacity exists within the allowed deadline window.`
+    } else if (waterThrottleRequired) {
+      decision = 'throttle'
+      reasonCode = 'WATER_GUARDRAIL_THROTTLED'
+      recommendation =
+        'Run only minimal concurrency in the selected region because water guardrails remain active for this critical workload.'
     } else if (baselineRegionChanged) {
       decision = 'reroute'
-      reasonCode = 'CLEANER_REGION_AVAILABLE'
-      recommendation = `Reroute execution from ${baselineRegion} to ${selectedRegion}; the selected region is materially cleaner under current policy weights.`
+      const baselineWaterImpact = responseWater.baselineWaterScarcityImpact ?? Number.POSITIVE_INFINITY
+      const selectedWaterImpact = responseWater.selectedWaterScarcityImpact ?? Number.POSITIVE_INFINITY
+      const materiallyLowerWaterImpact =
+        Number.isFinite(baselineWaterImpact) &&
+        Number.isFinite(selectedWaterImpact) &&
+        selectedWaterImpact + 0.01 < baselineWaterImpact
+
+      reasonCode = materiallyLowerWaterImpact
+        ? 'LOWER_WATER_IMPACT_REGION_AVAILABLE'
+        : 'CLEANER_REGION_AVAILABLE'
+      recommendation = materiallyLowerWaterImpact
+        ? `Reroute execution from ${baselineRegion} to ${selectedRegion}; the selected region materially lowers water scarcity impact under the active policy.`
+        : `Reroute execution from ${baselineRegion} to ${selectedRegion}; the selected region is materially cleaner under current policy weights.`
     } else if (matrixThrottled) {
       decision = 'throttle'
       reasonCode = 'HIGH_CARBON_MATRIX_THROTTLED'
-      recommendation = `${immediatePlan.rationale} Reduce matrix parallelism to ${maxParallel} for this run.`
+      recommendation = `${immediatePlan.rationale} Reduce matrix parallelism to ${computedMaxParallel} for this run.`
     }
 
     const policyTrace = [
       'request_validated=true',
       `signal_profile=${data.signalProfile}`,
       `policy_mode=${routingResult.policyMode}`,
+      `water_policy_profile=${responseWater.policyProfile}`,
       `criticality=${data.criticality}`,
       `baseline_region=${baselineRegion}`,
       `selected_region=${selectedRegion}`,
       `fallback_used=${String(routingResult.fallback_used === true)}`,
       `confidence=${routingResult.assurance.confidenceLabel}`,
+      `water_guardrail_triggered=${String(responseWater.guardrailTriggered)}`,
+      `water_fallback_used=${String(responseWater.fallbackUsed)}`,
       `deadline_mode=${deadlineConstraint.mode}`,
       `reroute_viable=${String(baselineRegionChanged)}`,
       `delay_viable=${String(shouldDelay)}`,
-      `throttle_required=${String(matrixThrottled)}`,
+      `throttle_required=${String(matrixThrottled || waterThrottleRequired)}`,
       `fail_closed=${String(failClosed)}`,
     ]
 
@@ -742,7 +1020,7 @@ async function handleCarbonRoute(req: Request, res: Response, allowLegacy: boole
       delaySeconds: shouldDelay
         ? Math.max(0, Math.floor((deferredWindow!.window.startTime.getTime() - Date.now()) / 1000))
         : 0,
-      maxParallel: decision === 'deny' ? 0 : maxParallel,
+      maxParallel: decision === 'deny' ? 0 : computedMaxParallel,
       shouldRun: decision !== 'deny' && !shouldDelay && immediatePlan.shouldRun,
       startTime: shouldDelay ? deferredWindow!.window.startTime.toISOString() : new Date().toISOString(),
       decisionId: responseDecisionId,
@@ -751,6 +1029,7 @@ async function handleCarbonRoute(req: Request, res: Response, allowLegacy: boole
       selectedCarbonIntensity: decision === 'deny' ? null : selectedCarbonIntensity,
       estimatedSavingsPercent: decision === 'deny' ? null : estimatedSavingsPercent,
       signalConfidence,
+      water: responseWater,
       policyTrace,
       selectedRunner,
       selectedRegion,
@@ -790,6 +1069,7 @@ async function handleCarbonRoute(req: Request, res: Response, allowLegacy: boole
         disagreement: routingResult.provider_disagreement,
         confidenceBand: routingResult.confidenceBand,
         budgetStatus: routingResult.budgetStatus ?? [],
+        water: responseWater,
       },
       workflowOutputs: {
         decision,
@@ -798,7 +1078,7 @@ async function handleCarbonRoute(req: Request, res: Response, allowLegacy: boole
         delay_seconds: String(
           shouldDelay ? Math.max(0, Math.floor((deferredWindow!.window.startTime.getTime() - Date.now()) / 1000)) : 0
         ),
-        max_parallel: String(decision === 'deny' ? 0 : maxParallel),
+        max_parallel: String(decision === 'deny' ? 0 : computedMaxParallel),
         should_run: String(decision !== 'deny' && !shouldDelay && immediatePlan.shouldRun),
         start_time: shouldDelay ? deferredWindow!.window.startTime.toISOString() : new Date().toISOString(),
         score: routingResult.score.toFixed(4),
@@ -807,6 +1087,10 @@ async function handleCarbonRoute(req: Request, res: Response, allowLegacy: boole
         confidence: routingResult.assurance.confidenceLabel,
         reason_code: reasonCode,
         decision_id: responseDecisionId,
+        water_intensity_l_per_kwh: String(responseWater.waterIntensityLPerKwh ?? ''),
+        water_stress_index: String(responseWater.waterStressIndex ?? ''),
+        selected_water_liters: String(responseWater.selectedWaterLiters ?? ''),
+        baseline_water_liters: String(responseWater.baselineWaterLiters ?? ''),
       },
     }
 
@@ -829,6 +1113,8 @@ async function handleCarbonRoute(req: Request, res: Response, allowLegacy: boole
         shouldRun: response.shouldRun,
         decision: response.decision,
         reasonCode: response.reasonCode,
+        waterPolicyProfile: response.water.policyProfile,
+        water: response.water,
         policyTrace: response.policyTrace,
         legacyRouteInput: data.legacyRouteInput,
         deadlineHandling: deadlineConstraint,

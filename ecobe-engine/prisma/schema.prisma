@@ -355,6 +355,30 @@ enum OrgPlanTier {
   ENTERPRISE
 }
 
+model WaterSignal {
+  id                    String   @id @default(cuid())
+  region                String
+  waterIntensityLPerKwh Float
+  waterStressIndex      Float
+  waterQualityIndex     Float?
+  droughtRiskIndex      Float?
+  scarcityCfMonthly     Float?
+  scarcityCfAnnual      Float?
+  siteWaterIntensityLPerKwh Float?
+  source                String
+  referenceTime         DateTime
+  dataQuality           String
+  signalType            String
+  confidence            Float?
+  datasetVersion        String?
+  metadata              Json     @default("{}")
+  createdAt             DateTime @default(now())
+
+  @@index([region, referenceTime])
+  @@index([source, referenceTime])
+  @@unique([region, referenceTime, source], name: "water_region_reference_source")
+}
+
 enum CarbonBudgetPeriod {
   MONTHLY
   QUARTERLY
@@ -1108,6 +1132,24 @@ model CarbonLedgerEntry {
   confidenceBandHigh    Float?
   lowerHalfBenchmarkGPerKwh Float?
   lowerHalfQualified    Boolean?
+  baselineWaterL        Float?
+  chosenWaterL          Float?
+  waterSavedL           Float?
+  baselineWaterScarcityImpact Float?
+  chosenWaterScarcityImpact Float?
+  baselineWaterIntensityLPerKwh Float?
+  chosenWaterIntensityLPerKwh Float?
+  waterStressIndex      Float?
+  waterQualityIndex     Float?
+  droughtRiskIndex      Float?
+  waterConfidenceScore  Float?
+  waterSource           String?
+  waterSignalType       String?
+  waterDatasetVersion   String?
+  waterPolicyProfile    String?
+  waterGuardrailTriggered Boolean @default(false)
+  waterFallbackUsed     Boolean @default(false)
+  waterReferenceTime    DateTime?
   metadata              Json     @default("{}")
 
   // Grid intelligence at decision time
@@ -1152,14 +1194,21 @@ model RoutingCandidate {
   costEstimateUsd       Float?
   confidenceScore       Float?
   retryRiskScore        Float?
+  waterEstimateLiters   Float?
+  waterScarcityImpact   Float?
+  waterStressIndex      Float?
+  waterIntensityLPerKwh Float?
+  waterConfidenceScore  Float?
 
   // Scoring breakdown
   carbonScore           Float?
+  waterScore            Float?
   latencyScore          Float?
   costScore             Float?
   queueScore            Float?
   uncertaintyScore      Float?
   rankScore             Float?
+  waterGuardrailTriggered Boolean @default(false)
 
   // Selection
   wasSelected           Boolean  @default(false)

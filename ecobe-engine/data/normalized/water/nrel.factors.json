@@ -1,0 +1,63 @@
+{
+  "renewables_heavy": {
+    "water_intensity_l_per_kwh": 0.1878,
+    "source": "nrel",
+    "dataset_version": "nrel_water_factor_library_v1",
+    "confidence": 0.7,
+    "mix": {
+      "wind_onshore": 0.5,
+      "solar_pv_operational": 0.3,
+      "ngcc_closed_loop": 0.2
+    }
+  },
+  "gas_dominant": {
+    "water_intensity_l_per_kwh": 0.8505,
+    "source": "nrel",
+    "dataset_version": "nrel_water_factor_library_v1",
+    "confidence": 0.7,
+    "mix": {
+      "ngcc_closed_loop": 0.75,
+      "wind_onshore": 0.1,
+      "solar_pv_operational": 0.1,
+      "nuclear_closed_loop": 0.05
+    }
+  },
+  "thermal_mixed": {
+    "water_intensity_l_per_kwh": 1.5794,
+    "source": "nrel",
+    "dataset_version": "nrel_water_factor_library_v1",
+    "confidence": 0.7,
+    "mix": {
+      "ngcc_closed_loop": 0.45,
+      "coal_closed_loop": 0.3,
+      "nuclear_closed_loop": 0.15,
+      "wind_onshore": 0.05,
+      "solar_pv_operational": 0.05
+    }
+  },
+  "coal_heavy": {
+    "water_intensity_l_per_kwh": 1.9906,
+    "source": "nrel",
+    "dataset_version": "nrel_water_factor_library_v1",
+    "confidence": 0.7,
+    "mix": {
+      "coal_closed_loop": 0.65,
+      "ngcc_closed_loop": 0.2,
+      "nuclear_closed_loop": 0.1,
+      "wind_onshore": 0.025,
+      "solar_pv_operational": 0.025
+    }
+  },
+  "nuclear_heavy": {
+    "water_intensity_l_per_kwh": 2.417,
+    "source": "nrel",
+    "dataset_version": "nrel_water_factor_library_v1",
+    "confidence": 0.7,
+    "mix": {
+      "nuclear_closed_loop": 0.7,
+      "ngcc_closed_loop": 0.2,
+      "wind_onshore": 0.05,
+      "solar_pv_operational": 0.05
+    }
+  }
+}

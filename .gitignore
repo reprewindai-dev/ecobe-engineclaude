@@ -36,3 +36,8 @@ ecobe-engine/.windsurf/
 
 # logs
 *.log
+
+# Water dataset mirrors (normalized bundle stays committed, raw downloads stay local)
+/ecobe-engine/data/raw/water/aqueduct/
+/ecobe-engine/data/raw/water/aware/
+/_tmp/

@@ -19,6 +19,11 @@ export interface RoutingCandidate {
   costEstimateUsd: number | null
   confidenceScore: number | null
   retryRiskScore: number | null
+  waterEstimateLiters: number | null
+  waterScarcityImpact: number | null
+  waterStressIndex: number | null
+  waterIntensityLPerKwh: number | null
+  waterConfidenceScore: number | null
 
   // Grid intelligence
   balancingAuthority: string | null
@@ -31,11 +36,13 @@ export interface RoutingCandidate {
 
   // Scoring (filled by scoring engine)
   carbonScore: number | null
+  waterScore: number | null
   latencyScore: number | null
   costScore: number | null
   queueScore: number | null
   uncertaintyScore: number | null
   rankScore: number | null
+  waterGuardrailTriggered: boolean
 
   // Feasibility
   isFeasible: boolean
@@ -123,6 +130,11 @@ export function generateCandidates(input: CandidateGenerationInput): RoutingCand
         costEstimateUsd: null,
         confidenceScore: null,
         retryRiskScore: null,
+        waterEstimateLiters: null,
+        waterScarcityImpact: null,
+        waterStressIndex: null,
+        waterIntensityLPerKwh: null,
+        waterConfidenceScore: null,
 
         // Grid intelligence (to be filled)
         balancingAuthority: null,
@@ -135,11 +147,13 @@ export function generateCandidates(input: CandidateGenerationInput): RoutingCand
 
         // Scoring (to be filled)
         carbonScore: null,
+        waterScore: null,
         latencyScore: null,
         costScore: null,
         queueScore: null,
         uncertaintyScore: null,
         rankScore: null,
+        waterGuardrailTriggered: false,
 
         // Feasibility
         isFeasible,

@@ -129,6 +129,16 @@ router.get('/job/:decisionFrameId', async (req, res) => {
         accountingMethod: entry.accountingMethod,
       },
 
+      waterAccounting: {
+        baselineWaterL: entry.baselineWaterL,
+        chosenWaterL: entry.chosenWaterL,
+        waterSavedL: entry.waterSavedL,
+        baselineWaterScarcityImpact: entry.baselineWaterScarcityImpact,
+        chosenWaterScarcityImpact: entry.chosenWaterScarcityImpact,
+        baselineWaterIntensityLPerKwh: entry.baselineWaterIntensityLPerKwh,
+        chosenWaterIntensityLPerKwh: entry.chosenWaterIntensityLPerKwh,
+      },
+
       verified: entry.verifiedAt ? {
         actualCarbonGPerKwh: entry.actualCarbonGPerKwh,
         actualCarbonG: entry.actualCarbonG,
@@ -155,6 +165,19 @@ router.get('/job/:decisionFrameId', async (req, res) => {
           low: entry.confidenceBandLow,
           mid: entry.confidenceBandMid,
           high: entry.confidenceBandHigh,
+        },
+        water: {
+          waterStressIndex: entry.waterStressIndex,
+          waterQualityIndex: entry.waterQualityIndex,
+          droughtRiskIndex: entry.droughtRiskIndex,
+          waterConfidenceScore: entry.waterConfidenceScore,
+          waterSource: entry.waterSource,
+          waterSignalType: entry.waterSignalType,
+          waterDatasetVersion: entry.waterDatasetVersion,
+          waterPolicyProfile: entry.waterPolicyProfile,
+          waterGuardrailTriggered: entry.waterGuardrailTriggered,
+          waterFallbackUsed: entry.waterFallbackUsed,
+          waterReferenceTime: entry.waterReferenceTime?.toISOString() ?? null,
         },
       },
 
@@ -208,6 +231,12 @@ router.get('/candidates/:decisionFrameId', async (req, res) => {
         region: c.region,
         startTs: c.startTs?.toISOString() ?? null,
         carbonEstimateGPerKwh: c.carbonEstimateGPerKwh,
+        waterEstimateLiters: c.waterEstimateLiters,
+        waterScarcityImpact: c.waterScarcityImpact,
+        waterStressIndex: c.waterStressIndex,
+        waterIntensityLPerKwh: c.waterIntensityLPerKwh,
+        waterConfidenceScore: c.waterConfidenceScore,
+        waterGuardrailTriggered: c.waterGuardrailTriggered,
         latencyEstimateMs: c.latencyEstimateMs,
         costEstimateUsd: c.costEstimateUsd,
         confidenceScore: c.confidenceScore,
@@ -217,6 +246,7 @@ router.get('/candidates/:decisionFrameId', async (req, res) => {
         rejectionReason: c.rejectionReason,
         scores: {
           carbon: c.carbonScore,
+          water: c.waterScore,
           latency: c.latencyScore,
           cost: c.costScore,
           queue: c.queueScore,

@@ -1,0 +1,48 @@
+{
+  "source_url": "https://www.nrel.gov/docs/fy15osti/63604.pdf",
+  "dataset_version": "nrel_water_factor_library_v1",
+  "unit": "gal_per_mwh",
+  "methodology": "Pinned pre-extracted factor table for control-plane use. Medians are derived from official NREL-published operational and comparative water-use ranges and kept explicit so routing does not depend on live document parsing.",
+  "factors": {
+    "wind_onshore": {
+      "min_gal_per_mwh": 0,
+      "max_gal_per_mwh": 1,
+      "median_gal_per_mwh": 0.5,
+      "notes": [
+        "Operational renewable benchmark used for low-water generation profiles."
+      ]
+    },
+    "solar_pv_operational": {
+      "min_gal_per_mwh": 0,
+      "max_gal_per_mwh": 5,
+      "median_gal_per_mwh": 2.5,
+      "notes": [
+        "Operational photovoltaic benchmark used for low-water generation profiles."
+      ]
+    },
+    "ngcc_closed_loop": {
+      "min_gal_per_mwh": 193,
+      "max_gal_per_mwh": 293,
+      "median_gal_per_mwh": 243,
+      "notes": [
+        "Natural gas combined-cycle closed-loop cooling median derived from official NREL comparison ranges."
+      ]
+    },
+    "coal_closed_loop": {
+      "min_gal_per_mwh": 425,
+      "max_gal_per_mwh": 784,
+      "median_gal_per_mwh": 604.5,
+      "notes": [
+        "Closed-loop coal benchmark derived from official NREL comparison ranges."
+      ]
+    },
+    "nuclear_closed_loop": {
+      "min_gal_per_mwh": 655,
+      "max_gal_per_mwh": 1030,
+      "median_gal_per_mwh": 842.5,
+      "notes": [
+        "Closed-loop nuclear benchmark derived from official NREL comparison ranges."
+      ]
+    }
+  }
+}

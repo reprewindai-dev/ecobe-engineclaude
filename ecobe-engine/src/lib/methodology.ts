@@ -1,5 +1,6 @@
 export interface RoutingWeightSet {
   carbon: number
+  water: number
   latency: number
   cost: number
 }
@@ -7,6 +8,22 @@ export interface RoutingWeightSet {
 export type RoutingMode = 'optimize' | 'assurance'
 export type PolicyMode = 'default' | 'sec_disclosure_strict' | 'eu_24x7_ready'
 export type SignalType = 'average_operational' | 'marginal_estimate' | 'consumed_emissions' | 'unknown'
+export type WaterPolicyProfileId =
+  | 'default'
+  | 'drought_sensitive'
+  | 'eu_data_center_reporting'
+  | 'high_water_sensitivity'
+
+export interface WaterPolicyProfile {
+  id: WaterPolicyProfileId
+  name: string
+  summary: string
+  guardrailStressThreshold: number
+  guardrailScarcityThreshold: number
+  missingSignalMode: 'penalize' | 'fail_closed'
+  conservativeFallbackIntensityLPerKwh: number
+  conservativeFallbackScarcityCf: number
+}
 
 export interface MethodologyTier {
   id: string
@@ -37,6 +54,7 @@ export interface StandardsMappingRow {
 
 export const DEFAULT_ROUTING_WEIGHTS: RoutingWeightSet = {
   carbon: 0.5,
+  water: 0,
   latency: 0.2,
   cost: 0.3,
 }
@@ -51,6 +69,49 @@ export const LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE =
 
 export const ROUTING_LEGAL_DISCLAIMER =
   'Ecobe recommends execution targets using best-available grid signals. Providers can diverge or degrade, and final execution responsibility remains with the operator. Every decision is logged with provenance for later review.'
+
+export const WATER_POLICY_PROFILES: WaterPolicyProfile[] = [
+  {
+    id: 'default',
+    name: 'Default Water Aware',
+    summary: 'Applies water-aware scoring when signals are present and uses conservative penalties when they are not.',
+    guardrailStressThreshold: 4,
+    guardrailScarcityThreshold: 0.25,
+    missingSignalMode: 'penalize',
+    conservativeFallbackIntensityLPerKwh: 2.5,
+    conservativeFallbackScarcityCf: 75,
+  },
+  {
+    id: 'drought_sensitive',
+    name: 'Drought Sensitive',
+    summary: 'Raises stress sensitivity and fails closed for non-critical work when water signals are missing.',
+    guardrailStressThreshold: 3.5,
+    guardrailScarcityThreshold: 0.18,
+    missingSignalMode: 'fail_closed',
+    conservativeFallbackIntensityLPerKwh: 3,
+    conservativeFallbackScarcityCf: 100,
+  },
+  {
+    id: 'eu_data_center_reporting',
+    name: 'EU Data Centre Reporting',
+    summary: 'Optimizes for auditable water footprint reporting and conservative scarcity handling.',
+    guardrailStressThreshold: 3.8,
+    guardrailScarcityThreshold: 0.2,
+    missingSignalMode: 'fail_closed',
+    conservativeFallbackIntensityLPerKwh: 2.8,
+    conservativeFallbackScarcityCf: 90,
+  },
+  {
+    id: 'high_water_sensitivity',
+    name: 'High Water Sensitivity',
+    summary: 'Aggressively avoids high-stress, high-scarcity basins and treats unknown water signals as blocking.',
+    guardrailStressThreshold: 3,
+    guardrailScarcityThreshold: 0.12,
+    missingSignalMode: 'fail_closed',
+    conservativeFallbackIntensityLPerKwh: 3.5,
+    conservativeFallbackScarcityCf: 125,
+  },
+]
 
 export const POLICY_MODES: PolicyModeDefinition[] = [
   {
@@ -189,17 +250,19 @@ export function normalizeRoutingWeights(
 ): RoutingWeightSet {
   const candidate: RoutingWeightSet = {
     carbon: weights?.carbon ?? DEFAULT_ROUTING_WEIGHTS.carbon,
+    water: weights?.water ?? DEFAULT_ROUTING_WEIGHTS.water,
     latency: weights?.latency ?? DEFAULT_ROUTING_WEIGHTS.latency,
     cost: weights?.cost ?? DEFAULT_ROUTING_WEIGHTS.cost,
   }
 
-  const total = candidate.carbon + candidate.latency + candidate.cost
+  const total = candidate.carbon + candidate.water + candidate.latency + candidate.cost
   if (total <= 0) {
     return { ...DEFAULT_ROUTING_WEIGHTS }
   }
 
   return {
     carbon: candidate.carbon / total,
+    water: candidate.water / total,
     latency: candidate.latency / total,
     cost: candidate.cost / total,
   }
@@ -249,4 +312,12 @@ export function inferSignalType(sourceUsed?: string | null): SignalType {
   }
 
   return 'unknown'
+}
+
+export function getWaterPolicyProfile(profileId?: WaterPolicyProfileId | null): WaterPolicyProfile {
+  const profile = WATER_POLICY_PROFILES.find((candidate) => candidate.id === (profileId ?? 'default'))
+  if (!profile) {
+    throw new Error(`Unknown water policy profile: ${profileId}`)
+  }
+  return profile
 }

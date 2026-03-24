@@ -1,0 +1,170 @@
+{
+  "us-east-1": {
+    "aqueduct_key": "USA",
+    "aware_key": "USA",
+    "nrel_key": "thermal_mixed",
+    "notes": ["AWS us-east-1 mapped to United States country-level hydrology and a thermal-mixed grid profile."]
+  },
+  "us-east-2": {
+    "aqueduct_key": "USA",
+    "aware_key": "USA",
+    "nrel_key": "thermal_mixed",
+    "notes": ["AWS us-east-2 mapped to United States country-level hydrology and a thermal-mixed grid profile."]
+  },
+  "us-west-1": {
+    "aqueduct_key": "USA",
+    "aware_key": "USA",
+    "nrel_key": "gas_dominant",
+    "notes": ["AWS us-west-1 uses a gas-dominant profile to reflect California-style thermal balancing in the first pass bundle."]
+  },
+  "us-west-2": {
+    "aqueduct_key": "USA",
+    "aware_key": "USA",
+    "nrel_key": "renewables_heavy",
+    "notes": ["AWS us-west-2 mapped to a renewables-heavy profile for BPA-style hydro and wind heavy supply."]
+  },
+  "us-central1": {
+    "aqueduct_key": "USA",
+    "aware_key": "USA",
+    "nrel_key": "thermal_mixed",
+    "notes": ["GCP us-central1 uses a thermal-mixed US grid profile."]
+  },
+  "us-east4": {
+    "aqueduct_key": "USA",
+    "aware_key": "USA",
+    "nrel_key": "thermal_mixed",
+    "notes": ["GCP us-east4 uses a thermal-mixed US grid profile."]
+  },
+  "us-west1": {
+    "aqueduct_key": "USA",
+    "aware_key": "USA",
+    "nrel_key": "renewables_heavy",
+    "notes": ["GCP us-west1 uses a renewables-heavy profile for BPA-style supply."]
+  },
+  "eastus": {
+    "aqueduct_key": "USA",
+    "aware_key": "USA",
+    "nrel_key": "thermal_mixed",
+    "notes": ["Azure eastus uses a thermal-mixed US grid profile."]
+  },
+  "eastus2": {
+    "aqueduct_key": "USA",
+    "aware_key": "USA",
+    "nrel_key": "thermal_mixed",
+    "notes": ["Azure eastus2 uses a thermal-mixed US grid profile."]
+  },
+  "westus2": {
+    "aqueduct_key": "USA",
+    "aware_key": "USA",
+    "nrel_key": "renewables_heavy",
+    "notes": ["Azure westus2 uses a renewables-heavy US West profile."]
+  },
+  "centralus": {
+    "aqueduct_key": "USA",
+    "aware_key": "USA",
+    "nrel_key": "thermal_mixed",
+    "notes": ["Azure centralus uses a thermal-mixed US grid profile."]
+  },
+  "southcentralus": {
+    "aqueduct_key": "USA",
+    "aware_key": "USA",
+    "nrel_key": "gas_dominant",
+    "notes": ["Azure southcentralus uses a gas-dominant US grid profile."]
+  },
+  "eu-west-1": {
+    "aqueduct_key": "IRL",
+    "aware_key": "IRL",
+    "nrel_key": "gas_dominant",
+    "notes": ["AWS eu-west-1 mapped to Ireland and a gas-dominant European profile."]
+  },
+  "eu-west-2": {
+    "aqueduct_key": "GBR",
+    "aware_key": "GBR",
+    "nrel_key": "gas_dominant",
+    "notes": ["AWS eu-west-2 mapped to Great Britain and a gas-dominant European profile."]
+  },
+  "eu-central-1": {
+    "aqueduct_key": "DEU",
+    "aware_key": "DEU",
+    "nrel_key": "thermal_mixed",
+    "notes": ["AWS eu-central-1 mapped to Germany and a thermal-mixed profile."]
+  },
+  "eu-north-1": {
+    "aqueduct_key": "SWE",
+    "aware_key": "SWE",
+    "nrel_key": "renewables_heavy",
+    "notes": ["AWS eu-north-1 mapped to Sweden and a renewables-heavy Nordic profile."]
+  },
+  "ap-southeast-1": {
+    "aqueduct_key": "SGP",
+    "aware_key": "SGP",
+    "nrel_key": "gas_dominant",
+    "notes": ["AWS ap-southeast-1 mapped to Singapore and a gas-dominant profile."]
+  },
+  "ap-northeast-1": {
+    "aqueduct_key": "JPN",
+    "aware_key": "JPN",
+    "nrel_key": "gas_dominant",
+    "notes": ["AWS ap-northeast-1 mapped to Japan and a gas-dominant profile."]
+  },
+  "ap-south-1": {
+    "aqueduct_key": "IND",
+    "aware_key": "IND",
+    "nrel_key": "coal_heavy",
+    "notes": ["AWS ap-south-1 mapped to India and a coal-heavy profile."]
+  },
+  "europe-west1": {
+    "aqueduct_key": "BEL",
+    "aware_key": "BEL",
+    "nrel_key": "nuclear_heavy",
+    "notes": ["GCP europe-west1 mapped to Belgium and a nuclear-heavy profile."]
+  },
+  "europe-north1": {
+    "aqueduct_key": "FIN",
+    "aware_key": "FIN",
+    "nrel_key": "renewables_heavy",
+    "notes": ["GCP europe-north1 mapped to Finland and a renewables-heavy Nordic profile."]
+  },
+  "northeurope": {
+    "aqueduct_key": "IRL",
+    "aware_key": "IRL",
+    "nrel_key": "gas_dominant",
+    "notes": ["Azure northeurope mapped to Ireland and a gas-dominant profile."]
+  },
+  "norwayeast": {
+    "aqueduct_key": "NOR",
+    "aware_key": "NOR",
+    "nrel_key": "renewables_heavy",
+    "notes": ["Azure norwayeast mapped to Norway and a renewables-heavy Nordic profile."]
+  },
+  "uksouth": {
+    "aqueduct_key": "GBR",
+    "aware_key": "GBR",
+    "nrel_key": "gas_dominant",
+    "notes": ["Azure uksouth mapped to Great Britain and a gas-dominant profile."]
+  },
+  "FR": {
+    "aqueduct_key": "FRA",
+    "aware_key": "FRA",
+    "nrel_key": "nuclear_heavy",
+    "notes": ["Routing test region FR mapped to France and a nuclear-heavy profile."]
+  },
+  "DE": {
+    "aqueduct_key": "DEU",
+    "aware_key": "DEU",
+    "nrel_key": "thermal_mixed",
+    "notes": ["Routing test region DE mapped to Germany and a thermal-mixed profile."]
+  },
+  "GB": {
+    "aqueduct_key": "GBR",
+    "aware_key": "GBR",
+    "nrel_key": "gas_dominant",
+    "notes": ["Routing test region GB mapped to Great Britain and a gas-dominant profile."]
+  },
+  "US-CAL-CISO": {
+    "aqueduct_key": "USA",
+    "aware_key": "USA",
+    "nrel_key": "gas_dominant",
+    "notes": ["Routing test region US-CAL-CISO uses the United States country baseline and a gas-dominant California profile."]
+  }
+}

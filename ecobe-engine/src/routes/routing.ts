@@ -4,6 +4,7 @@ import { routeGreen } from '../lib/green-routing'
 import { prisma } from '../lib/db'
 import { DEFAULT_ROUTING_WEIGHTS } from '../lib/methodology'
 import { CarbonBudgetViolationError } from '../lib/routing'
+import { WaterGuardrailViolationError } from '../lib/water/signals'
 import {
   requireActiveOrganization,
   getOrCreateUsageCounter,
@@ -15,12 +16,33 @@ import {
 
 const router = Router()
 
+const waterSignalSchema = z.object({
+  region: z.string().min(1),
+  waterIntensityLPerKwh: z.number().nonnegative(),
+  waterStressIndex: z.number().nonnegative(),
+  waterQualityIndex: z.number().nonnegative().optional().nullable(),
+  droughtRiskIndex: z.number().nonnegative().optional().nullable(),
+  scarcityCfMonthly: z.number().nonnegative().optional().nullable(),
+  scarcityCfAnnual: z.number().nonnegative().optional().nullable(),
+  siteWaterIntensityLPerKwh: z.number().nonnegative().optional().nullable(),
+  source: z.string().min(1),
+  referenceTime: z.string().datetime().optional().nullable(),
+  dataQuality: z.enum(['high', 'medium', 'low']).optional(),
+  signalType: z
+    .enum(['average_operational', 'scarcity_weighted_operational', 'site_measured', 'unknown'])
+    .optional(),
+  confidence: z.number().min(0).max(1).optional().nullable(),
+  datasetVersion: z.string().optional().nullable(),
+  metadata: z.record(z.unknown()).optional(),
+})
+
 const routingRequestSchema = z.object({
   preferredRegions: z.array(z.string()).min(1),
   maxCarbonGPerKwh: z.number().positive().optional(),
   latencyMsByRegion: z.record(z.number()).optional(),
   costIndexByRegion: z.record(z.number().positive()).optional(),
   carbonWeight: z.number().min(0).max(1).optional(),
+  waterWeight: z.number().min(0).max(1).optional(),
   latencyWeight: z.number().min(0).max(1).optional(),
   costWeight: z.number().min(0).max(1).optional(),
   mode: z.enum(['optimize', 'assurance']).optional(),
@@ -31,6 +53,11 @@ const routingRequestSchema = z.object({
   workloadType: z.string().min(1).max(120).optional(),
   workloadName: z.string().min(1).max(160).optional(),
   energyEstimateKwh: z.number().positive().max(100000).optional(),
+  criticality: z.enum(['critical', 'standard', 'deferable']).optional(),
+  waterPolicyProfile: z
+    .enum(['default', 'drought_sensitive', 'eu_data_center_reporting', 'high_water_sensitivity'])
+    .optional(),
+  waterSignalsByRegion: z.record(waterSignalSchema).optional(),
 })
 
 router.post('/green', async (req, res) => {
@@ -71,6 +98,13 @@ router.post('/green', async (req, res) => {
       return res.status(statusCode).json({ error: error.message, code: error.code })
     }
     if (error instanceof CarbonBudgetViolationError) {
+      return res.status(409).json({
+        error: error.message,
+        code: error.code,
+        evaluations: error.evaluations,
+      })
+    }
+    if (error instanceof WaterGuardrailViolationError) {
       return res.status(409).json({
         error: error.message,
         code: error.code,

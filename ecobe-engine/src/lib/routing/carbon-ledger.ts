@@ -36,6 +36,7 @@ export interface LedgerEntryInput {
   forecastStability?: string | null
   disagreementFlag?: boolean
   disagreementPct?: number | null
+  waterPolicyProfile?: string | null
   metadata?: Record<string, unknown>
 }
 
@@ -68,6 +69,7 @@ export async function recordLedgerEntry(input: LedgerEntryInput): Promise<string
     forecastStability,
     disagreementFlag,
     disagreementPct,
+    waterPolicyProfile,
     metadata,
   } = input
 
@@ -88,6 +90,10 @@ export async function recordLedgerEntry(input: LedgerEntryInput): Promise<string
     lowerHalfBenchmark != null && selected.carbonEstimateGPerKwh != null
       ? selected.carbonEstimateGPerKwh <= lowerHalfBenchmark
       : null
+  const baselineWaterL = baseline?.waterEstimateLiters ?? null
+  const chosenWaterL = selected.waterEstimateLiters ?? null
+  const waterSavedL =
+    baselineWaterL != null && chosenWaterL != null ? Math.max(0, baselineWaterL - chosenWaterL) : null
 
   const entry = await prisma.carbonLedgerEntry.create({
     data: {
@@ -133,6 +139,45 @@ export async function recordLedgerEntry(input: LedgerEntryInput): Promise<string
       confidenceBandHigh: confidenceBand?.high ?? null,
       lowerHalfBenchmarkGPerKwh: lowerHalfBenchmark,
       lowerHalfQualified,
+      baselineWaterL,
+      chosenWaterL,
+      waterSavedL,
+      baselineWaterScarcityImpact: baseline?.waterScarcityImpact ?? null,
+      chosenWaterScarcityImpact: selected.waterScarcityImpact ?? null,
+      baselineWaterIntensityLPerKwh: baseline?.waterIntensityLPerKwh ?? null,
+      chosenWaterIntensityLPerKwh: selected.waterIntensityLPerKwh ?? null,
+      waterStressIndex: selected.waterStressIndex ?? null,
+      waterQualityIndex:
+        typeof metadata?.water === 'object' && metadata?.water !== null
+          ? ((metadata.water as Record<string, unknown>).waterQualityIndex as number | null) ?? null
+          : null,
+      droughtRiskIndex:
+        typeof metadata?.water === 'object' && metadata?.water !== null
+          ? ((metadata.water as Record<string, unknown>).droughtRiskIndex as number | null) ?? null
+          : null,
+      waterConfidenceScore: selected.waterConfidenceScore ?? null,
+      waterSource:
+        typeof metadata?.water === 'object' && metadata?.water !== null
+          ? ((metadata.water as Record<string, unknown>).source as string | null) ?? null
+          : null,
+      waterSignalType:
+        typeof metadata?.water === 'object' && metadata?.water !== null
+          ? ((metadata.water as Record<string, unknown>).signalType as string | null) ?? null
+          : null,
+      waterDatasetVersion:
+        typeof metadata?.water === 'object' && metadata?.water !== null
+          ? ((metadata.water as Record<string, unknown>).datasetVersion as string | null) ?? null
+          : null,
+      waterPolicyProfile: waterPolicyProfile ?? null,
+      waterGuardrailTriggered: selected.waterGuardrailTriggered,
+      waterFallbackUsed:
+        typeof metadata?.water === 'object' && metadata?.water !== null
+          ? Boolean((metadata.water as Record<string, unknown>).fallbackUsed)
+          : false,
+      waterReferenceTime:
+        typeof metadata?.water === 'object' && metadata?.water !== null
+          ? toDateOrNull((metadata.water as Record<string, unknown>).referenceTime)
+          : null,
       metadata: metadata ?? {},
 
       balancingAuthority: selected.balancingAuthority,
@@ -349,12 +394,19 @@ async function persistCandidates(
       costEstimateUsd: c.costEstimateUsd,
       confidenceScore: c.confidenceScore,
       retryRiskScore: c.retryRiskScore,
+      waterEstimateLiters: c.waterEstimateLiters,
+      waterScarcityImpact: c.waterScarcityImpact,
+      waterStressIndex: c.waterStressIndex,
+      waterIntensityLPerKwh: c.waterIntensityLPerKwh,
+      waterConfidenceScore: c.waterConfidenceScore,
       carbonScore: c.carbonScore,
+      waterScore: c.waterScore,
       latencyScore: c.latencyScore,
       costScore: c.costScore,
       queueScore: c.queueScore,
       uncertaintyScore: c.uncertaintyScore,
       rankScore: c.rankScore,
+      waterGuardrailTriggered: c.waterGuardrailTriggered,
       wasSelected: c === scoringResult.selected,
       wasFeasible: c.isFeasible,
       rejectionReason: c.rejectionReason,
@@ -391,4 +443,15 @@ function getLowerHalfBenchmark(scoringResult: ScoringResult): number | null {
 
 function round3(n: number): number {
   return Math.round(n * 1000) / 1000
+}
+
+function toDateOrNull(value: unknown): Date | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+  return parsed
 }

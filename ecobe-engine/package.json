@@ -16,6 +16,7 @@
     "prisma:push": "prisma db push",
     "prisma:seed": "tsx prisma/seed.ts",
     "db:setup": "npm run prisma:migrate:deploy && npm run prisma:seed",
+    "ingest:water": "tsx scripts/ingest-water.ts",
     "format": "prettier --write \"src/**/*.ts\"",
     "lint": "eslint src --ext .ts",
     "type-check": "tsc --noEmit"
@@ -42,6 +43,7 @@
     "@upstash/qstash": "^2.9.0",
     "@upstash/redis": "^1.36.3",
     "@upstash/vector": "1.1.1",
+    "adm-zip": "^0.5.16",
     "axios": "^1.13.6",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
@@ -55,9 +57,11 @@
     "openai": "^4.28.0",
     "redis": "^4.6.0",
     "stripe": "^20.4.0",
+    "xlsx": "^0.18.5",
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
     "@types/cors": "^2.8.19",
     "@types/express": "^4.17.0",
     "@types/jest": "^29.5.0",
