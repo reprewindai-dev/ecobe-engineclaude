@@ -51,6 +51,9 @@ jobs:
           DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
           DIRECT_DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
 
+      - name: Validate GitHub Action runtime
+        run: node --check ../github-action/main.js
+
       - name: Build
         run: npm run build
         env:

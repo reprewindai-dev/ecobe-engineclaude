@@ -73,6 +73,14 @@ export interface RoutingResult {
     score: number
     reason?: string
   }>
+  evaluatedCandidates?: Array<{
+    region: string
+    carbonIntensity: number
+    effectiveCarbonIntensity?: number
+    estimatedLatency?: number
+    costIndex?: number
+    score: number
+  }>
   // Keep existing lease fields
   lease_id?: string
   lease_expires_at?: string
@@ -224,6 +232,14 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
         carbonIntensity: r.carbonIntensity,
         score: 0,
         reason: `Exceeds carbon budget (${maxCarbonGPerKwh} gCO2/kWh)`,
+      })),
+      evaluatedCandidates: sorted.map((candidate) => ({
+        region: candidate.region,
+        carbonIntensity: candidate.carbonIntensity,
+        effectiveCarbonIntensity: candidate.effectiveCarbonIntensity,
+        estimatedLatency: candidate.latency,
+        costIndex: candidate.costIndex,
+        score: 0,
       })),
     }
   }
@@ -598,6 +614,14 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
       region: r.region,
       carbonIntensity: r.carbonIntensity,
       score: r.score,
+    })),
+    evaluatedCandidates: scored.map((candidate) => ({
+      region: candidate.region,
+      carbonIntensity: candidate.carbonIntensity,
+      effectiveCarbonIntensity: candidate.effectiveCarbonIntensity,
+      estimatedLatency: candidate.latency,
+      costIndex: candidate.costIndex,
+      score: candidate.score,
     })),
     confidenceBand,
     dataResolutionMinutes: bestSignal?.isForecast ? 60 : 5,

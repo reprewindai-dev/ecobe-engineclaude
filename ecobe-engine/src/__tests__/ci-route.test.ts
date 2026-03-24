@@ -17,25 +17,53 @@ jest.mock('../lib/db', () => ({
   },
 }))
 
-const express = require('express')
-const request = require('supertest')
-const { routeGreen } = require('../lib/green-routing')
-const ciRoutes = require('../routes/ci').default
-
-describe('CI routing hardening', () => {
+describe('CI routing control layer', () => {
+  const internalKey = 'test-internal-key'
   let app: any
+  let request: any
+  let routeGreen: jest.Mock
+  let prisma: any
+  let CarbonBudgetViolationError: any
+
+  function postWithAuth(path: string) {
+    return request(app).post(path).set('Authorization', `Bearer ${internalKey}`)
+  }
 
   beforeEach(() => {
+    jest.resetModules()
     jest.clearAllMocks()
+    process.env.ECOBE_INTERNAL_API_KEY = internalKey
+
+    const express = require('express')
+    request = require('supertest')
+    routeGreen = require('../lib/green-routing').routeGreen
+    prisma = require('../lib/db').prisma
+    CarbonBudgetViolationError = require('../lib/routing').CarbonBudgetViolationError
+    const ciRoutes = require('../routes/ci').default
+
     app = express()
     app.use(express.json())
     app.use('/api/v1/ci', ciRoutes)
   })
 
-  it('returns 400 for expired deadlines', async () => {
+  afterEach(() => {
+    delete process.env.ECOBE_INTERNAL_API_KEY
+  })
+
+  it('requires internal auth for carbon-route', async () => {
     const response = await request(app).post('/api/v1/ci/carbon-route').send({
+      workloadId: 'unauthorized-build',
+      candidateRegions: ['eastus'],
+    })
+
+    expect(response.status).toBe(401)
+    expect(response.body.code).toBe('UNAUTHORIZED_INTERNAL_CALL')
+  })
+
+  it('returns 400 for expired deadlines', async () => {
+    const response = await postWithAuth('/api/v1/ci/carbon-route').send({
       workloadId: 'expired-build',
-      candidateRegions: ['us-east-1'],
+      candidateRegions: ['eastus'],
       durationMinutes: 20,
       delayToleranceMinutes: 60,
       deadline: '2020-01-01T00:00:00.000Z',
@@ -48,10 +76,14 @@ describe('CI routing hardening', () => {
 
   it('treats impossible deadlines as immediate-only routing', async () => {
     routeGreen.mockResolvedValue({
-      selectedRegion: 'us-east-1',
+      selectedRegion: 'eastus',
       carbonIntensity: 115,
       score: 0.82,
-      alternatives: [{ region: 'eu-west-1', carbonIntensity: 190, score: 0.31 }],
+      alternatives: [{ region: 'northeurope', carbonIntensity: 190, score: 0.31 }],
+      evaluatedCandidates: [
+        { region: 'eastus', carbonIntensity: 115, score: 0.82 },
+        { region: 'northeurope', carbonIntensity: 190, score: 0.31 },
+      ],
       decisionFrameId: 'decision-123',
       doctrine: 'lowest defensible signal',
       legalDisclaimer: 'routing disclaimer',
@@ -68,9 +100,9 @@ describe('CI routing hardening', () => {
     })
 
     const deadline = new Date(Date.now() + 10 * 60 * 1000).toISOString()
-    const response = await request(app).post('/api/v1/ci/carbon-route').send({
+    const response = await postWithAuth('/api/v1/ci/carbon-route').send({
       workloadId: 'bounded-build',
-      candidateRegions: ['us-east-1', 'eu-west-1'],
+      candidateRegions: ['eastus', 'northeurope'],
       durationMinutes: 30,
       delayToleranceMinutes: 120,
       deadline,
@@ -80,20 +112,140 @@ describe('CI routing hardening', () => {
     expect(response.status).toBe(200)
     expect(response.body.deadlineHandling.mode).toBe('immediate_only')
     expect(response.body.deadlineHandling.effectiveLookaheadMinutes).toBe(0)
+    expect(response.body.decision).toBe('run_now')
     expect(response.body.shouldRun).toBe(true)
     expect(routeGreen).toHaveBeenCalledWith(
       expect.objectContaining({
-        preferredRegions: ['us-east-1', 'eu-west-1'],
+        preferredRegions: ['eastus', 'northeurope'],
       })
     )
   })
 
+  it('uses the declared baseline region for honest savings math', async () => {
+    routeGreen.mockResolvedValue({
+      selectedRegion: 'westus2',
+      carbonIntensity: 100,
+      score: 0.9,
+      alternatives: [{ region: 'eastus', carbonIntensity: 200, score: 0.2 }],
+      evaluatedCandidates: [
+        { region: 'eastus', carbonIntensity: 200, score: 0.2 },
+        { region: 'westus2', carbonIntensity: 100, score: 0.9 },
+      ],
+      decisionFrameId: 'decision-456',
+      doctrine: 'lowest defensible signal',
+      legalDisclaimer: 'routing disclaimer',
+      mode: 'assurance',
+      policyMode: 'sec_disclosure_strict',
+      signalTypeUsed: 'average_operational',
+      assurance: { confidenceLabel: 'high' },
+      source_used: 'WATTTIME_MOER',
+      validation_source: null,
+      fallback_used: false,
+      provider_disagreement: { flag: false, pct: 0 },
+      confidenceBand: { low: 90, mid: 100, high: 120, empirical: true },
+      budgetStatus: [],
+    })
+
+    const response = await postWithAuth('/api/v1/ci/carbon-route').send({
+      workloadId: 'reroute-build',
+      candidateRegions: ['eastus', 'westus2'],
+      baselineRegion: 'eastus',
+      candidateRunners: ['ubuntu-latest'],
+      matrixSize: 4,
+    })
+
+    expect(response.status).toBe(200)
+    expect(response.body.decision).toBe('reroute')
+    expect(response.body.reasonCode).toBe('CLEANER_REGION_AVAILABLE')
+    expect(response.body.baselineRegion).toBe('eastus')
+    expect(response.body.baselineCarbonIntensity).toBe(200)
+    expect(response.body.selectedCarbonIntensity).toBe(100)
+    expect(response.body.estimatedSavingsPercent).toBe(50)
+    expect(prisma.cIDecision.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          baseline: 200,
+          savings: 50,
+        }),
+      })
+    )
+  })
+
+  it('denies execution in assurance mode when only low-confidence fallback signals are available', async () => {
+    routeGreen.mockResolvedValue({
+      selectedRegion: 'eastus',
+      carbonIntensity: 315,
+      score: 0.12,
+      alternatives: [{ region: 'northeurope', carbonIntensity: 330, score: 0.1 }],
+      evaluatedCandidates: [
+        { region: 'eastus', carbonIntensity: 315, score: 0.12 },
+        { region: 'northeurope', carbonIntensity: 330, score: 0.1 },
+      ],
+      decisionFrameId: 'decision-deny',
+      doctrine: 'lowest defensible signal',
+      legalDisclaimer: 'routing disclaimer',
+      mode: 'assurance',
+      policyMode: 'sec_disclosure_strict',
+      signalTypeUsed: 'average_operational',
+      assurance: { confidenceLabel: 'low' },
+      source_used: 'EMBER_STRUCTURAL_BASELINE',
+      validation_source: null,
+      fallback_used: true,
+      provider_disagreement: { flag: false, pct: 0 },
+      confidenceBand: { low: 300, mid: 315, high: 340, empirical: false },
+      budgetStatus: [],
+    })
+
+    const response = await postWithAuth('/api/v1/ci/carbon-route').send({
+      workloadId: 'strict-build',
+      candidateRegions: ['eastus', 'northeurope'],
+      assuranceMode: true,
+    })
+
+    expect(response.status).toBe(200)
+    expect(response.body.decision).toBe('deny')
+    expect(response.body.reasonCode).toBe('INSUFFICIENT_TRUSTED_SIGNALS')
+    expect(response.body.shouldRun).toBe(false)
+    expect(response.body.maxParallel).toBe(0)
+    expect(response.body.estimatedSavingsPercent).toBeNull()
+    expect(prisma.cIDecision.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          metadata: expect.objectContaining({
+            decision: 'deny',
+            reasonCode: 'INSUFFICIENT_TRUSTED_SIGNALS',
+          }),
+        }),
+      })
+    )
+  })
+
+  it('returns a deny decision when a carbon budget policy blocks the request', async () => {
+    routeGreen.mockRejectedValue(new CarbonBudgetViolationError([]))
+
+    const response = await postWithAuth('/api/v1/ci/carbon-route').send({
+      workloadId: 'budget-build',
+      candidateRegions: ['eastus', 'westus2'],
+      orgId: 'org-1',
+    })
+
+    expect(response.status).toBe(200)
+    expect(response.body.decision).toBe('deny')
+    expect(response.body.reasonCode).toBe('CARBON_BUDGET_EXCEEDED')
+    expect(response.body.shouldRun).toBe(false)
+    expect(prisma.cIDecision.create).toHaveBeenCalled()
+  })
+
   it('normalizes legacy /api/v1/ci/route payloads', async () => {
     routeGreen.mockResolvedValue({
-      selectedRegion: 'eu-west-1',
+      selectedRegion: 'northeurope',
       carbonIntensity: 95,
       score: 0.91,
-      alternatives: [{ region: 'us-east-1', carbonIntensity: 180, score: 0.28 }],
+      alternatives: [{ region: 'eastus', carbonIntensity: 180, score: 0.28 }],
+      evaluatedCandidates: [
+        { region: 'northeurope', carbonIntensity: 95, score: 0.91 },
+        { region: 'eastus', carbonIntensity: 180, score: 0.28 },
+      ],
       decisionFrameId: 'legacy-456',
       doctrine: 'lowest defensible signal',
       legalDisclaimer: 'routing disclaimer',
@@ -109,8 +261,8 @@ describe('CI routing hardening', () => {
       budgetStatus: [],
     })
 
-    const response = await request(app).post('/api/v1/ci/route').send({
-      preferredRegions: ['eu-west-1', 'us-east-1'],
+    const response = await postWithAuth('/api/v1/ci/route').send({
+      preferredRegions: ['northeurope', 'eastus'],
       carbonWeight: 0.9,
       latencyWeight: 0.05,
       costWeight: 0.05,
@@ -121,13 +273,14 @@ describe('CI routing hardening', () => {
     expect(response.status).toBe(200)
     expect(routeGreen).toHaveBeenCalledWith(
       expect.objectContaining({
-        preferredRegions: ['eu-west-1', 'us-east-1'],
+        preferredRegions: ['northeurope', 'eastus'],
         carbonWeight: 0.9,
         latencyWeight: 0.05,
         costWeight: 0.05,
         workloadName: 'legacy-ci-route',
       })
     )
-    expect(response.body.selectedRegion).toBe('eu-west-1')
+    expect(response.body.selectedRegion).toBe('northeurope')
+    expect(response.body.decision).toBe('run_now')
   })
 })
