@@ -3,7 +3,6 @@ import { eia930 } from '../lib/grid-signals/eia-client'
 import { gridStatus } from '../lib/grid-signals/gridstatus-client'
 import { BalanceParser } from '../lib/grid-signals/balance-parser'
 import { InterchangeParser } from '../lib/grid-signals/interchange-parser'
-import { SubregionParser } from '../lib/grid-signals/subregion-parser'
 import { FuelMixParser } from '../lib/grid-signals/fuel-mix-parser'
 import { GridFeatureEngine } from '../lib/grid-signals/grid-feature-engine'
 import { GridSignalCache } from '../lib/grid-signals/grid-signal-cache'
@@ -325,14 +324,13 @@ export class EIAIngestionWorker {
     endTime: Date
   ): Promise<RegionIngestionResult> {
     // Fetch raw data from EIA API
-    const [balanceData, interchangeData, subregionData] = await Promise.all([
+    const [balanceData, interchangeData] = await Promise.all([
       eia930.getBalance(config.eiaRespondent, startTime, endTime),
       eia930.getInterchange(config.eiaRespondent, startTime, endTime),
-      eia930.getSubregion(config.eiaRespondent, startTime, endTime)
     ])
 
     // Store raw data for audit
-    await this.storeRawData(config, balanceData, interchangeData, subregionData)
+    await this.storeRawData(config, balanceData, interchangeData, [])
 
     // Parse and normalize data
     const balanceSnapshots = BalanceParser.parseBalanceData(
@@ -348,18 +346,10 @@ export class EIAIngestionWorker {
       config.balancingAuthority
     )
 
-    // Heuristic subregion parser (less accurate than GridStatus fuel mix)
-    const subregionSnapshots = SubregionParser.parseSubregionData(
-      subregionData,
-      config.region,
-      config.balancingAuthority
-    )
-
-    // Merge all data sources
-    const mergedSnapshots = this.mergeSnapshots(
+    // Merge the measured datasets available on the direct EIA path.
+    const mergedSnapshots = InterchangeParser.mergeIntoSnapshots(
       balanceWithChanges,
-      interchangeSnapshots,
-      subregionSnapshots
+      interchangeSnapshots
     )
 
     // Calculate derived features
@@ -377,7 +367,7 @@ export class EIAIngestionWorker {
 
     return {
       snapshotsProcessed: finalSnapshots.length,
-      rawRecordsStored: balanceData.length + interchangeData.length + subregionData.length,
+      rawRecordsStored: balanceData.length + interchangeData.length,
       featuresCalculated: finalSnapshots.length,
       dataSource: 'eia_direct',
     }

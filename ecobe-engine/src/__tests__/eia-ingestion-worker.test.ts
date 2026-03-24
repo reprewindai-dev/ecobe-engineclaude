@@ -191,4 +191,26 @@ describe('EIA ingestion provider fallback', () => {
       (worker as any).ingestFromGridStatus(config, new Date('2026-03-23T00:00:00.000Z'), new Date('2026-03-24T00:00:00.000Z'))
     ).rejects.toThrow('direct EIA fallback is unavailable')
   })
+
+  it('ingests direct EIA snapshots without subregion fetches', async () => {
+    eia930.getBalance.mockResolvedValue([
+      { period: '2026-03-24T00:00:00.000Z', respondent: 'PJM', 'respondent-name': 'PJM', type: 'D', value: 100, 'value-units': 'megawatthours' },
+      { period: '2026-03-24T00:00:00.000Z', respondent: 'PJM', 'respondent-name': 'PJM', type: 'NG', value: 95, 'value-units': 'megawatthours' },
+    ])
+    eia930.getInterchange.mockResolvedValue([
+      { period: '2026-03-24T00:00:00.000Z', 'from-ba': 'PJM', 'from-ba-name': 'PJM', 'to-ba': 'MISO', 'to-ba-name': 'MISO', type: 'ID', value: 4, 'value-units': 'megawatthours' },
+    ])
+    eia930.getSubregion.mockResolvedValue([{ period: '2026-03-24T00:00:00.000Z' }])
+
+    const worker = new EIAIngestionWorker()
+    const result = await (worker as any).ingestFromDirectEia(
+      config,
+      new Date('2026-03-23T00:00:00.000Z'),
+      new Date('2026-03-24T00:00:00.000Z')
+    )
+
+    expect(eia930.getSubregion).not.toHaveBeenCalled()
+    expect(result.snapshotsProcessed).toBeGreaterThan(0)
+    expect(result.dataSource).toBe('eia_direct')
+  })
 })
