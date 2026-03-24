@@ -23,6 +23,14 @@ type EiaInterchangeApiRecord = {
   'value-units': string
 }
 
+function normalizeEiaPeriod(period: string): string {
+  const trimmed = period.trim()
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}$/.test(trimmed)) {
+    return `${trimmed}:00:00.000Z`
+  }
+  return trimmed
+}
+
 export class EIA930Client {
   private baseUrl: string
   private apiKey?: string
@@ -92,7 +100,7 @@ export class EIA930Client {
 
       await this.logSuccess()
       return (response.data.response.data || []).map((record) => ({
-        period: record.period,
+        period: normalizeEiaPeriod(record.period),
         respondent: record.respondent,
         'respondent-name': record['respondent-name'],
         type: record.type,
@@ -145,7 +153,7 @@ export class EIA930Client {
 
       await this.logSuccess()
       return (response.data.response.data || []).map((record) => ({
-        period: record.period,
+        period: normalizeEiaPeriod(record.period),
         'from-ba': record.fromba,
         'from-ba-name': record['fromba-name'],
         'to-ba': record.toba,
