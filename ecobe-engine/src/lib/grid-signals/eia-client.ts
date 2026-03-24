@@ -13,6 +13,10 @@ export class EIA930Client {
     this.apiKey = env.EIA_API_KEY
   }
 
+  get isAvailable(): boolean {
+    return !!this.apiKey
+  }
+
   private async logSuccess() {
     try {
       await recordIntegrationSuccess('EIA_930')

@@ -66,6 +66,26 @@ export const emberResilience = new ApiResilienceWrapper('ember', {
 })
 
 /**
+ * GridStatus Resilience Wrapper
+ * - Provider: GridStatus.io curated EIA/ISO datasets
+ * - Timeout: 12s (dataset queries can be heavy)
+ * - Retries: 0 (403/429 churn gets worse when we retry immediately)
+ * - Failure Threshold: 3 (open quickly under degraded conditions)
+ * - Role: Preferred ingestion adapter, but not authoritative over direct EIA fallback
+ */
+export const gridStatusResilience = new ApiResilienceWrapper('gridstatus', {
+  timeoutMs: 12000,
+  maxRetries: 0,
+  baseDelayMs: 1000,
+  maxDelayMs: 3000,
+  failureThreshold: 3,
+  resetTimeoutMs: 30000,
+  halfOpenMaxAttempts: 1,
+  maxConcurrent: 2,
+  maxQueueSize: 12,
+})
+
+/**
  * EIA-930 Resilience Wrapper
  * - Provider: EIA Real-Time Grid Data (BALANCE, INTERCHANGE, SUBREGION)
  * - Timeout: 12s (larger datasets, parsing overhead)
@@ -99,6 +119,7 @@ export function getAllHealthStatus(): Array<{
     { ...wattTimeResilience.getHealthStatus(), isHealthy: wattTimeResilience.isHealthy() },
     { ...electricityMapsResilience.getHealthStatus(), isHealthy: electricityMapsResilience.isHealthy() },
     { ...emberResilience.getHealthStatus(), isHealthy: emberResilience.isHealthy() },
+    { ...gridStatusResilience.getHealthStatus(), isHealthy: gridStatusResilience.isHealthy() },
     { ...eiaResilience.getHealthStatus(), isHealthy: eiaResilience.isHealthy() },
   ]
 }
@@ -119,6 +140,7 @@ export async function gracefulShutdown(): Promise<void> {
   wattTimeResilience.drain()
   electricityMapsResilience.drain()
   emberResilience.drain()
+  gridStatusResilience.drain()
   eiaResilience.drain()
 
   // Allow pending tasks to complete (max 5s)

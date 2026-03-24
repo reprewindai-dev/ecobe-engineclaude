@@ -24,6 +24,13 @@ type IngestionRunResult = {
   finishedAt: string
   successCount: number
   failureCount: number
+  dataSource: 'gridstatus' | 'eia_direct' | 'mixed'
+}
+
+type RegionIngestionResult = {
+  snapshotsProcessed: number
+  rawRecordsStored: number
+  featuresCalculated: number
   dataSource: 'gridstatus' | 'eia_direct'
 }
 
@@ -44,6 +51,8 @@ const DEFAULT_REGIONS: RegionConfig[] = (() => {
     { region: 'SPP', balancingAuthority: 'SPP', eiaRespondent: 'SPP' },
   ]
 })()
+
+const MAX_CONCURRENT_REGION_INGESTIONS = 2
 
 export class EIAIngestionWorker {
   private isRunning = false
@@ -161,17 +170,17 @@ export class EIAIngestionWorker {
       const endTime = new Date()
       const startTime = new Date(endTime.getTime() - 48 * 60 * 60 * 1000)
 
-      const results = await Promise.allSettled(
-        DEFAULT_REGIONS.map(config => this.ingestRegion(config, startTime, endTime))
-      )
+      const results = await this.ingestRegionsWithConcurrency(DEFAULT_REGIONS, startTime, endTime)
 
       // Log results
       let successCount = 0
       let failureCount = 0
+      const dataSourcesUsed = new Set<'gridstatus' | 'eia_direct'>()
 
       for (const result of results) {
         if (result.status === 'fulfilled') {
           successCount++
+          dataSourcesUsed.add(result.value.dataSource)
         } else {
           failureCount++
           console.error('Region ingestion failed:', result.reason)
@@ -193,7 +202,7 @@ export class EIAIngestionWorker {
         finishedAt: new Date().toISOString(),
         successCount,
         failureCount,
-        dataSource: this.useGridStatus ? 'gridstatus' : 'eia_direct',
+        dataSource: dataSourcesUsed.size > 1 ? 'mixed' : dataSourcesUsed.has('eia_direct') ? 'eia_direct' : 'gridstatus',
       }
     } catch (error) {
       console.error('EIA-930 ingestion failed:', error)
@@ -214,11 +223,7 @@ export class EIAIngestionWorker {
     config: RegionConfig,
     startTime: Date,
     endTime: Date
-  ): Promise<{
-    snapshotsProcessed: number
-    rawRecordsStored: number
-    featuresCalculated: number
-  }> {
+  ): Promise<RegionIngestionResult> {
     console.log(`Ingesting EIA-930 data for ${config.region} (${config.balancingAuthority}) [${this.useGridStatus ? 'GridStatus' : 'EIA'}]`)
 
     if (this.useGridStatus) {
@@ -236,13 +241,29 @@ export class EIAIngestionWorker {
     config: RegionConfig,
     startTime: Date,
     endTime: Date
-  ): Promise<{ snapshotsProcessed: number; rawRecordsStored: number; featuresCalculated: number }> {
-    // Fetch all three datasets in parallel
-    const [balanceData, interchangeData, fuelMixData] = await Promise.all([
-      gridStatus.getBalance(config.eiaRespondent, startTime, endTime),
-      gridStatus.getInterchange(config.eiaRespondent, startTime, endTime),
-      gridStatus.getFuelMix(config.eiaRespondent, startTime, endTime),
-    ])
+  ): Promise<RegionIngestionResult> {
+    // Keep GridStatus requests sequential per region so one worker run cannot stampede the provider.
+    const balanceData = await gridStatus.getBalance(config.eiaRespondent, startTime, endTime)
+
+    if (balanceData.length === 0) {
+      return this.ingestViaDirectFallback(config, startTime, endTime, 'missing GridStatus balance data')
+    }
+
+    const interchangeData = await gridStatus.getInterchange(config.eiaRespondent, startTime, endTime)
+    const fuelMixData = await gridStatus.getFuelMix(config.eiaRespondent, startTime, endTime)
+
+    if (interchangeData.length === 0 || fuelMixData.length === 0) {
+      const missingDatasets = [
+        ...(interchangeData.length === 0 ? ['interchange'] : []),
+        ...(fuelMixData.length === 0 ? ['fuel_mix'] : []),
+      ]
+      return this.ingestViaDirectFallback(
+        config,
+        startTime,
+        endTime,
+        `incomplete GridStatus payload (${missingDatasets.join(', ')})`
+      )
+    }
 
     // Store raw balance/interchange data for audit
     await this.storeRawData(config, balanceData, interchangeData, [])
@@ -277,6 +298,10 @@ export class EIAIngestionWorker {
     const snapshotsWithFeatures = GridFeatureEngine.updateSnapshotsWithFeatures(merged)
     const finalSnapshots = GridFeatureEngine.updateSignalQuality(snapshotsWithFeatures)
 
+    if (finalSnapshots.length === 0) {
+      return this.ingestViaDirectFallback(config, startTime, endTime, 'GridStatus produced no snapshots')
+    }
+
     // Store, cache, audit
     await this.storeProcessedSnapshots(finalSnapshots)
     await this.cacheSnapshots(config.region, finalSnapshots)
@@ -286,6 +311,7 @@ export class EIAIngestionWorker {
       snapshotsProcessed: finalSnapshots.length,
       rawRecordsStored: balanceData.length + interchangeData.length + fuelMixData.length,
       featuresCalculated: finalSnapshots.length,
+      dataSource: 'gridstatus',
     }
   }
 
@@ -297,7 +323,7 @@ export class EIAIngestionWorker {
     config: RegionConfig,
     startTime: Date,
     endTime: Date
-  ): Promise<{ snapshotsProcessed: number; rawRecordsStored: number; featuresCalculated: number }> {
+  ): Promise<RegionIngestionResult> {
     // Fetch raw data from EIA API
     const [balanceData, interchangeData, subregionData] = await Promise.all([
       eia930.getBalance(config.eiaRespondent, startTime, endTime),
@@ -340,6 +366,10 @@ export class EIAIngestionWorker {
     const snapshotsWithFeatures = GridFeatureEngine.updateSnapshotsWithFeatures(mergedSnapshots)
     const finalSnapshots = GridFeatureEngine.updateSignalQuality(snapshotsWithFeatures)
 
+    if (finalSnapshots.length === 0) {
+      throw new Error(`No direct EIA snapshots produced for ${config.region}`)
+    }
+
     // Store processed snapshots
     await this.storeProcessedSnapshots(finalSnapshots)
     await this.cacheSnapshots(config.region, finalSnapshots)
@@ -348,8 +378,64 @@ export class EIAIngestionWorker {
     return {
       snapshotsProcessed: finalSnapshots.length,
       rawRecordsStored: balanceData.length + interchangeData.length + subregionData.length,
-      featuresCalculated: finalSnapshots.length
+      featuresCalculated: finalSnapshots.length,
+      dataSource: 'eia_direct',
     }
+  }
+
+  private async ingestViaDirectFallback(
+    config: RegionConfig,
+    startTime: Date,
+    endTime: Date,
+    reason: string
+  ): Promise<RegionIngestionResult> {
+    if (!eia930.isAvailable) {
+      throw new Error(`GridStatus degraded for ${config.region} (${reason}) and direct EIA fallback is unavailable`)
+    }
+
+    console.warn(
+      `GridStatus degraded for ${config.region}; falling back to direct EIA (${reason})`
+    )
+
+    return this.ingestFromDirectEia(config, startTime, endTime)
+  }
+
+  private async ingestRegionsWithConcurrency(
+    configs: RegionConfig[],
+    startTime: Date,
+    endTime: Date
+  ): Promise<Array<PromiseSettledResult<RegionIngestionResult>>> {
+    const results: Array<PromiseSettledResult<RegionIngestionResult>> = new Array(configs.length)
+    let nextIndex = 0
+
+    const runNext = async (): Promise<void> => {
+      const currentIndex = nextIndex++
+      if (currentIndex >= configs.length) {
+        return
+      }
+
+      try {
+        const value = await this.ingestRegion(configs[currentIndex], startTime, endTime)
+        results[currentIndex] = {
+          status: 'fulfilled',
+          value,
+        }
+      } catch (reason) {
+        results[currentIndex] = {
+          status: 'rejected',
+          reason,
+        }
+      }
+
+      await runNext()
+    }
+
+    const workers = Array.from(
+      { length: Math.min(MAX_CONCURRENT_REGION_INGESTIONS, configs.length) },
+      () => runNext()
+    )
+    await Promise.all(workers)
+    return results
   }
 
   /**
