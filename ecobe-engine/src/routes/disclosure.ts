@@ -1,16 +1,19 @@
 import { Router } from 'express'
-import { createHash, randomUUID } from 'crypto'
+import { randomUUID } from 'crypto'
 import { z } from 'zod'
+
+import { env } from '../config/env'
 import { prisma } from '../lib/db'
-import { internalServiceGuard } from '../middleware/internal-auth'
 import {
-  inferSignalType,
-  POLICY_MODES,
-  STANDARDS_MAPPING,
-  type PolicyMode,
-  type RoutingMode,
-  type SignalType,
-} from '../lib/methodology'
+  buildDisclosureCsv,
+  buildDisclosureEnvelope,
+  resolveDisclosureScope,
+  toDisclosureRecord,
+  type DisclosureExportScope,
+  type LedgerDisclosureEntry,
+} from '../lib/disclosure-exports'
+import type { PolicyMode, RoutingMode } from '../lib/methodology'
+import { internalServiceGuard } from '../middleware/internal-auth'
 
 const router = Router()
 router.use(internalServiceGuard)
@@ -19,63 +22,17 @@ const exportQuerySchema = z.object({
   from: z.string().datetime().optional(),
   to: z.string().datetime().optional(),
   format: z.enum(['json', 'csv']).default('json'),
-  mode: z.enum(['assurance', 'optimize', 'all']).default('assurance'),
+  mode: z.enum(['assurance', 'optimize', 'all']).default('all'),
   policyMode: z.enum(['default', 'sec_disclosure_strict', 'eu_24x7_ready']).optional(),
+  orgId: z.string().optional(),
+  scope: z.enum(['organization', 'system', 'global']).optional(),
 })
 
 const batchesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
+  orgId: z.string().optional(),
+  scope: z.enum(['organization', 'system', 'global']).optional(),
 })
-
-type ExportDecision = {
-  id: string
-  createdAt: Date
-  workloadName: string | null
-  opName: string | null
-  baselineRegion: string
-  chosenRegion: string
-  carbonIntensityBaselineGPerKwh: number | null
-  carbonIntensityChosenGPerKwh: number | null
-  estimatedKwh: number | null
-  co2BaselineG: number | null
-  co2ChosenG: number | null
-  fallbackUsed: boolean
-  dataFreshnessSeconds: number | null
-  sourceUsed: string | null
-  validationSource: string | null
-  referenceTime: Date | null
-  disagreementFlag: boolean | null
-  disagreementPct: number | null
-  meta: Record<string, any>
-}
-
-type DisclosureRecord = {
-  timestamp: string
-  workload_name: string | null
-  operation: string | null
-  decision_id: string
-  decision_frame_id: string | null
-  region: string
-  baseline_region: string
-  estimated_kwh: number | null
-  emissions_gco2: number | null
-  intensity_gco2_per_kwh: number | null
-  signal_type: SignalType
-  source: string | null
-  validation_source: string | null
-  mode: RoutingMode
-  policy_mode: PolicyMode
-  assurance_mode: boolean
-  quality_tier: string | null
-  confidence_label: string | null
-  fallback_used: boolean
-  disagreement_flag: boolean
-  disagreement_pct: number | null
-  reference_time: string | null
-  data_freshness_seconds: number | null
-  location_based_scope2_gco2: number | null
-  market_based_scope2_gco2: number | null
-}
 
 function resolveWindow(from?: string, to?: string) {
   const end = to ? new Date(to) : new Date()
@@ -83,68 +40,40 @@ function resolveWindow(from?: string, to?: string) {
   return { start, end }
 }
 
-function toDisclosureRecord(decision: ExportDecision): DisclosureRecord {
-  const mode = (decision.meta?.mode ?? 'optimize') as RoutingMode
-  const policyMode = (decision.meta?.policyMode ?? 'default') as PolicyMode
-  const signalType = (decision.meta?.signalTypeUsed ?? inferSignalType(decision.sourceUsed)) as SignalType
-  const assurance = decision.meta?.assurance as
-    | { enabled?: boolean; confidenceLabel?: string; accountingIntensityGPerKwh?: number }
-    | undefined
-  const disclosureIntensity =
-    assurance?.enabled && typeof assurance.accountingIntensityGPerKwh === 'number'
-      ? assurance.accountingIntensityGPerKwh
-      : decision.carbonIntensityChosenGPerKwh
-
-  return {
-    timestamp: decision.createdAt.toISOString(),
-    workload_name: decision.workloadName,
-    operation: decision.opName,
-    decision_id: decision.id,
-    decision_frame_id: decision.meta?.decisionFrameId ?? null,
-    region: decision.chosenRegion,
-    baseline_region: decision.baselineRegion,
-    estimated_kwh: decision.estimatedKwh,
-    emissions_gco2: decision.co2ChosenG,
-    intensity_gco2_per_kwh: disclosureIntensity,
-    signal_type: signalType,
-    source: decision.sourceUsed,
-    validation_source: decision.validationSource,
-    mode,
-    policy_mode: policyMode,
-    assurance_mode: assurance?.enabled ?? mode === 'assurance',
-    quality_tier: decision.meta?.qualityTier ?? null,
-    confidence_label: assurance?.confidenceLabel ?? decision.meta?.confidenceLabel ?? null,
-    fallback_used: decision.fallbackUsed,
-    disagreement_flag: decision.disagreementFlag ?? false,
-    disagreement_pct: decision.disagreementPct ?? null,
-    reference_time: decision.referenceTime?.toISOString() ?? null,
-    data_freshness_seconds: decision.dataFreshnessSeconds,
-    location_based_scope2_gco2: decision.co2ChosenG,
-    market_based_scope2_gco2: null,
-  }
-}
-
-function persistExportBatch(batchId: string, hash: string, generatedAt: string, recordCount: number, format: 'json' | 'csv', start: Date, end: Date, mode: string, policyMode?: PolicyMode) {
-  return prisma.emissionLog.create({
+async function persistExportBatch(input: {
+  batchId: string
+  orgId: string | null
+  scope: DisclosureExportScope
+  format: 'json' | 'csv'
+  mode: 'assurance' | 'optimize' | 'all'
+  policyMode?: PolicyMode
+  recordCount: number
+  payloadDigest: string
+  signature: string | null
+  signatureAlgorithm: 'hmac-sha256' | null
+  generatedAt: string
+  start: Date
+  end: Date
+}) {
+  return prisma.disclosureExportBatch.create({
     data: {
-      organizationId: null,
-      workloadRequestId: batchId,
-      emissionCO2: 0,
-      offsetCO2: 0,
-      region: 'GLOBAL',
-      source: 'DISCLOSURE_EXPORT_BATCH',
-      timestamp: new Date(generatedAt),
+      batchId: input.batchId,
+      orgId: input.orgId,
+      scope: input.scope,
+      format: input.format,
+      routingMode: input.mode,
+      policyMode: input.policyMode ?? null,
+      recordCount: input.recordCount,
+      payloadDigest: input.payloadDigest,
+      digestAlgorithm: 'sha256',
+      signature: input.signature,
+      signatureAlgorithm: input.signatureAlgorithm,
+      fromTs: input.start,
+      toTs: input.end,
+      generatedAt: new Date(input.generatedAt),
       metadata: {
-        kind: 'disclosure_export_batch',
-        batchId,
-        hash,
-        generatedAt,
-        recordCount,
-        format,
-        mode,
-        policyMode: policyMode ?? null,
-        from: start.toISOString(),
-        to: end.toISOString(),
+        scope: input.scope,
+        orgId: input.orgId,
       },
     },
   })
@@ -152,125 +81,125 @@ function persistExportBatch(batchId: string, hash: string, generatedAt: string, 
 
 router.get('/export', async (req, res) => {
   try {
-    const { from, to, format, mode, policyMode } = exportQuerySchema.parse(req.query)
+    const { from, to, format, mode, policyMode, orgId, scope: requestedScope } =
+      exportQuerySchema.parse(req.query)
     const { start, end } = resolveWindow(from, to)
+    const scope = resolveDisclosureScope(orgId, requestedScope)
 
-    const decisions = (await prisma.dashboardRoutingDecision.findMany({
-      where: {
-        createdAt: {
-          gte: start,
-          lte: end,
-        },
+    const where: Record<string, unknown> = {
+      createdAt: {
+        gte: start,
+        lte: end,
       },
+    }
+
+    if (scope.scope === 'organization' && scope.orgId) {
+      where.orgId = scope.orgId
+    } else if (scope.scope === 'system') {
+      where.orgId = 'system'
+    }
+
+    if (mode !== 'all') {
+      where.routingMode = mode
+    }
+
+    if (policyMode) {
+      where.policyMode = policyMode
+    }
+
+    const ledgerEntries = (await prisma.carbonLedgerEntry.findMany({
+      where,
       orderBy: { createdAt: 'asc' },
       select: {
         id: true,
+        orgId: true,
+        decisionFrameId: true,
         createdAt: true,
-        workloadName: true,
-        opName: true,
+        chosenStartTs: true,
+        jobClass: true,
+        workloadType: true,
         baselineRegion: true,
         chosenRegion: true,
-        carbonIntensityBaselineGPerKwh: true,
-        carbonIntensityChosenGPerKwh: true,
-        estimatedKwh: true,
-        co2BaselineG: true,
-        co2ChosenG: true,
-        fallbackUsed: true,
-        dataFreshnessSeconds: true,
+        baselineCarbonGPerKwh: true,
+        chosenCarbonGPerKwh: true,
+        energyEstimateKwh: true,
+        baselineCarbonG: true,
+        chosenCarbonG: true,
+        carbonSavedG: true,
+        actualCarbonGPerKwh: true,
+        actualCarbonG: true,
+        accountingMethod: true,
         sourceUsed: true,
         validationSource: true,
-        referenceTime: true,
+        fallbackUsed: true,
+        estimatedFlag: true,
+        syntheticFlag: true,
+        qualityTier: true,
+        confidenceLabel: true,
         disagreementFlag: true,
         disagreementPct: true,
-        meta: true,
+        routingMode: true,
+        policyMode: true,
+        signalTypeUsed: true,
+        referenceTime: true,
+        dataFreshnessSeconds: true,
+        confidenceBandLow: true,
+        confidenceBandMid: true,
+        confidenceBandHigh: true,
+        lowerHalfBenchmarkGPerKwh: true,
+        lowerHalfQualified: true,
+        metadata: true,
       },
-    })) as ExportDecision[]
+    })) as LedgerDisclosureEntry[]
 
-    const filtered = decisions.filter((decision) => {
-      const decisionMode = (decision.meta?.mode ?? 'optimize') as RoutingMode
-      const decisionPolicyMode = (decision.meta?.policyMode ?? 'default') as PolicyMode
-
-      if (mode !== 'all' && decisionMode !== mode) return false
-      if (policyMode && decisionPolicyMode !== policyMode) return false
-      return true
-    })
-
-    const records = filtered.map(toDisclosureRecord)
+    const records = ledgerEntries.map(toDisclosureRecord)
     const generatedAt = new Date().toISOString()
     const batchId = `disclosure_${randomUUID()}`
+    const envelope = buildDisclosureEnvelope({
+      batchId,
+      generatedAt,
+      scope: scope.scope,
+      orgId: scope.orgId,
+      records,
+      signingSecret: env.DISCLOSURE_EXPORT_SIGNING_SECRET,
+    })
+
+    await persistExportBatch({
+      batchId,
+      orgId: scope.orgId,
+      scope: scope.scope,
+      format,
+      mode,
+      policyMode,
+      recordCount: records.length,
+      payloadDigest: envelope.integrity.payload_digest,
+      signature: envelope.integrity.signature,
+      signatureAlgorithm: envelope.integrity.signature_algorithm,
+      generatedAt,
+      start,
+      end,
+    })
 
     if (format === 'json') {
-      const payload = {
-        batch_id: batchId,
-        hash: '',
-        hash_scope: 'canonical_payload_excluding_hash',
-        generated_at: generatedAt,
-        record_count: records.length,
-        standards_mapping: STANDARDS_MAPPING,
-        policy_modes: POLICY_MODES,
-        records,
-      }
-      const canonicalPayload = { ...payload }
-      const unsigned = JSON.stringify(canonicalPayload, null, 2)
-      const hash = createHash('sha256').update(unsigned).digest('hex')
-      payload.hash = hash
-      await persistExportBatch(batchId, hash, generatedAt, records.length, format, start, end, mode, policyMode)
-      return res.json(payload)
+      return res.json(envelope)
     }
 
-    const columns: Array<keyof DisclosureRecord> = [
-      'timestamp',
-      'workload_name',
-      'operation',
-      'decision_id',
-      'decision_frame_id',
-      'region',
-      'baseline_region',
-      'estimated_kwh',
-      'emissions_gco2',
-      'intensity_gco2_per_kwh',
-      'signal_type',
-      'source',
-      'validation_source',
-      'mode',
-      'policy_mode',
-      'assurance_mode',
-      'quality_tier',
-      'confidence_label',
-      'fallback_used',
-      'disagreement_flag',
-      'disagreement_pct',
-      'reference_time',
-      'data_freshness_seconds',
-      'location_based_scope2_gco2',
-      'market_based_scope2_gco2',
-    ]
-
-    const escape = (value: unknown) => {
-      if (value === null || value === undefined) return ''
-      const text = String(value)
-      if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`
-      return text
-    }
-
-    const lines = [columns.join(',')]
-    for (const record of records) {
-      lines.push(columns.map((column) => escape(record[column])).join(','))
-    }
-
-    const csv = lines.join('\n')
-    const hash = createHash('sha256').update(csv).digest('hex')
-    await persistExportBatch(batchId, hash, generatedAt, records.length, format, start, end, mode, policyMode)
-
+    const csv = buildDisclosureCsv(records)
     res.setHeader('Content-Type', 'text/csv; charset=utf-8')
     res.setHeader('Content-Disposition', 'attachment; filename="ecobe-disclosure-export.csv"')
     res.setHeader('X-Ecobe-Batch-Id', batchId)
-    res.setHeader('X-Ecobe-Export-Hash', hash)
+    res.setHeader('X-Ecobe-Export-Digest', envelope.integrity.payload_digest)
     res.setHeader('X-Ecobe-Generated-At', generatedAt)
+    if (envelope.integrity.signature) {
+      res.setHeader('X-Ecobe-Export-Signature', envelope.integrity.signature)
+    }
     return res.send(csv)
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid request', details: error.errors })
+    }
+    if (error instanceof Error && error.message.includes('scope')) {
+      return res.status(400).json({ error: error.message })
     }
     console.error('Disclosure export error:', error)
     return res.status(500).json({ error: 'Internal server error' })
@@ -279,28 +208,87 @@ router.get('/export', async (req, res) => {
 
 router.get('/batches', async (req, res) => {
   try {
-    const { limit } = batchesQuerySchema.parse(req.query)
-    const batches = await prisma.emissionLog.findMany({
-      where: { source: 'DISCLOSURE_EXPORT_BATCH' },
+    const { limit, orgId, scope: requestedScope } = batchesQuerySchema.parse(req.query)
+    const scope = resolveDisclosureScope(orgId, requestedScope)
+    const where: Record<string, unknown> = {}
+
+    if (scope.scope === 'organization' && scope.orgId) {
+      where.orgId = scope.orgId
+    } else {
+      where.scope = scope.scope
+    }
+
+    const batches = (await prisma.disclosureExportBatch.findMany({
+      where,
       orderBy: { createdAt: 'desc' },
       take: limit,
       select: {
-        workloadRequestId: true,
-        timestamp: true,
+        batchId: true,
+        orgId: true,
+        scope: true,
+        format: true,
+        routingMode: true,
+        policyMode: true,
+        recordCount: true,
+        payloadDigest: true,
+        digestAlgorithm: true,
+        signature: true,
+        signatureAlgorithm: true,
+        fromTs: true,
+        toTs: true,
+        generatedAt: true,
+        createdAt: true,
         metadata: true,
       },
-    })
+    })) as Array<{
+      batchId: string
+      orgId: string | null
+      scope: string
+      format: string
+      routingMode: string
+      policyMode: string | null
+      recordCount: number
+      payloadDigest: string
+      digestAlgorithm: string
+      signature: string | null
+      signatureAlgorithm: string | null
+      fromTs: Date
+      toTs: Date
+      generatedAt: Date
+      createdAt: Date
+      metadata: Record<string, unknown>
+    }>
 
     return res.json({
-      batches: batches.map((batch: { workloadRequestId: string | null; timestamp: Date; metadata: any }) => ({
-        batchId: batch.workloadRequestId,
-        generatedAt: batch.timestamp.toISOString(),
+      batches: batches.map((batch) => ({
+        batchId: batch.batchId,
+        orgId: batch.orgId,
+        scope: batch.scope,
+        format: batch.format,
+        routingMode: batch.routingMode as RoutingMode | 'all',
+        policyMode: batch.policyMode as PolicyMode | null,
+        recordCount: batch.recordCount,
+        integrity: {
+          payloadDigest: batch.payloadDigest,
+          digestAlgorithm: batch.digestAlgorithm,
+          signature: batch.signature,
+          signatureAlgorithm: batch.signatureAlgorithm,
+        },
+        window: {
+          from: batch.fromTs.toISOString(),
+          to: batch.toTs.toISOString(),
+        },
+        generatedAt: batch.generatedAt.toISOString(),
+        createdAt: batch.createdAt.toISOString(),
         metadata: batch.metadata,
       })),
     })
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid request', details: error.errors })
+    }
+    if (error instanceof Error && error.message.includes('scope')) {
+      return res.status(400).json({ error: error.message })
     }
     console.error('Disclosure batch list error:', error)
     return res.status(500).json({ error: 'Internal server error' })

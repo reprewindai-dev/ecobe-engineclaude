@@ -71,6 +71,7 @@ const envSchema = z.object({
   UI_TOKEN: z.string().optional(),
   LEGACY_PUBLIC_API_ENABLED: z.string().optional(),
   ECOBE_INTERNAL_API_KEY: z.string().optional(),
+  DISCLOSURE_EXPORT_SIGNING_SECRET: z.string().optional(),
   CORS_ALLOWED_ORIGINS: z.string().optional(),
   ENGINE_BACKGROUND_WORKERS_ENABLED: z.string().optional(),
 

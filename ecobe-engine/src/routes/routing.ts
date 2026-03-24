@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { routeGreen } from '../lib/green-routing'
 import { prisma } from '../lib/db'
 import { DEFAULT_ROUTING_WEIGHTS } from '../lib/methodology'
+import { CarbonBudgetViolationError } from '../lib/routing'
 import {
   requireActiveOrganization,
   getOrCreateUsageCounter,
@@ -27,6 +28,9 @@ const routingRequestSchema = z.object({
   targetTime: z.string().datetime().optional(),
   durationMinutes: z.number().int().positive().optional(),
   orgId: z.string().optional(), // Governance: when present, enforces quota
+  workloadType: z.string().min(1).max(120).optional(),
+  workloadName: z.string().min(1).max(160).optional(),
+  energyEstimateKwh: z.number().positive().max(100000).optional(),
 })
 
 router.post('/green', async (req, res) => {
@@ -65,6 +69,13 @@ router.post('/green', async (req, res) => {
     if (error instanceof OrganizationError) {
       const statusCode = error.code === 'QUOTA_EXCEEDED' ? 429 : error.code === 'ORG_NOT_FOUND' ? 404 : 403
       return res.status(statusCode).json({ error: error.message, code: error.code })
+    }
+    if (error instanceof CarbonBudgetViolationError) {
+      return res.status(409).json({
+        error: error.message,
+        code: error.code,
+        evaluations: error.evaluations,
+      })
     }
     console.error('Green routing error:', error)
     res.status(500).json({ error: 'Internal server error' })

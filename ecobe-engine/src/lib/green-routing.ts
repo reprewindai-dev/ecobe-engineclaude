@@ -3,7 +3,13 @@ import { GridSignalCache } from './grid-signals/grid-signal-cache'
 import { GridSignalAudit } from './grid-signals/grid-signal-audit'
 import { wattTime } from './watttime'
 import { randomUUID } from 'crypto'
-import { classifyJob, recordLedgerEntry, storeProviderSnapshot } from './routing'
+import {
+  CarbonBudgetViolationError,
+  classifyJob,
+  evaluateOrgCarbonBudgets,
+  recordLedgerEntry,
+  storeProviderSnapshot,
+} from './routing'
 import { generateLease, retryAsync } from './governance'
 import { prisma } from './db'
 import {
@@ -34,6 +40,10 @@ export interface RoutingRequest {
   policyMode?: PolicyMode
   targetTime?: string
   durationMinutes?: number
+  orgId?: string
+  workloadType?: string
+  workloadName?: string
+  energyEstimateKwh?: number
 }
 
 export interface RoutingResult {
@@ -85,6 +95,7 @@ export interface RoutingResult {
     accountingIntensityGPerKwh?: number
     reason?: string
   }
+  budgetStatus?: Awaited<ReturnType<typeof evaluateOrgCarbonBudgets>>
 }
 
 export async function routeGreen(request: RoutingRequest): Promise<RoutingResult> {
@@ -100,6 +111,10 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     policyMode,
     targetTime,
     durationMinutes,
+    orgId,
+    workloadType,
+    workloadName,
+    energyEstimateKwh = 0.05,
   } = request
 
   if (preferredRegions.length === 0) {
@@ -288,6 +303,16 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
   const assuranceReason = assuranceEnabled
     ? `Policy ${appliedPolicyMode} restricted routing to ${policyDefinition.preferredSignalTypes.join(', ')}.`
     : undefined
+  const confidenceBand = bestSignal
+    ? deriveConfidenceBand(
+        best.carbonIntensity,
+        bestSignal.confidence,
+        bestSignal.provenance.disagreementPct ?? 0
+      )
+    : deriveConfidenceBand(best.carbonIntensity, 0.25, 0)
+  const dataFreshnessSeconds = bestSignal
+    ? Math.max(0, Math.floor((Date.now() - new Date(bestSignal.provenance.fetchedAt).getTime()) / 1000))
+    : null
 
   const decisionFrameId = randomUUID()
 
@@ -348,70 +373,96 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     executionMode: 'immediate',
     latencySlaMs: best.latency,
   })
+  const candidateStartTs = targetTime ? new Date(targetTime) : new Date()
+  const scoringCandidates = scored.map((candidate, index) => ({
+    candidateId: `candidate-${index + 1}`,
+    region: candidate.region,
+    startTs: candidateStartTs,
+    carbonEstimateGPerKwh: assuranceEnabled
+      ? Math.round(candidate.effectiveCarbonIntensity)
+      : candidate.carbonIntensity,
+    latencyEstimateMs: candidate.latency,
+    queueDelayEstimateSec: null,
+    costEstimateUsd: null,
+    confidenceScore: candidate.signal?.confidence ?? null,
+    retryRiskScore: null,
+    balancingAuthority: candidate.region === best.region ? gridSnapshot?.balancingAuthority ?? null : null,
+    demandRampPct: candidate.region === best.region ? gridSnapshot?.demandChangePct ?? null : null,
+    carbonSpikeProbability: candidate.region === best.region ? gridSnapshot?.carbonSpikeProbability ?? null : null,
+    curtailmentProbability: candidate.region === best.region ? gridSnapshot?.curtailmentProbability ?? null : null,
+    importCarbonLeakageScore:
+      candidate.region === best.region ? gridSnapshot?.importCarbonLeakageScore ?? null : null,
+    estimatedFlag: candidate.signal?.isForecast ?? false,
+    syntheticFlag: candidate.signal?.source === 'fallback',
+    carbonScore: candidate.carbonScore,
+    latencyScore: candidate.latencyScore,
+    costScore: candidate.costScore,
+    queueScore: null,
+    uncertaintyScore: null,
+    rankScore: candidate.score,
+    isFeasible: true,
+    rejectionReason: null,
+  }))
+  const selectedCandidate = scoringCandidates[0]!
+  const fallbackCandidate = scoringCandidates[1] ?? null
+  const baselineCandidateRecord = scoringCandidates[scoringCandidates.length - 1] ?? selectedCandidate
+  const budgetStatus = orgId
+    ? await evaluateOrgCarbonBudgets(orgId, {
+        workloadType: workloadType ?? null,
+        projected: {
+          workloadType: workloadType ?? null,
+          chosenCarbonG: accountingIntensity * energyEstimateKwh,
+          baselineCarbonG: baselineAccountingIntensity * energyEstimateKwh,
+          lowerHalfQualified: null,
+        },
+      })
+    : []
+  const hardBudgetViolations = budgetStatus.filter((evaluation) => evaluation.hardStopTriggered)
+
+  if (hardBudgetViolations.length > 0) {
+    throw new CarbonBudgetViolationError(hardBudgetViolations)
+  }
 
   // Record carbon ledger entry for audit-grade accounting (with retry)
   retryAsync(() => recordLedgerEntry({
-    orgId: 'system', // Overridden by carbon-command when called with orgId
+    orgId: orgId ?? 'system',
     decisionFrameId,
     classification,
-    energyEstimateKwh: 0.05, // Default estimate; carbon-command overrides
+    workloadType: workloadType ?? undefined,
+    energyEstimateKwh,
     baselineRegion: scored[scored.length - 1]?.region ?? best.region,
+    sourceUsed: bestSignal?.provenance.sourceUsed ?? null,
+    validationSource:
+      (bestSignal?.provenance.contributingSources.length ?? 0) > 1 ? 'ember' : undefined,
+    fallbackUsed: bestSignal?.provenance.fallbackUsed ?? false,
+    estimatedFlag: bestSignal?.isForecast ?? false,
+    syntheticFlag: bestSignal?.source === 'fallback',
+    confidenceLabel,
+    routingMode: appliedMode,
+    policyMode: appliedPolicyMode,
+    signalTypeUsed,
+    referenceTime: bestSignal?.provenance.referenceTime
+      ? new Date(bestSignal.provenance.referenceTime)
+      : null,
+    dataFreshnessSeconds,
+    confidenceBand,
+    forecastStability,
+    disagreementFlag: bestSignal?.provenance.disagreementFlag ?? false,
+    disagreementPct: bestSignal?.provenance.disagreementPct ?? null,
+    metadata: {
+      doctrine: LOWEST_DEFENSIBLE_SIGNAL_DOCTRINE,
+      legalDisclaimer: ROUTING_LEGAL_DISCLAIMER,
+      leaseId,
+      leaseExpiresAt,
+      mustRevalidateAfter,
+      workloadName: workloadName ?? null,
+      budgetStatus,
+    },
     scoringResult: {
-      candidates: [],
-      selected: {
-        candidateId: 'best',
-        region: best.region,
-        startTs: new Date(),
-        carbonEstimateGPerKwh: accountingIntensity,
-        latencyEstimateMs: best.latency,
-        queueDelayEstimateSec: null,
-        costEstimateUsd: null,
-        confidenceScore: bestSignal?.confidence ?? null,
-        retryRiskScore: null,
-        balancingAuthority: gridSnapshot?.balancingAuthority ?? null,
-        demandRampPct: gridSnapshot?.demandChangePct ?? null,
-        carbonSpikeProbability: gridSnapshot?.carbonSpikeProbability ?? null,
-        curtailmentProbability: gridSnapshot?.curtailmentProbability ?? null,
-        importCarbonLeakageScore: gridSnapshot?.importCarbonLeakageScore ?? null,
-        estimatedFlag: bestSignal?.isForecast ?? false,
-        syntheticFlag: bestSignal?.source === 'fallback',
-        carbonScore: null, latencyScore: null, costScore: null,
-        queueScore: null, uncertaintyScore: null, rankScore: best.score,
-        isFeasible: true, rejectionReason: null,
-      },
-      fallback: scored[1] ? {
-        candidateId: 'fallback',
-        region: scored[1].region,
-        startTs: new Date(),
-        carbonEstimateGPerKwh: assuranceEnabled
-          ? Math.round(scored[1].effectiveCarbonIntensity)
-          : scored[1].carbonIntensity,
-        latencyEstimateMs: scored[1].latency,
-        queueDelayEstimateSec: null, costEstimateUsd: null,
-        confidenceScore: null, retryRiskScore: null,
-        balancingAuthority: null, demandRampPct: null,
-        carbonSpikeProbability: null, curtailmentProbability: null,
-        importCarbonLeakageScore: null,
-        estimatedFlag: false, syntheticFlag: false,
-        carbonScore: null, latencyScore: null, costScore: null,
-        queueScore: null, uncertaintyScore: null, rankScore: scored[1].score,
-        isFeasible: true, rejectionReason: null,
-      } : null,
-      baselineCandidate: scored[scored.length - 1] ? {
-        candidateId: 'baseline',
-        region: scored[scored.length - 1].region,
-        startTs: new Date(),
-        carbonEstimateGPerKwh: assuranceEnabled ? baselineAccountingIntensity : worstIntensity,
-        latencyEstimateMs: null, queueDelayEstimateSec: null,
-        costEstimateUsd: null, confidenceScore: null, retryRiskScore: null,
-        balancingAuthority: null, demandRampPct: null,
-        carbonSpikeProbability: null, curtailmentProbability: null,
-        importCarbonLeakageScore: null,
-        estimatedFlag: false, syntheticFlag: false,
-        carbonScore: null, latencyScore: null, costScore: null,
-        queueScore: null, uncertaintyScore: null, rankScore: null,
-        isFeasible: true, rejectionReason: null,
-      } : null,
+      candidates: scoringCandidates,
+      selected: selectedCandidate,
+      fallback: fallbackCandidate,
+      baselineCandidate: baselineCandidateRecord,
       totalEvaluated: scored.length,
       totalFeasible: filtered.length,
     },
@@ -441,17 +492,17 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
   if ((prisma as any)?.dashboardRoutingDecision?.create) {
     await prisma.dashboardRoutingDecision.create({
       data: {
-        workloadName: null,
-        opName: 'route-green',
+        workloadName: workloadName ?? null,
+        opName: workloadType ?? 'route-green',
         baselineRegion: baselineCandidate.region,
         chosenRegion: best.region,
         zoneBaseline: baselineCandidate.region,
         zoneChosen: best.region,
         carbonIntensityBaselineGPerKwh: baselineIntensity,
         carbonIntensityChosenGPerKwh: chosenIntensity,
-        estimatedKwh: 0.05,
-        co2BaselineG: baselineIntensity * 0.05,
-        co2ChosenG: chosenIntensity * 0.05,
+        estimatedKwh: energyEstimateKwh,
+        co2BaselineG: baselineIntensity * energyEstimateKwh,
+        co2ChosenG: chosenIntensity * energyEstimateKwh,
         reason,
         latencyEstimateMs: Math.round(best.latency),
         fallbackUsed: bestSignal?.provenance.fallbackUsed ?? false,
@@ -486,19 +537,18 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
           weights: normalizedWeights,
           targetTime: targetTime ?? null,
           durationMinutes: durationMinutes ?? null,
+          orgId: orgId ?? null,
+          workloadType: workloadType ?? null,
+          workloadName: workloadName ?? null,
+          energyEstimateKwh,
+          budgetStatus,
           alternatives: scored.slice(1, 3).map((r) => ({
             region: r.region,
             carbonIntensity: r.carbonIntensity,
             score: r.score,
           })),
           dataResolutionMinutes: bestSignal?.isForecast ? 60 : 5,
-          confidenceBand: bestSignal
-            ? deriveConfidenceBand(
-                best.carbonIntensity,
-                bestSignal.confidence,
-                bestSignal.provenance.disagreementPct ?? 0
-              )
-            : deriveConfidenceBand(best.carbonIntensity, 0.25, 0),
+          confidenceBand,
           assurance: {
             enabled: assuranceEnabled,
             disagreementThresholdPct: ASSURANCE_DISAGREEMENT_THRESHOLD_PCT,
@@ -549,9 +599,7 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
       carbonIntensity: r.carbonIntensity,
       score: r.score,
     })),
-    confidenceBand: bestSignal
-      ? deriveConfidenceBand(best.carbonIntensity, bestSignal.confidence, bestSignal.provenance.disagreementPct ?? 0)
-      : deriveConfidenceBand(best.carbonIntensity, 0.25, 0),
+    confidenceBand,
     dataResolutionMinutes: bestSignal?.isForecast ? 60 : 5,
     weights: normalizedWeights,
     legalDisclaimer: ROUTING_LEGAL_DISCLAIMER,
@@ -559,6 +607,7 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     mode: appliedMode,
     policyMode: appliedPolicyMode,
     signalTypeUsed,
+    budgetStatus,
     assurance: {
       enabled: assuranceEnabled,
       disagreementThresholdPct: ASSURANCE_DISAGREEMENT_THRESHOLD_PCT,

@@ -35,6 +35,22 @@ export {
 } from './carbon-ledger'
 
 export {
+  CarbonBudgetViolationError,
+  calculateBudgetWindow,
+  evaluateBudgetPolicy,
+  evaluateOrgCarbonBudgets,
+  listCarbonBudgetPolicies,
+  upsertCarbonBudgetPolicy,
+} from './carbon-governance'
+export type {
+  CarbonBudgetEvaluation,
+  CarbonBudgetPeriod,
+  CarbonBudgetPolicyRecord,
+  CarbonBudgetStatus,
+  ProjectedCarbonUsage,
+} from './carbon-governance'
+
+export {
   storeProviderSnapshot,
   storeProviderSnapshotBatch,
   getLatestSnapshots,

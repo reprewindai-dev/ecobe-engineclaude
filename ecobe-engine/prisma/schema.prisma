@@ -355,6 +355,17 @@ enum OrgPlanTier {
   ENTERPRISE
 }
 
+enum CarbonBudgetPeriod {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum CarbonBudgetStatus {
+  ACTIVE
+  PAUSED
+}
+
 model Organization {
   id        String   @id @default(cuid())
   name      String
@@ -372,6 +383,8 @@ model Organization {
   commands CarbonCommand[]
   outcomes CarbonCommandOutcome[]
   usageCounters OrgUsageCounter[]
+  carbonBudgetPolicies CarbonBudgetPolicy[]
+  disclosureExportBatches DisclosureExportBatch[]
 }
 
 model OrgUsageCounter {
@@ -994,6 +1007,52 @@ model DekesHandoffEvent {
 // CARBON LEDGER — AUDIT-GRADE ACCOUNTING
 // ============================================================================
 
+model CarbonBudgetPolicy {
+  id                      String             @id @default(cuid())
+  orgId                   String
+  organization            Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  name                    String
+  workloadType            String?
+  budgetPeriod            CarbonBudgetPeriod @default(MONTHLY)
+  maxCarbonKgCo2e         Float
+  targetReductionPct      Float?
+  targetLowerHalfSharePct Float?
+  hardEnforcement         Boolean            @default(false)
+  policyMode              String             @default("sec_disclosure_strict")
+  status                  CarbonBudgetStatus @default(ACTIVE)
+  metadata                Json               @default("{}")
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+
+  @@unique([orgId, name])
+  @@index([orgId, status])
+  @@index([orgId, workloadType, status])
+}
+
+model DisclosureExportBatch {
+  id                 String        @id @default(cuid())
+  batchId            String        @unique
+  orgId              String?
+  organization       Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  scope              String
+  format             String
+  routingMode        String
+  policyMode         String?
+  recordCount        Int
+  payloadDigest      String
+  digestAlgorithm    String        @default("sha256")
+  signature          String?
+  signatureAlgorithm String?
+  fromTs             DateTime
+  toTs               DateTime
+  generatedAt        DateTime
+  metadata           Json          @default("{}")
+  createdAt          DateTime      @default(now())
+
+  @@index([orgId, createdAt])
+  @@index([scope, createdAt])
+}
+
 model CarbonLedgerEntry {
   id                    String   @id @default(cuid())
   orgId                 String
@@ -1038,6 +1097,18 @@ model CarbonLedgerEntry {
   forecastStability     String?  // stable | medium | unstable
   disagreementFlag      Boolean  @default(false)
   disagreementPct       Float?
+  routingMode           String   @default("optimize")
+  policyMode            String   @default("default")
+  signalTypeUsed        String   @default("unknown")
+  confidenceLabel       String?
+  referenceTime         DateTime?
+  dataFreshnessSeconds  Int?
+  confidenceBandLow     Float?
+  confidenceBandMid     Float?
+  confidenceBandHigh    Float?
+  lowerHalfBenchmarkGPerKwh Float?
+  lowerHalfQualified    Boolean?
+  metadata              Json     @default("{}")
 
   // Grid intelligence at decision time
   balancingAuthority    String?
@@ -1060,6 +1131,8 @@ model CarbonLedgerEntry {
   @@index([commandId])
   @@index([chosenRegion, createdAt])
   @@index([jobClass, createdAt])
+  @@index([orgId, workloadType, createdAt])
+  @@index([routingMode, policyMode, createdAt])
 }
 
 // ============================================================================

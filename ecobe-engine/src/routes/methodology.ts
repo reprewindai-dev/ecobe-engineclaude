@@ -32,6 +32,62 @@ type IntegrationMetricRecord = {
   alertActive: boolean
 }
 
+const SIGNAL_PROFILES = [
+  {
+    id: 'us_official',
+    description: 'Uses assurance-safe average operational signals from EIA-930, ISO telemetry, GridStatus, and Ember validation.',
+    signalTypes: ['average_operational'],
+    policyMode: 'sec_disclosure_strict',
+  },
+  {
+    id: 'forecast_research',
+    description: 'Uses forecast and structural validation layers for low-carbon scheduling over a broader time horizon.',
+    signalTypes: ['average_operational', 'consumed_emissions'],
+    policyMode: 'eu_24x7_ready',
+  },
+  {
+    id: 'marginal_when_available',
+    description: 'Allows marginal estimates such as WattTime MOER when the provider/router supports them.',
+    signalTypes: ['marginal_estimate', 'average_operational'],
+    policyMode: 'default',
+  },
+] as const
+
+function buildCapabilities() {
+  return {
+    routingModes: ['optimize', 'assurance'],
+    policyModes: POLICY_MODES,
+    signalTypes: ['average_operational', 'marginal_estimate', 'consumed_emissions'],
+    signalProfiles: SIGNAL_PROFILES,
+    disclosure: {
+      exportFormats: ['json', 'csv'],
+      batchEndpoint: '/api/v1/disclosure/batches',
+      exportEndpoint: '/api/v1/disclosure/export',
+      signedBatches: Boolean(env.DISCLOSURE_EXPORT_SIGNING_SECRET),
+      orgScopedExports: true,
+      globalExports: true,
+    },
+    governance: {
+      carbonBudgets: true,
+      hardEnforcement: true,
+      lowerHalfSlaTracking: true,
+      policyEndpoint: '/api/v1/carbon-ledger/policies',
+      evaluationEndpoint: '/api/v1/carbon-ledger/policies/:orgId/evaluate',
+    },
+    ci: {
+      routeEndpoint: '/api/v1/ci/route',
+      reusableWorkflowTemplates: true,
+      concurrencyProfiles: true,
+      budgetAwareDeferral: true,
+    },
+    providers: PROVIDERS.map((provider) => ({
+      name: provider.name,
+      source: provider.source,
+      enabled: provider.enabled,
+    })),
+  }
+}
+
 const PROVIDERS: ProviderConfig[] = [
   {
     name: 'WattTime',
@@ -133,6 +189,15 @@ router.get('/providers', async (_req, res) => {
   }
 })
 
+router.get('/capabilities', async (_req, res) => {
+  try {
+    return res.json(buildCapabilities())
+  } catch (error) {
+    console.error('Methodology capabilities error:', error)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 router.get('/', async (_req, res) => {
   try {
     const markdown = await readMethodologyMarkdown()
@@ -155,10 +220,12 @@ router.get('/', async (_req, res) => {
         summary: ASSURANCE_MODE_SUMMARY,
         disagreementThresholdPct: ASSURANCE_DISAGREEMENT_THRESHOLD_PCT,
         exportPath: '/api/v1/disclosure/export',
+        signedBatches: Boolean(env.DISCLOSURE_EXPORT_SIGNING_SECRET),
       },
       policyModes: POLICY_MODES,
       standardsMapping: STANDARDS_MAPPING,
       tiers: METHODOLOGY_TIERS,
+      capabilities: buildCapabilities(),
       markdown,
     })
   } catch (error) {

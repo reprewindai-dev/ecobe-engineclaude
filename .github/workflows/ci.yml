@@ -4,10 +4,18 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: engine-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   engine-build:
     name: Engine Build, Test, and Docker Verification
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: ecobe-engine
@@ -24,6 +32,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Prisma validate
+        run: npx prisma validate
+        env:
+          DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+          DIRECT_DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
 
       - name: Prisma generate
         run: npx prisma generate
@@ -55,6 +69,7 @@ jobs:
     name: Engine Docker Build
     runs-on: ubuntu-latest
     needs: engine-build
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
