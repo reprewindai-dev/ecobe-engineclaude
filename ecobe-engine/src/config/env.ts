@@ -3,6 +3,14 @@ import dotenv from 'dotenv'
 
 dotenv.config()
 
+function normalizeEiaBaseUrl(value: string): string {
+  const trimmed = value.trim().replace(/\/+$/, '')
+  if (/\/v\d+$/i.test(trimmed)) {
+    return trimmed
+  }
+  return `${trimmed}/v2`
+}
+
 const envSchema = z.object({
   PORT: z.string().default('3000'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -28,7 +36,7 @@ const envSchema = z.object({
   
   // EIA
   EIA_API_KEY: z.string().optional(),
-  EIA_BASE_URL: z.string().default('https://api.eia.gov'),
+  EIA_BASE_URL: z.string().default('https://api.eia.gov/v2'),
   WATTTIME_API_KEY: z.string().optional(),
 
   // GridStatus.io (curated EIA-930 data with real fuel mix)
@@ -107,6 +115,7 @@ if (!parsed.success) {
 export const env = {
   ...parsed.data,
   DEFAULT_MAX_CARBON_G_PER_KWH: parseInt(parsed.data.DEFAULT_MAX_CARBON_G_PER_KWH),
+  EIA_BASE_URL: normalizeEiaBaseUrl(parsed.data.EIA_BASE_URL),
   PORT: parseInt(parsed.data.PORT),
   UI_ENABLED:
     parsed.data.UI_ENABLED !== undefined
