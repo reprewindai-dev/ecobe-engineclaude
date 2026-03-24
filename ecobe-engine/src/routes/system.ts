@@ -11,9 +11,9 @@ router.use(internalServiceGuard)
 
 // Track worker status in memory
 let workerStatus = {
-  forecastPoller: { running: false, lastRun: null as string | null, nextRun: null as string | null },
-  eiaIngestion: { running: false, lastRun: null as string | null, nextRun: null as string | null },
-  intelligenceJobs: { running: false, lastRun: null as string | null, nextRun: null as string | null }
+  forecastPoller: { running: false, lastRun: null as string | null, nextRun: null as string | null, activeRunId: null as string | null },
+  eiaIngestion: { running: false, lastRun: null as string | null, nextRun: null as string | null, activeRunId: null as string | null },
+  intelligenceJobs: { running: false, lastRun: null as string | null, nextRun: null as string | null, activeRunId: null as string | null }
 }
 
 export function setWorkerStatus(worker: keyof typeof workerStatus, status: Partial<typeof workerStatus.forecastPoller>) {

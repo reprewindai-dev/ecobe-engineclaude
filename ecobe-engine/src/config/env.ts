@@ -72,6 +72,7 @@ const envSchema = z.object({
   LEGACY_PUBLIC_API_ENABLED: z.string().optional(),
   ECOBE_INTERNAL_API_KEY: z.string().optional(),
   DISCLOSURE_EXPORT_SIGNING_SECRET: z.string().optional(),
+  ALLOWED_ORIGINS: z.string().optional(),
   CORS_ALLOWED_ORIGINS: z.string().optional(),
   ENGINE_BACKGROUND_WORKERS_ENABLED: z.string().optional(),
 
@@ -127,8 +128,8 @@ export const env = {
   INTELLIGENCE_ACCURACY_CRON: parsed.data.INTELLIGENCE_ACCURACY_CRON,
   INTELLIGENCE_VECTOR_CLEANUP_CRON: parsed.data.INTELLIGENCE_VECTOR_CLEANUP_CRON,
   INTELLIGENCE_CALIBRATION_CRON: parsed.data.INTELLIGENCE_CALIBRATION_CRON,
-  CORS_ALLOWED_ORIGINS: parsed.data.CORS_ALLOWED_ORIGINS
-    ? parsed.data.CORS_ALLOWED_ORIGINS
+  CORS_ALLOWED_ORIGINS: (parsed.data.CORS_ALLOWED_ORIGINS || parsed.data.ALLOWED_ORIGINS)
+    ? (parsed.data.CORS_ALLOWED_ORIGINS || parsed.data.ALLOWED_ORIGINS)!
         .split(',')
         .map((origin) => origin.trim())
         .filter(Boolean)

@@ -9,6 +9,7 @@ import { GridFeatureEngine } from '../lib/grid-signals/grid-feature-engine'
 import { GridSignalCache } from '../lib/grid-signals/grid-signal-cache'
 import { GridSignalAudit } from '../lib/grid-signals/grid-signal-audit'
 import { getUsBalancingAuthorities } from '../lib/grid-signals/region-mapping'
+import { TaskAlreadyRunningError, withTaskLock } from '../lib/task-lock'
 import { setWorkerStatus } from '../routes/system'
 import { prisma } from '../lib/db'
 
@@ -16,6 +17,14 @@ interface RegionConfig {
   region: string
   balancingAuthority: string
   eiaRespondent: string
+}
+
+type IngestionRunResult = {
+  startedAt: string
+  finishedAt: string
+  successCount: number
+  failureCount: number
+  dataSource: 'gridstatus' | 'eia_direct'
 }
 
 // Default region configurations — now sourced from region-mapping.ts
@@ -40,6 +49,8 @@ export class EIAIngestionWorker {
   private isRunning = false
   private ingestionTask?: cron.ScheduledTask
   private useGridStatus: boolean
+  private activeRun: Promise<IngestionRunResult> | null = null
+  private activeRunId: string | null = null
 
   constructor() {
     this.useGridStatus = gridStatus.isAvailable
@@ -65,7 +76,8 @@ export class EIAIngestionWorker {
     setWorkerStatus('eiaIngestion', {
       running: true,
       lastRun: null,
-      nextRun: null
+      nextRun: null,
+      activeRunId: null,
     })
 
     // Run initial ingestion
@@ -93,6 +105,10 @@ export class EIAIngestionWorker {
 
     console.log('Stopping EIA-930 ingestion worker...')
     this.isRunning = false
+    setWorkerStatus('eiaIngestion', {
+      running: false,
+      activeRunId: null,
+    })
 
     if (this.ingestionTask) {
       this.ingestionTask.stop()
@@ -105,7 +121,38 @@ export class EIAIngestionWorker {
   /**
    * Run the ingestion process
    */
-  private async runIngestion(): Promise<void> {
+  async runOnce(): Promise<IngestionRunResult> {
+    return this.runIngestion()
+  }
+
+  private async runIngestion(): Promise<IngestionRunResult> {
+    if (this.activeRun) {
+      throw new TaskAlreadyRunningError('eia_ingestion', this.activeRunId)
+    }
+
+    this.activeRun = withTaskLock('eia_ingestion', 15 * 60, async (runId) => {
+      this.activeRunId = runId ?? `local-eia-${Date.now()}`
+      setWorkerStatus('eiaIngestion', {
+        running: true,
+        activeRunId: this.activeRunId,
+      })
+
+      return this.executeIngestion()
+    }).then(({ result }) => result)
+
+    try {
+      return await this.activeRun
+    } finally {
+      this.activeRun = null
+      this.activeRunId = null
+      setWorkerStatus('eiaIngestion', {
+        running: this.isRunning,
+        activeRunId: null,
+      })
+    }
+  }
+
+  private async executeIngestion(): Promise<IngestionRunResult> {
     const runStart = new Date()
     console.log(`Starting EIA-930 ingestion at ${runStart.toISOString()} [source: ${this.useGridStatus ? 'GridStatus.io' : 'EIA Direct'}]`)
 
@@ -137,14 +184,24 @@ export class EIAIngestionWorker {
       setWorkerStatus('eiaIngestion', {
         running: true,
         lastRun: runStart.toISOString(),
-        nextRun: null
+        nextRun: null,
+        activeRunId: this.activeRunId,
       })
+
+      return {
+        startedAt: runStart.toISOString(),
+        finishedAt: new Date().toISOString(),
+        successCount,
+        failureCount,
+        dataSource: this.useGridStatus ? 'gridstatus' : 'eia_direct',
+      }
     } catch (error) {
       console.error('EIA-930 ingestion failed:', error)
       setWorkerStatus('eiaIngestion', {
         running: false,
         lastRun: new Date().toISOString(),
-        nextRun: null
+        nextRun: null,
+        activeRunId: this.activeRunId,
       })
       throw error
     }
@@ -547,6 +604,14 @@ export async function startEIAIngestionWorker(): Promise<void> {
     eiaWorker = new EIAIngestionWorker()
   }
   await eiaWorker.start()
+}
+
+export async function runEIAIngestionOnce(): Promise<IngestionRunResult> {
+  if (!eiaWorker) {
+    eiaWorker = new EIAIngestionWorker()
+  }
+
+  return eiaWorker.runOnce()
 }
 
 /**

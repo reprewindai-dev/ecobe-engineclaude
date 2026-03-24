@@ -4,6 +4,7 @@ import { providerRouter } from '../lib/carbon/provider-router'
 import { forecastCarbonIntensity } from '../lib/carbon-forecasting'
 import { env } from '../config/env'
 import { redis } from '../lib/redis'
+import { TaskAlreadyRunningError, withTaskLock } from '../lib/task-lock'
 import { setWorkerStatus } from '../routes/system'
 import {
   DEFAULT_FORECAST_HOURS,
@@ -70,7 +71,52 @@ async function recordRefresh(region: string, payload: {
   })
 }
 
-export async function runForecastRefresh() {
+type ForecastRefreshResult = {
+  startedAt: string
+  finishedAt: string
+  totalRegions: number
+  totalRecords: number
+  totalForecasts: number
+  status: 'SUCCESS' | 'FAILURE'
+  message?: string
+}
+
+const runForecastRefreshState: {
+  activeRun: Promise<ForecastRefreshResult> | null
+  activeRunId: string | null
+} = {
+  activeRun: null,
+  activeRunId: null,
+}
+
+export async function runForecastRefresh(): Promise<ForecastRefreshResult> {
+  if (runForecastRefreshState.activeRun) {
+    throw new TaskAlreadyRunningError('forecast_refresh', runForecastRefreshState.activeRunId)
+  }
+
+  runForecastRefreshState.activeRun = withTaskLock('forecast_refresh', 15 * 60, async (runId) => {
+    runForecastRefreshState.activeRunId = runId ?? `local-forecast-${Date.now()}`
+    setWorkerStatus('forecastPoller', {
+      running: true,
+      activeRunId: runForecastRefreshState.activeRunId,
+    })
+
+    return executeForecastRefresh()
+  }).then(({ result }) => result)
+
+  try {
+    return await runForecastRefreshState.activeRun
+  } finally {
+    runForecastRefreshState.activeRun = null
+    runForecastRefreshState.activeRunId = null
+    setWorkerStatus('forecastPoller', {
+      running: true,
+      activeRunId: null,
+    })
+  }
+}
+
+async function executeForecastRefresh(): Promise<ForecastRefreshResult> {
   const runStart = new Date()
   try {
     const regions = await prisma.region.findMany({ where: { enabled: true }, select: { code: true } })
@@ -115,15 +161,28 @@ export async function runForecastRefresh() {
     setWorkerStatus('forecastPoller', {
       running: true,
       lastRun: runStart.toISOString(),
-      nextRun: null
+      nextRun: null,
+      activeRunId: runForecastRefreshState.activeRunId,
     })
+
+    return {
+      startedAt: runStart.toISOString(),
+      finishedAt: new Date().toISOString(),
+      totalRegions: regions.length,
+      totalRecords,
+      totalForecasts,
+      status: failed ? 'FAILURE' : 'SUCCESS',
+      message: failureMessage,
+    }
   } catch (error) {
     console.error('Fatal error in forecast refresh:', error)
     setWorkerStatus('forecastPoller', {
       running: false,
       lastRun: new Date().toISOString(),
-      nextRun: null
+      nextRun: null,
+      activeRunId: runForecastRefreshState.activeRunId,
     })
+    throw error
   }
 }
 
@@ -136,7 +195,8 @@ export function startForecastWorker() {
   setWorkerStatus('forecastPoller', {
     running: true,
     lastRun: null,
-    nextRun: null
+    nextRun: null,
+    activeRunId: null,
   })
 
   cron.schedule(env.FORECAST_REFRESH_CRON, () => {

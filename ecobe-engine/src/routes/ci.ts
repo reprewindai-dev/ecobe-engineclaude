@@ -1,12 +1,11 @@
 /**
  * Carbon-aware CI/CD runner routing and reusable workflow planning.
  *
- * This route family is designed to back a real GitHub Action / reusable workflow,
- * not a static demo. It exposes region choice, runner mapping, concurrency, defer
- * decisions, and provenance-rich outputs that can be fed directly into workflow_call.
+ * This route family is the decision surface for GitHub Actions and other
+ * execution clients. ECOBE remains the control plane.
  */
 
-import { Router } from 'express'
+import { Request, Response, Router } from 'express'
 import { z } from 'zod'
 
 import { findOptimalWindow } from '../lib/carbon-forecasting'
@@ -27,10 +26,13 @@ const RUNNER_REGIONS: Record<string, string[]> = {
   westus2: ['ubuntu-latest'],
   centralus: ['ubuntu-latest'],
   'us-east-1': ['ubuntu-latest', 'windows-latest', 'macos-latest'],
+  'us-east-2': ['ubuntu-latest', 'windows-latest'],
+  'us-west-1': ['ubuntu-latest', 'windows-latest'],
   'us-west-2': ['ubuntu-latest', 'windows-latest'],
   'eu-west-1': ['ubuntu-latest', 'windows-latest'],
   'eu-west-2': ['ubuntu-latest'],
   'eu-central-1': ['ubuntu-latest'],
+  'ap-southeast-1': ['ubuntu-latest'],
 }
 
 const SIGNAL_PROFILES: Record<
@@ -66,12 +68,18 @@ const SIGNAL_PROFILES: Record<
   },
 }
 
-const ciRoutingRequestSchema = z.object({
+const canonicalCiRoutingRequestSchema = z.object({
   workloadId: z.string().min(1),
   workloadName: z.string().min(1).max(160).optional(),
   orgId: z.string().optional(),
-  candidateRegions: z.array(z.string()).min(1),
+  candidateRegions: z.array(z.string().min(1)).min(1),
+  candidateRunners: z.array(z.string().min(1)).min(1).default([
+    'ubuntu-latest',
+    'windows-latest',
+    'macos-latest',
+  ]),
   durationMinutes: z.number().int().positive().max(24 * 60).default(20),
+  delayToleranceMinutes: z.number().int().min(0).max(24 * 60).default(0),
   deadline: z.string().datetime().optional(),
   signalProfile: z
     .enum(['us_official', 'forecast_research', 'marginal_when_available'])
@@ -82,42 +90,148 @@ const ciRoutingRequestSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 })
 
+const legacyCiRoutingRequestSchema = z.object({
+  preferredRegions: z.array(z.string().min(1)).min(1),
+  carbonWeight: z.number().min(0).max(1).optional(),
+  latencyWeight: z.number().min(0).max(1).optional(),
+  costWeight: z.number().min(0).max(1).optional(),
+  workloadId: z.string().min(1).optional(),
+  workloadName: z.string().min(1).max(160).optional(),
+  orgId: z.string().optional(),
+  candidateRunners: z.array(z.string().min(1)).min(1).optional(),
+  durationMinutes: z.number().int().positive().max(24 * 60).default(20),
+  delayToleranceMinutes: z.number().int().min(0).max(24 * 60).default(0),
+  deadline: z.string().datetime().optional(),
+  signalProfile: z
+    .enum(['us_official', 'forecast_research', 'marginal_when_available'])
+    .default('us_official'),
+  criticality: z.enum(['critical', 'standard', 'deferable']).default('standard'),
+  jobType: z.enum(['standard', 'heavy', 'light']).default('standard'),
+  assuranceMode: z.boolean().default(false),
+  metadata: z.record(z.unknown()).optional(),
+})
+
+type CanonicalCiRoutingRequest = z.infer<typeof canonicalCiRoutingRequestSchema>
+
+type NormalizedCIRoutingRequest = CanonicalCiRoutingRequest & {
+  legacyRouteInput: boolean
+  weightsOverride: {
+    carbonWeight?: number
+    latencyWeight?: number
+    costWeight?: number
+  } | null
+}
+
+function parseCiRoutingRequest(body: unknown, allowLegacy: boolean): NormalizedCIRoutingRequest {
+  const canonical = canonicalCiRoutingRequestSchema.safeParse(body)
+  if (canonical.success) {
+    return {
+      ...canonical.data,
+      legacyRouteInput: false,
+      weightsOverride: null,
+    }
+  }
+
+  if (!allowLegacy) {
+    throw canonical.error
+  }
+
+  const legacy = legacyCiRoutingRequestSchema.parse(body)
+  return {
+    workloadId: legacy.workloadId ?? 'legacy-ci-route',
+    workloadName: legacy.workloadName,
+    orgId: legacy.orgId,
+    candidateRegions: legacy.preferredRegions,
+    candidateRunners: legacy.candidateRunners ?? ['ubuntu-latest', 'windows-latest', 'macos-latest'],
+    durationMinutes: legacy.durationMinutes,
+    delayToleranceMinutes: legacy.delayToleranceMinutes,
+    deadline: legacy.deadline,
+    signalProfile: legacy.signalProfile,
+    criticality: legacy.criticality,
+    jobType: legacy.jobType,
+    assuranceMode: legacy.assuranceMode,
+    metadata: {
+      ...(legacy.metadata ?? {}),
+      legacyRouteInput: true,
+    },
+    legacyRouteInput: true,
+    weightsOverride: {
+      carbonWeight: legacy.carbonWeight,
+      latencyWeight: legacy.latencyWeight,
+      costWeight: legacy.costWeight,
+    },
+  }
+}
+
 function resolveSignalProfile(
   signalProfile: SignalProfileId,
   assuranceMode: boolean,
-  jobType: 'standard' | 'heavy' | 'light'
+  jobType: 'standard' | 'heavy' | 'light',
+  weightsOverride: NormalizedCIRoutingRequest['weightsOverride']
 ) {
   const base = SIGNAL_PROFILES[signalProfile]
   const carbonWeight =
-    jobType === 'heavy' ? Math.max(base.carbonWeight, 0.8) : jobType === 'light' ? Math.min(base.carbonWeight, 0.55) : base.carbonWeight
+    weightsOverride?.carbonWeight ??
+    (jobType === 'heavy'
+      ? Math.max(base.carbonWeight, 0.8)
+      : jobType === 'light'
+        ? Math.min(base.carbonWeight, 0.55)
+        : base.carbonWeight)
 
   return {
     mode: assuranceMode ? 'assurance' : base.mode,
     policyMode: assuranceMode ? 'sec_disclosure_strict' : base.policyMode,
     carbonWeight,
-    latencyWeight: base.latencyWeight,
-    costWeight: base.costWeight,
+    latencyWeight: weightsOverride?.latencyWeight ?? base.latencyWeight,
+    costWeight: weightsOverride?.costWeight ?? base.costWeight,
+  }
+}
+
+function resolveDeadlineConstraint(
+  deadline: string | undefined,
+  durationMinutes: number,
+  delayToleranceMinutes: number
+) {
+  if (!deadline) {
+    return {
+      deadline,
+      mode: 'not_provided' as const,
+      minutesUntilDeadline: null,
+      effectiveLookaheadMinutes: delayToleranceMinutes,
+      requestedDelayToleranceMinutes: delayToleranceMinutes,
+    }
+  }
+
+  const deadlineMs = new Date(deadline).getTime()
+  const minutesUntilDeadline = Math.floor((deadlineMs - Date.now()) / 60000)
+
+  if (minutesUntilDeadline <= 0) {
+    return {
+      deadline,
+      mode: 'expired' as const,
+      minutesUntilDeadline,
+      effectiveLookaheadMinutes: 0,
+      requestedDelayToleranceMinutes: delayToleranceMinutes,
+    }
+  }
+
+  const maxDelayBeforeDeadline = Math.max(0, minutesUntilDeadline - durationMinutes)
+
+  return {
+    deadline,
+    mode: maxDelayBeforeDeadline > 0 ? 'bounded' as const : 'immediate_only' as const,
+    minutesUntilDeadline,
+    effectiveLookaheadMinutes: Math.min(delayToleranceMinutes, maxDelayBeforeDeadline),
+    requestedDelayToleranceMinutes: delayToleranceMinutes,
   }
 }
 
 function estimateCiEnergyKwh(jobType: 'standard' | 'heavy' | 'light', durationMinutes: number) {
-  const perMinute =
-    jobType === 'heavy' ? 0.012 : jobType === 'light' ? 0.003 : 0.006
+  const perMinute = jobType === 'heavy' ? 0.012 : jobType === 'light' ? 0.003 : 0.006
   return Math.round(perMinute * durationMinutes * 1000) / 1000
 }
 
-function planConcurrency(
-  score: number,
-  criticality: Criticality,
-  deadline?: Date | null
-): {
-  maxParallel: number
-  shouldRun: boolean
-  rationale: string
-} {
-  const minutesToDeadline =
-    deadline ? (deadline.getTime() - Date.now()) / (60 * 1000) : Number.POSITIVE_INFINITY
-
+function planImmediateConcurrency(score: number, criticality: Criticality) {
   if (criticality === 'critical') {
     if (score >= 0.7) {
       return { maxParallel: 6, shouldRun: true, rationale: 'Critical job in a strong carbon window.' }
@@ -125,32 +239,49 @@ function planConcurrency(
     return { maxParallel: 4, shouldRun: true, rationale: 'Critical job kept live despite dirtier grid conditions.' }
   }
 
-  if (criticality === 'standard') {
-    if (score >= 0.8) {
-      return { maxParallel: 4, shouldRun: true, rationale: 'Clean window allows broad matrix concurrency.' }
-    }
-    if (score >= 0.5) {
-      return { maxParallel: 2, shouldRun: true, rationale: 'Moderate window keeps CI moving with reduced parallelism.' }
-    }
-    return { maxParallel: 1, shouldRun: true, rationale: 'Dirty window; serialize work to limit runner load.' }
-  }
-
-  if (minutesToDeadline <= 120) {
-    return { maxParallel: 1, shouldRun: true, rationale: 'Deadline is close, so deferable workflow must still run.' }
-  }
-
-  if (score >= 0.75) {
-    return { maxParallel: 4, shouldRun: true, rationale: 'Deferable workflow landed in a clean window.' }
+  if (score >= 0.8) {
+    return { maxParallel: 4, shouldRun: true, rationale: 'Clean window allows broad matrix concurrency.' }
   }
   if (score >= 0.5) {
-    return { maxParallel: 2, shouldRun: true, rationale: 'Moderate window for deferable work; limited parallelism applied.' }
+    return { maxParallel: 2, shouldRun: true, rationale: 'Moderate window keeps CI moving with reduced parallelism.' }
   }
 
-  return {
-    maxParallel: 0,
-    shouldRun: false,
-    rationale: 'Deferable workflow should wait for a cleaner forecast window.',
-  }
+  return { maxParallel: 1, shouldRun: true, rationale: 'Dirty window; serialize work to limit runner load.' }
+}
+
+function pickRunner(availableRunners: string[], candidateRunners: string[]) {
+  return candidateRunners.find((runner) => availableRunners.includes(runner)) ?? availableRunners[0] ?? 'ubuntu-latest'
+}
+
+async function findBestDeferredWindow(
+  candidateRegions: string[],
+  durationMinutes: number,
+  effectiveLookaheadMinutes: number
+) {
+  if (effectiveLookaheadMinutes <= 0) return null
+
+  const durationHours = Math.max(1, Math.ceil(durationMinutes / 60))
+  const lookAheadHours = Math.max(1, Math.ceil(effectiveLookaheadMinutes / 60))
+
+  const windows = await Promise.all(
+    candidateRegions.map(async (region) => {
+      try {
+        const window = await findOptimalWindow(region, durationHours, lookAheadHours)
+        return window ? { region, window } : null
+      } catch {
+        return null
+      }
+    })
+  )
+
+  const viable = windows.filter(
+    (entry): entry is { region: string; window: NonNullable<Awaited<ReturnType<typeof findOptimalWindow>>> } =>
+      entry !== null
+  )
+  if (viable.length === 0) return null
+
+  viable.sort((left, right) => left.window.avgCarbonIntensity - right.window.avgCarbonIntensity)
+  return viable[0]
 }
 
 function buildReusableWorkflowTemplates() {
@@ -189,12 +320,6 @@ on:
 jobs:
   plan:
     runs-on: ubuntu-latest
-    outputs:
-      region: \${{ steps.ecobe.outputs.region }}
-      runner: \${{ steps.ecobe.outputs.runner }}
-      score: \${{ steps.ecobe.outputs.score }}
-      max_parallel: \${{ steps.ecobe.outputs.max_parallel }}
-      should_run: \${{ steps.ecobe.outputs.should_run }}
     steps:
       - id: ecobe
         uses: co2-router/ecobe-action@v1
@@ -206,62 +331,36 @@ jobs:
           deadline: \${{ inputs.deadline }}
           candidate_regions: \${{ inputs.candidate_regions }}
           signal_profile: \${{ inputs.signal_profile }}
-          assurance_mode: \${{ inputs.assurance_mode }}
-          criticality: deferable
-          job_type: heavy
-
-  heavy_matrix:
-    needs: plan
-    if: \${{ needs.plan.outputs.should_run == 'true' }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
-      max-parallel: \${{ fromJSON(needs.plan.outputs.max_parallel) }}
-    steps:
-      - uses: actions/checkout@v4
-      - run: npm test --shard=\${{ matrix.shard }}`,
-    nightly_deferral: `name: Ecobe Nightly Deferral
-
-on:
-  schedule:
-    - cron: "0 0 * * *"
-
-jobs:
-  plan:
-    runs-on: ubuntu-latest
-    outputs:
-      should_run: \${{ steps.ecobe.outputs.should_run }}
-      start_time: \${{ steps.ecobe.outputs.start_time }}
-    steps:
-      - id: ecobe
-        uses: co2-router/ecobe-action@v1
-        with:
-          ecobe_url: \${{ secrets.ECOBE_URL }}
-          api_key: \${{ secrets.ECOBE_INTERNAL_API_KEY }}
-          workload_id: nightly-build
-          duration_minutes: 60
-          candidate_regions: eastus,northeurope,norwayeast
-          signal_profile: forecast_research
-          criticality: deferable
-          job_type: heavy
-
-  nightly_build:
-    needs: plan
-    if: \${{ needs.plan.outputs.should_run == 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: npm run build && npm test`,
+          assurance_mode: \${{ inputs.assurance_mode }}`,
   }
 }
 
-router.post('/route', async (req, res) => {
+async function handleCarbonRoute(req: Request, res: Response, allowLegacy: boolean) {
   try {
-    const data = ciRoutingRequestSchema.parse(req.body)
-    const deadline = data.deadline ? new Date(data.deadline) : null
-    const profile = resolveSignalProfile(data.signalProfile, data.assuranceMode, data.jobType)
+    const data = parseCiRoutingRequest(req.body, allowLegacy)
+    const deadlineConstraint = resolveDeadlineConstraint(
+      data.deadline,
+      data.durationMinutes,
+      data.delayToleranceMinutes
+    )
+
+    if (deadlineConstraint.mode === 'expired') {
+      return res.status(400).json({
+        error: 'Deadline expired',
+        message: 'deadline has already passed',
+        details: {
+          deadline: data.deadline,
+          minutesUntilDeadline: deadlineConstraint.minutesUntilDeadline,
+        },
+      })
+    }
+
+    const profile = resolveSignalProfile(
+      data.signalProfile,
+      data.assuranceMode,
+      data.jobType,
+      data.weightsOverride
+    )
     const energyEstimateKwh = estimateCiEnergyKwh(data.jobType, data.durationMinutes)
 
     const routingResult = await routeGreen({
@@ -279,45 +378,59 @@ router.post('/route', async (req, res) => {
 
     const selectedRegion = routingResult.selectedRegion
     const availableRunners = RUNNER_REGIONS[selectedRegion] ?? ['ubuntu-latest']
-    const selectedRunner = availableRunners[0]
-    const baselineIntensity = Math.max(
+    const selectedRunner = pickRunner(availableRunners, data.candidateRunners)
+    const baseline = Math.max(
       routingResult.carbonIntensity,
-      ...routingResult.alternatives.map((candidate) => candidate.carbonIntensity),
-      500
+      ...routingResult.alternatives.map((candidate) => candidate.carbonIntensity)
     )
-    const savings = Math.max(
-      0,
-      ((baselineIntensity - routingResult.carbonIntensity) / baselineIntensity) * 100
-    )
-    const concurrency = planConcurrency(routingResult.score, data.criticality, deadline)
-    const lookAheadHours =
-      deadline != null
-        ? Math.max(1, Math.min(168, Math.ceil((deadline.getTime() - Date.now()) / (60 * 60 * 1000))))
-        : 24
+    const savings = Math.max(0, ((baseline - routingResult.carbonIntensity) / baseline) * 100)
+
     const deferredWindow =
-      !concurrency.shouldRun && lookAheadHours > 0
-        ? await findOptimalWindow(selectedRegion, Math.max(1, Math.ceil(data.durationMinutes / 60)), lookAheadHours)
+      data.criticality === 'deferable' && deadlineConstraint.effectiveLookaheadMinutes > 0
+        ? await findBestDeferredWindow(
+            data.candidateRegions,
+            data.durationMinutes,
+            deadlineConstraint.effectiveLookaheadMinutes
+          )
         : null
 
-    const startTime = deferredWindow?.startTime?.toISOString() ?? new Date().toISOString()
-    const ciResponse = {
+    const deferredImprovement =
+      deferredWindow == null ? 0 : routingResult.carbonIntensity - deferredWindow.window.avgCarbonIntensity
+
+    const shouldDelay =
+      data.criticality === 'deferable' &&
+      deadlineConstraint.effectiveLookaheadMinutes > 0 &&
+      deferredWindow != null &&
+      deferredImprovement >= 10
+
+    const immediatePlan = planImmediateConcurrency(
+      routingResult.score,
+      deadlineConstraint.mode === 'immediate_only' && data.criticality === 'deferable'
+        ? 'standard'
+        : data.criticality
+    )
+
+    const response = {
       selectedRunner,
       selectedRegion,
-      carbonIntensity: routingResult.carbonIntensity,
-      baselineIntensity,
-      savingsPct: Math.round(savings * 10) / 10,
+      carbonIntensity: shouldDelay ? deferredWindow!.window.avgCarbonIntensity : routingResult.carbonIntensity,
+      baseline,
+      savings: Math.round(savings * 10) / 10,
       mode: routingResult.mode,
       policyMode: routingResult.policyMode,
       signalType: routingResult.signalTypeUsed,
       confidence: routingResult.assurance.confidenceLabel,
-      maxParallel: concurrency.maxParallel,
-      shouldRun: concurrency.shouldRun,
-      startTime,
+      maxParallel: shouldDelay ? 0 : immediatePlan.maxParallel,
+      shouldRun: !shouldDelay && immediatePlan.shouldRun,
+      startTime: shouldDelay ? deferredWindow!.window.startTime.toISOString() : new Date().toISOString(),
       decisionFrameId: routingResult.decisionFrameId,
-      recommendation: concurrency.rationale,
+      recommendation: shouldDelay
+        ? `Delay execution until ${deferredWindow!.window.startTime.toISOString()}; cleaner capacity exists within the allowed deadline window.`
+        : immediatePlan.rationale,
+      deadlineHandling: deadlineConstraint,
       alternatives: routingResult.alternatives.map((alternative) => ({
         region: alternative.region,
-        runner: RUNNER_REGIONS[alternative.region]?.[0] ?? 'ubuntu-latest',
+        runner: pickRunner(RUNNER_REGIONS[alternative.region] ?? ['ubuntu-latest'], data.candidateRunners),
         carbonIntensity: alternative.carbonIntensity,
         score: alternative.score,
       })),
@@ -325,11 +438,12 @@ router.post('/route', async (req, res) => {
         deferredWindow == null
           ? null
           : {
-              startTime: deferredWindow.startTime.toISOString(),
-              endTime: deferredWindow.endTime.toISOString(),
-              avgCarbonIntensity: deferredWindow.avgCarbonIntensity,
-              savingsPct: deferredWindow.savings,
-              confidenceBand: deferredWindow.confidenceBand,
+              region: deferredWindow.region,
+              startTime: deferredWindow.window.startTime.toISOString(),
+              endTime: deferredWindow.window.endTime.toISOString(),
+              avgCarbonIntensity: deferredWindow.window.avgCarbonIntensity,
+              savingsPct: deferredWindow.window.savings,
+              confidenceBand: deferredWindow.window.confidenceBand,
             },
       provenance: {
         doctrine: routingResult.doctrine,
@@ -344,11 +458,13 @@ router.post('/route', async (req, res) => {
       workflowOutputs: {
         region: selectedRegion,
         runner: selectedRunner,
-        should_run: String(concurrency.shouldRun),
-        max_parallel: String(concurrency.maxParallel),
-        start_time: startTime,
+        should_run: String(!shouldDelay && immediatePlan.shouldRun),
+        max_parallel: String(shouldDelay ? 0 : immediatePlan.maxParallel),
+        start_time: shouldDelay ? deferredWindow!.window.startTime.toISOString() : new Date().toISOString(),
         score: routingResult.score.toFixed(4),
-        intensity_gco2_per_kwh: String(routingResult.carbonIntensity),
+        intensity_gco2_per_kwh: String(
+          shouldDelay ? deferredWindow!.window.avgCarbonIntensity : routingResult.carbonIntensity
+        ),
         mode: routingResult.mode,
         confidence: routingResult.assurance.confidenceLabel,
       },
@@ -359,43 +475,49 @@ router.post('/route', async (req, res) => {
         decisionFrameId: routingResult.decisionFrameId ?? '',
         selectedRunner,
         selectedRegion,
-        carbonIntensity: routingResult.carbonIntensity,
-        baseline: baselineIntensity,
+        carbonIntensity: response.carbonIntensity,
+        baseline,
         savings,
         jobType: data.jobType,
         preferredRegions: data.candidateRegions,
         carbonWeight: profile.carbonWeight,
-        recommendation: concurrency.rationale,
+        recommendation: response.recommendation,
         metadata: {
           workloadId: data.workloadId,
           signalProfile: data.signalProfile,
           criticality: data.criticality,
-          maxParallel: concurrency.maxParallel,
-          shouldRun: concurrency.shouldRun,
-          deferredWindow:
-            deferredWindow == null
-              ? null
-              : {
-                  startTime: deferredWindow.startTime.toISOString(),
-                  endTime: deferredWindow.endTime.toISOString(),
-                  avgCarbonIntensity: deferredWindow.avgCarbonIntensity,
-                  savingsPct: deferredWindow.savings,
-                },
-          provenance: ciResponse.provenance,
+          maxParallel: response.maxParallel,
+          shouldRun: response.shouldRun,
+          legacyRouteInput: data.legacyRouteInput,
+          deadlineHandling: deadlineConstraint,
+          deferredWindow: response.deferredWindow,
+          provenance: response.provenance,
           metadata: data.metadata ?? {},
         },
       },
     })
 
-    res.json(ciResponse)
+    return res.json(response)
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        error: 'Invalid CI routing request',
+        details: error.errors,
+      })
+    }
+
     console.error('CI routing error:', error)
-    res.status(500).json({
+    return res.status(500).json({
       error: 'Failed to compute CI routing plan',
       message: error instanceof Error ? error.message : 'Unknown error',
     })
   }
-})
+}
+
+router.post('/carbon-route', (req, res) => handleCarbonRoute(req, res, false))
+// Deprecated compatibility route for older clients that still send preferredRegions
+// and explicit legacy weights.
+router.post('/route', (req, res) => handleCarbonRoute(req, res, true))
 
 router.get('/profiles', (_req, res) => {
   res.json({
@@ -470,8 +592,10 @@ router.get('/decisions', async (req, res) => {
         selectedRunner: true,
         selectedRegion: true,
         carbonIntensity: true,
+        baseline: true,
         savings: true,
         jobType: true,
+        recommendation: true,
         createdAt: true,
         metadata: true,
       },
