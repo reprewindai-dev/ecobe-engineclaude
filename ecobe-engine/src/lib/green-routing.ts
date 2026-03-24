@@ -1,4 +1,4 @@
-import { providerRouter } from './carbon/provider-router'
+import { mapRegionToWattTimeRegion, providerRouter } from './carbon/provider-router'
 import { GridSignalCache } from './grid-signals/grid-signal-cache'
 import { GridSignalAudit } from './grid-signals/grid-signal-audit'
 import { wattTime } from './watttime'
@@ -631,7 +631,9 @@ async function getLatestGridSnapshot(region: string) {
 
 async function getCleanWindowSafe(region: string) {
   try {
-    return await wattTime.getPredictedCleanWindows(region)
+    const wattTimeRegion = mapRegionToWattTimeRegion(region)
+    if (!wattTimeRegion) return null
+    return await wattTime.getPredictedCleanWindows(wattTimeRegion)
   } catch {
     return null
   }

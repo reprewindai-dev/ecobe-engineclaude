@@ -20,6 +20,8 @@ import { eia930 } from '../lib/grid-signals/eia-client'
 import { ember } from '../lib/ember'
 import { GridSignalCache } from '../lib/grid-signals/grid-signal-cache'
 import { GridSignalAudit } from '../lib/grid-signals/grid-signal-audit'
+import { getRegionMapping } from '../lib/grid-signals/region-mapping'
+import { mapRegionToWattTimeRegion } from '../lib/carbon/provider-router'
 import { gbGridSource } from '../lib/regional/gb-grid-source'
 import { denmarkGridSource } from '../lib/regional/denmark-grid-source'
 import { finlandGridSource } from '../lib/regional/finland-grid-source'
@@ -122,8 +124,10 @@ export class FingardControlLayer {
    * Get locked provider hierarchy for region
    */
   private getProviderHierarchy(region: string): string[] {
+    const mappedRegion = getRegionMapping(region)
+
     // US regions
-    if (region.startsWith('US-')) {
+    if (region.startsWith('US-') || mappedRegion?.country === 'US' || Boolean(mapRegionToWattTimeRegion(region))) {
       return ['watttime', 'eia930', 'ember', 'static']
     }
     
@@ -146,15 +150,17 @@ export class FingardControlLayer {
   private async queryProvider(provider: string, region: string, timestamp: Date) {
     switch (provider) {
       case 'watttime': {
-        const moer = await wattTime.getCurrentMOER(region)
+        const wattTimeRegion = mapRegionToWattTimeRegion(region) ?? region
+        const moer = await wattTime.getCurrentMOER(wattTimeRegion)
         if (moer) return { carbonIntensity: moer.moer, timestamp: moer.timestamp, isForecast: false }
-        const forecast = await wattTime.getMOERForecast(region)
+        const forecast = await wattTime.getMOERForecast(wattTimeRegion)
         return forecast?.[0] ? { carbonIntensity: forecast[0].moer, timestamp: forecast[0].timestamp, isForecast: true } : null
       }
 
       case 'eia930': {
         // EIA-930 uses getBalance as closest proxy for current signal
-        const balance = await eia930.getBalance(region)
+        const eiaRespondent = getRegionMapping(region)?.eiaRespondent ?? region
+        const balance = await eia930.getBalance(eiaRespondent)
         const latest = balance?.[0]
         return latest ? { carbonIntensity: latest.value ?? 0, timestamp: latest.period ?? new Date().toISOString(), isForecast: false } : null
       }

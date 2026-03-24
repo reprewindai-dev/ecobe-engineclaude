@@ -11,7 +11,7 @@
 
 import { prisma } from './db'
 import { wattTime } from './watttime'
-import { providerRouter } from './carbon/provider-router'
+import { mapRegionToWattTimeRegion, providerRouter } from './carbon/provider-router'
 import { addHours, subDays } from 'date-fns'
 
 export interface CarbonForecastResult {
@@ -117,8 +117,7 @@ export async function forecastCarbonIntensity(
   if (historicalData.length < 24) {
     // Not enough data — try WattTime MOER forecast for US regions
     try {
-      const { WATTTIME_REGION_MAP } = await import('./carbon/provider-router') as any
-      const ba = WATTTIME_REGION_MAP?.[region]
+      const ba = mapRegionToWattTimeRegion(region)
       if (ba) {
         const moerForecast = await wattTime.getMOERForecast(ba, new Date())
         if (moerForecast.length > 0) {

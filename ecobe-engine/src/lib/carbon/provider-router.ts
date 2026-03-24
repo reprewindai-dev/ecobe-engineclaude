@@ -47,6 +47,25 @@ export interface RoutingSignal {
   }
 }
 
+export const WATTTIME_REGION_MAP: Record<string, string> = {
+  'us-east-1': 'PJM_DC',
+  'us-east-2': 'PJM_ROANOKE',
+  'us-west-1': 'CAISO_NORTH',
+  'us-west-2': 'BPA',
+  'us-central1': 'MISO_MI',
+  'us-east4': 'PJM_DC',
+  'us-west1': 'BPA',
+  eastus: 'PJM_DC',
+  eastus2: 'PJM_DC',
+  westus2: 'BPA',
+  centralus: 'SPP_NORTH',
+  southcentralus: 'ERCOT_SOUTH',
+}
+
+export function mapRegionToWattTimeRegion(region: string): string | null {
+  return WATTTIME_REGION_MAP[region] ?? null
+}
+
 /**
  * PROVIDER DOCTRINE – FREE-FIRST GLOBAL STACK (REV 2026-03-18)
  *
@@ -292,7 +311,7 @@ export class ProviderRouter {
     try {
       // Map cloud region to WattTime v3 sub-regional name
       // ONLY try US regions — WattTime free plan covers US only (CAISO_NORTH full access)
-      const wattTimeRegion = ProviderRouter.WATTTIME_REGION_MAP[region]
+      const wattTimeRegion = mapRegionToWattTimeRegion(region)
       if (!wattTimeRegion) return null // No mapping = not a US region, skip entirely
 
       // Try current MOER first
