@@ -46,6 +46,43 @@ function buildConfidenceBand(
   }
 }
 
+async function persistForecastRecord(
+  region: string,
+  forecastTime: Date,
+  payload: {
+    predictedIntensity: number
+    confidence: number
+    modelVersion: string
+    features: Record<string, unknown>
+  }
+) {
+  try {
+    const existing = await prisma.carbonForecast.findFirst({
+      where: { region, forecastTime },
+      select: { id: true },
+    })
+
+    if (existing) {
+      await prisma.carbonForecast.update({
+        where: { id: existing.id },
+        data: payload,
+      })
+      return
+    }
+
+    await prisma.carbonForecast.create({
+      data: {
+        region,
+        forecastTime,
+        ...payload,
+      },
+    })
+  } catch {
+    // Forecast persistence is best-effort. Routing should not fail because
+    // historical forecast rows could not be written back to storage.
+  }
+}
+
 /**
  * Simple forecasting model (v1.0)
  * Uses moving average of historical data
@@ -97,11 +134,12 @@ export async function forecastCarbonIntensity(
               trend: 'stable',
               confidenceBand: buildConfidenceBand(predictedIntensity, 0.7, 0.18, false),
             }
-            await prisma.carbonForecast.upsert({
-              where: { region_forecastTime: { region, forecastTime } },
-              update: { predictedIntensity, confidence: 0.7, modelVersion: 'watttime-moer', features: { provider: 'watttime' } },
-              create: { region, forecastTime, predictedIntensity, confidence: 0.7, modelVersion: 'watttime-moer', features: { provider: 'watttime' } },
-            }).catch(() => {})
+            await persistForecastRecord(region, forecastTime, {
+              predictedIntensity,
+              confidence: 0.7,
+              modelVersion: 'watttime-moer',
+              features: { provider: 'watttime' },
+            })
             mapped.push(result)
           }
           if (mapped.length > 0) return mapped
@@ -124,11 +162,12 @@ export async function forecastCarbonIntensity(
         trend: 'stable',
         confidenceBand: buildConfidenceBand(baseIntensity, 0.3, 0.3, false),
       }
-      await prisma.carbonForecast.upsert({
-        where: { region_forecastTime: { region, forecastTime } },
-        update: { predictedIntensity: baseIntensity, confidence: 0.3, modelVersion: 'static-projection', features: { provider: 'provider-router' } },
-        create: { region, forecastTime, predictedIntensity: baseIntensity, confidence: 0.3, modelVersion: 'static-projection', features: { provider: 'provider-router' } },
-      }).catch(() => {})
+      await persistForecastRecord(region, forecastTime, {
+        predictedIntensity: baseIntensity,
+        confidence: 0.3,
+        modelVersion: 'static-projection',
+        features: { provider: 'provider-router' },
+      })
       projected.push(result)
     }
     return projected
@@ -199,35 +238,16 @@ export async function forecastCarbonIntensity(
     forecasts.push(result)
 
     // Store forecast
-    await prisma.carbonForecast.upsert({
-      where: {
-        region_forecastTime: {
-          region,
-          forecastTime,
-        },
+    await persistForecastRecord(region, forecastTime, {
+      predictedIntensity,
+      confidence,
+      modelVersion: 'v1.0',
+      features: {
+        hour,
+        dayOfWeek,
+        historicalCount: similarPeriods.length,
       },
-      update: {
-        predictedIntensity,
-        confidence,
-        features: {
-          hour,
-          dayOfWeek,
-          historicalCount: similarPeriods.length,
-        },
-      },
-      create: {
-        region,
-        forecastTime,
-        predictedIntensity,
-        confidence,
-        modelVersion: 'v1.0',
-        features: {
-          hour,
-          dayOfWeek,
-          historicalCount: similarPeriods.length,
-        },
-      },
-    }).catch(() => {}) // Ignore duplicates
+    })
   }
 
   return forecasts
