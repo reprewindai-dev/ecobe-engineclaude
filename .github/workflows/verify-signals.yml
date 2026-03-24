@@ -34,7 +34,13 @@ jobs:
 
       - name: System status check
         run: |
-          response=$(curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -sf "${ENGINE_URL}/api/v1/system/status")
+          headers=()
+          if [ -n "${ECOBE_ENGINE_API_KEY:-}" ]; then
+            headers+=(-H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}")
+            headers+=(-H "x-ecobe-internal-key: ${ECOBE_ENGINE_API_KEY}")
+            headers+=(-H "x-api-key: ${ECOBE_ENGINE_API_KEY}")
+          fi
+          response=$(curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -sf "${headers[@]}" "${ENGINE_URL}/api/v1/system/status")
           echo "System status: $response"
           echo "$response" | grep -q '"status":"healthy"' || (echo "System status degraded" && exit 1)
 
@@ -56,7 +62,13 @@ jobs:
 
       - name: Disclosure export check
         run: |
-          response=$(curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -sf "${ENGINE_URL}/api/v1/disclosure/export?format=json&mode=assurance")
+          headers=()
+          if [ -n "${ECOBE_ENGINE_API_KEY:-}" ]; then
+            headers+=(-H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}")
+            headers+=(-H "x-ecobe-internal-key: ${ECOBE_ENGINE_API_KEY}")
+            headers+=(-H "x-api-key: ${ECOBE_ENGINE_API_KEY}")
+          fi
+          response=$(curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -sf "${headers[@]}" "${ENGINE_URL}/api/v1/disclosure/export?format=json&mode=assurance")
           echo "Disclosure export: $response"
           echo "$response" | grep -q '"batch_id"' || (echo "Disclosure export missing batch metadata" && exit 1)
 
