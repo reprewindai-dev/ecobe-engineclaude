@@ -47,7 +47,7 @@ const DEFAULT_REGIONS: RegionConfig[] = (() => {
     { region: 'MISO', balancingAuthority: 'MISO', eiaRespondent: 'MISO' },
     { region: 'NYISO', balancingAuthority: 'NYISO', eiaRespondent: 'NYISO' },
     { region: 'ISO-NE', balancingAuthority: 'ISNE', eiaRespondent: 'ISNE' },
-    { region: 'SPP', balancingAuthority: 'SPP', eiaRespondent: 'SPP' },
+    { region: 'SWPP', balancingAuthority: 'SWPP', eiaRespondent: 'SWPP' },
   ]
 })()
 
