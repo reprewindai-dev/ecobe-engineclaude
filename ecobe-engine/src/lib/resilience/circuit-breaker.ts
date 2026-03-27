@@ -322,16 +322,21 @@ export async function timeoutWrapper<T>(
   config: TimeoutConfig = {}
 ): Promise<T> {
   const timeoutMs = config.timeoutMs ?? 10000
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Operation timeout after ${timeoutMs}ms`))
+    }, timeoutMs)
 
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`Operation timeout after ${timeoutMs}ms`)),
-        timeoutMs
-      )
-    ),
-  ])
+    Promise.resolve(promise)
+      .then((value) => {
+        clearTimeout(timer)
+        resolve(value)
+      })
+      .catch((error) => {
+        clearTimeout(timer)
+        reject(error)
+      })
+  })
 }
 
 /**

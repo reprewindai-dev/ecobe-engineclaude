@@ -44,7 +44,7 @@ const REGION_MAP: RegionMapping[] = [
   { cloudRegion: 'eastus',          balancingAuthority: 'PJM',   eiaRespondent: 'PJM',   country: 'US', hasEia930Coverage: true,  notes: 'Virginia, PJM territory' },
   { cloudRegion: 'eastus2',         balancingAuthority: 'PJM',   eiaRespondent: 'PJM',   country: 'US', hasEia930Coverage: true,  notes: 'Virginia, PJM territory' },
   { cloudRegion: 'westus2',         balancingAuthority: 'BPAT',  eiaRespondent: 'BPAT',  country: 'US', hasEia930Coverage: true,  notes: 'Washington, BPA territory' },
-  { cloudRegion: 'centralus',       balancingAuthority: 'SWPP',  eiaRespondent: 'SWPP',  country: 'US', hasEia930Coverage: true,  notes: 'Iowa, Southwest Power Pool territory (EIA respondent SWPP)' },
+  { cloudRegion: 'centralus',       balancingAuthority: 'SPP',   eiaRespondent: 'SPP',   country: 'US', hasEia930Coverage: true,  notes: 'Iowa, SPP territory' },
   { cloudRegion: 'southcentralus',  balancingAuthority: 'ERCO',  eiaRespondent: 'ERCO',  country: 'US', hasEia930Coverage: true,  notes: 'Texas, ERCOT territory' },
 ]
 

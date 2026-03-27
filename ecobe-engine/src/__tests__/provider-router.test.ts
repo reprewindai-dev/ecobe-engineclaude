@@ -1,4 +1,4 @@
-import { mapRegionToWattTimeRegion, ProviderRouter } from '../lib/carbon/provider-router'
+import { ProviderRouter } from '../lib/carbon/provider-router'
 
 // Mock external providers — WattTime is Tier 1 (locked doctrine)
 jest.mock('../lib/watttime', () => ({
@@ -61,14 +61,6 @@ jest.mock('../lib/ember/structural-profile', () => ({
 
 describe('ProviderRouter', () => {
   let router: ProviderRouter
-
-  describe('mapRegionToWattTimeRegion', () => {
-    it('maps cloud regions to WattTime subregions', () => {
-      expect(mapRegionToWattTimeRegion('eastus')).toBe('PJM_DC')
-      expect(mapRegionToWattTimeRegion('us-west-2')).toBe('BPA')
-      expect(mapRegionToWattTimeRegion('northeurope')).toBeNull()
-    })
-  })
 
   beforeEach(() => {
     jest.clearAllMocks()

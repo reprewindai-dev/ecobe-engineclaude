@@ -11,7 +11,7 @@
 
 import { prisma } from './db'
 import { wattTime } from './watttime'
-import { mapRegionToWattTimeRegion, providerRouter } from './carbon/provider-router'
+import { providerRouter } from './carbon/provider-router'
 import { addHours, subDays } from 'date-fns'
 
 export interface CarbonForecastResult {
@@ -20,67 +20,6 @@ export interface CarbonForecastResult {
   predictedIntensity: number
   confidence: number
   trend: 'increasing' | 'decreasing' | 'stable'
-  confidenceBand?: {
-    low: number
-    mid: number
-    high: number
-    empirical: boolean
-  }
-}
-
-function buildConfidenceBand(
-  predictedIntensity: number,
-  confidence: number,
-  spreadRatio: number,
-  empirical: boolean
-) {
-  const boundedSpread = Math.max(0.05, Math.min(0.45, spreadRatio))
-  const low = Math.max(1, Math.round(predictedIntensity * (1 - boundedSpread)))
-  const high = Math.max(low, Math.round(predictedIntensity * (1 + boundedSpread)))
-
-  return {
-    low,
-    mid: Math.round(predictedIntensity),
-    high,
-    empirical,
-  }
-}
-
-async function persistForecastRecord(
-  region: string,
-  forecastTime: Date,
-  payload: {
-    predictedIntensity: number
-    confidence: number
-    modelVersion: string
-    features: Record<string, unknown>
-  }
-) {
-  try {
-    const existing = await prisma.carbonForecast.findFirst({
-      where: { region, forecastTime },
-      select: { id: true },
-    })
-
-    if (existing) {
-      await prisma.carbonForecast.update({
-        where: { id: existing.id },
-        data: payload,
-      })
-      return
-    }
-
-    await prisma.carbonForecast.create({
-      data: {
-        region,
-        forecastTime,
-        ...payload,
-      },
-    })
-  } catch {
-    // Forecast persistence is best-effort. Routing should not fail because
-    // historical forecast rows could not be written back to storage.
-  }
 }
 
 /**
@@ -117,7 +56,8 @@ export async function forecastCarbonIntensity(
   if (historicalData.length < 24) {
     // Not enough data — try WattTime MOER forecast for US regions
     try {
-      const ba = mapRegionToWattTimeRegion(region)
+      const { WATTTIME_REGION_MAP } = await import('./carbon/provider-router') as any
+      const ba = WATTTIME_REGION_MAP?.[region]
       if (ba) {
         const moerForecast = await wattTime.getMOERForecast(ba, new Date())
         if (moerForecast.length > 0) {
@@ -125,20 +65,12 @@ export async function forecastCarbonIntensity(
           for (const f of moerForecast.slice(0, hoursAhead)) {
             const forecastTime = new Date(f.timestamp)
             const predictedIntensity = Math.round(f.moer)
-            const result: CarbonForecastResult = {
-              region,
-              forecastTime,
-              predictedIntensity,
-              confidence: 0.7,
-              trend: 'stable',
-              confidenceBand: buildConfidenceBand(predictedIntensity, 0.7, 0.18, false),
-            }
-            await persistForecastRecord(region, forecastTime, {
-              predictedIntensity,
-              confidence: 0.7,
-              modelVersion: 'watttime-moer',
-              features: { provider: 'watttime' },
-            })
+            const result: CarbonForecastResult = { region, forecastTime, predictedIntensity, confidence: 0.7, trend: 'stable' }
+            await prisma.carbonForecast.upsert({
+              where: { region_forecastTime: { region, forecastTime } },
+              update: { predictedIntensity, confidence: 0.7, modelVersion: 'watttime-moer', features: { provider: 'watttime' } },
+              create: { region, forecastTime, predictedIntensity, confidence: 0.7, modelVersion: 'watttime-moer', features: { provider: 'watttime' } },
+            }).catch(() => {})
             mapped.push(result)
           }
           if (mapped.length > 0) return mapped
@@ -153,20 +85,12 @@ export async function forecastCarbonIntensity(
     const projected: CarbonForecastResult[] = []
     for (let h = 1; h <= hoursAhead; h++) {
       const forecastTime = addHours(now, h)
-      const result: CarbonForecastResult = {
-        region,
-        forecastTime,
-        predictedIntensity: baseIntensity,
-        confidence: 0.3,
-        trend: 'stable',
-        confidenceBand: buildConfidenceBand(baseIntensity, 0.3, 0.3, false),
-      }
-      await persistForecastRecord(region, forecastTime, {
-        predictedIntensity: baseIntensity,
-        confidence: 0.3,
-        modelVersion: 'static-projection',
-        features: { provider: 'provider-router' },
-      })
+      const result: CarbonForecastResult = { region, forecastTime, predictedIntensity: baseIntensity, confidence: 0.3, trend: 'stable' }
+      await prisma.carbonForecast.upsert({
+        where: { region_forecastTime: { region, forecastTime } },
+        update: { predictedIntensity: baseIntensity, confidence: 0.3, modelVersion: 'static-projection', features: { provider: 'provider-router' } },
+        create: { region, forecastTime, predictedIntensity: baseIntensity, confidence: 0.3, modelVersion: 'static-projection', features: { provider: 'provider-router' } },
+      }).catch(() => {})
       projected.push(result)
     }
     return projected
@@ -227,26 +151,39 @@ export async function forecastCarbonIntensity(
       predictedIntensity,
       confidence,
       trend,
-      confidenceBand: buildConfidenceBand(
-        predictedIntensity,
-        confidence,
-        predictedIntensity === 0 ? 0.25 : stdDev / predictedIntensity,
-        true
-      ),
     }
     forecasts.push(result)
 
     // Store forecast
-    await persistForecastRecord(region, forecastTime, {
-      predictedIntensity,
-      confidence,
-      modelVersion: 'v1.0',
-      features: {
-        hour,
-        dayOfWeek,
-        historicalCount: similarPeriods.length,
+    await prisma.carbonForecast.upsert({
+      where: {
+        region_forecastTime: {
+          region,
+          forecastTime,
+        },
       },
-    })
+      update: {
+        predictedIntensity,
+        confidence,
+        features: {
+          hour,
+          dayOfWeek,
+          historicalCount: similarPeriods.length,
+        },
+      },
+      create: {
+        region,
+        forecastTime,
+        predictedIntensity,
+        confidence,
+        modelVersion: 'v1.0',
+        features: {
+          hour,
+          dayOfWeek,
+          historicalCount: similarPeriods.length,
+        },
+      },
+    }).catch(() => {}) // Ignore duplicates
   }
 
   return forecasts
@@ -264,12 +201,6 @@ export async function findOptimalWindow(
   endTime: Date
   avgCarbonIntensity: number
   savings: number  // % vs immediate execution
-  confidenceBand: {
-    low: number
-    mid: number
-    high: number
-    empirical: boolean
-  }
 }> {
   const forecasts = await forecastCarbonIntensity(region, lookAheadHours)
 
@@ -280,7 +211,6 @@ export async function findOptimalWindow(
       endTime: addHours(now, durationHours),
       avgCarbonIntensity: 400,
       savings: 0,
-      confidenceBand: buildConfidenceBand(400, 0.25, 0.3, false),
     }
   }
 
@@ -301,14 +231,6 @@ export async function findOptimalWindow(
 
   const startTime = forecasts[bestStart].forecastTime
   const endTime = addHours(startTime, durationHours)
-  const selectedWindow = forecasts.slice(bestStart, bestStart + durationHours)
-  const lowAvg =
-    selectedWindow.reduce((sum, f) => sum + (f.confidenceBand?.low ?? f.predictedIntensity), 0) /
-    selectedWindow.length
-  const highAvg =
-    selectedWindow.reduce((sum, f) => sum + (f.confidenceBand?.high ?? f.predictedIntensity), 0) /
-    selectedWindow.length
-  const empirical = selectedWindow.every((f) => f.confidenceBand?.empirical)
 
   // Calculate savings vs immediate execution
   const immediateAvg = forecasts.slice(0, durationHours).reduce((sum, f) => sum + f.predictedIntensity, 0) / durationHours
@@ -319,12 +241,6 @@ export async function findOptimalWindow(
     endTime,
     avgCarbonIntensity: bestAvg,
     savings,
-    confidenceBand: {
-      low: Math.round(lowAvg),
-      mid: Math.round(bestAvg),
-      high: Math.round(highAvg),
-      empirical,
-    },
   }
 }
 

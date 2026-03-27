@@ -9,7 +9,6 @@ import { getRegionMapping } from '../grid-signals/region-mapping'
 import { FuelMixParser } from '../grid-signals/fuel-mix-parser'
 import { gridStatus } from '../grid-signals/gridstatus-client'
 import { EmberStructuralProfile, type EmberData, type RegionStructuralProfile } from '../ember/structural-profile'
-import { type SignalType } from '../methodology'
 
 
 export interface ProviderSignal {
@@ -35,6 +34,8 @@ export interface RoutingSignal {
   source: 'watttime' | 'electricity_maps' | 'ember' | 'gb_carbon_intensity' | 'dk_carbon' | 'fi_carbon' | 'gridstatus_fuel_mix' | 'fallback'
   isForecast: boolean
   confidence: number
+  signalMode: 'marginal' | 'average' | 'fallback'
+  accountingMethod: 'marginal' | 'flow-traced' | 'average'
   provenance: {
     sourceUsed: string
     contributingSources: string[]
@@ -45,25 +46,6 @@ export interface RoutingSignal {
     disagreementPct: number
     validationNotes?: string
   }
-}
-
-export const WATTTIME_REGION_MAP: Record<string, string> = {
-  'us-east-1': 'PJM_DC',
-  'us-east-2': 'PJM_ROANOKE',
-  'us-west-1': 'CAISO_NORTH',
-  'us-west-2': 'BPA',
-  'us-central1': 'MISO_MI',
-  'us-east4': 'PJM_DC',
-  'us-west1': 'BPA',
-  eastus: 'PJM_DC',
-  eastus2: 'PJM_DC',
-  westus2: 'BPA',
-  centralus: 'SPP_NORTH',
-  southcentralus: 'ERCOT_SOUTH',
-}
-
-export function mapRegionToWattTimeRegion(region: string): string | null {
-  return WATTTIME_REGION_MAP[region] ?? null
 }
 
 /**
@@ -102,22 +84,14 @@ export class ProviderRouter {
    * 4. Ember structural baseline — global fallback
    * 5. Static fallback — degraded state
    */
-  async getRoutingSignal(
-    region: string,
-    timestamp: Date,
-    options?: { allowedSignalTypes?: SignalType[] }
-  ): Promise<RoutingSignal> {
+  async getRoutingSignal(region: string, timestamp: Date): Promise<RoutingSignal> {
     const referenceTime = timestamp.toISOString()
     const fetchedAt = new Date().toISOString()
-    const allowedSignalTypes = options?.allowedSignalTypes
-    const allowsSignalType = (signalType: SignalType) =>
-      !allowedSignalTypes?.length || allowedSignalTypes.includes(signalType)
 
     // ── TIER 1a: WattTime MOER — primary causal US signal (locked doctrine) ──
     // WattTime provides real-time marginal emissions (MOER) for US regions.
     // This is the fast-path routing truth for US. EIA-930 is backbone/fallback.
-    const wattTimeSignal =
-      allowsSignalType('marginal_estimate') ? await this.getWattTimeSignal(region, timestamp) : null
+    const wattTimeSignal = await this.getWattTimeSignal(region, timestamp)
     if (wattTimeSignal) {
       const validation = await this.validateWithEmber(wattTimeSignal, region, timestamp, [wattTimeSignal])
 
@@ -126,6 +100,8 @@ export class ProviderRouter {
         source: 'watttime',
         isForecast: wattTimeSignal.isForecast,
         confidence: validation.adjustedConfidence,
+        signalMode: 'marginal',
+        accountingMethod: 'marginal',
         provenance: {
           sourceUsed: wattTimeSignal.metadata?.signalType === 'forecast_moer' ? 'WATTTIME_MOER_FORECAST' : 'WATTTIME_MOER',
           contributingSources: ['watttime'],
@@ -140,8 +116,7 @@ export class ProviderRouter {
     }
 
     // ── TIER 1b: GB regions → GB Carbon Intensity API (free, no auth, 96h forecast) ──
-    const gbSignal =
-      allowsSignalType('average_operational') ? await this.getGBCarbonIntensitySignal(region) : null
+    const gbSignal = await this.getGBCarbonIntensitySignal(region)
     if (gbSignal) {
       const validation = await this.validateWithEmber(gbSignal, region, timestamp, [gbSignal])
 
@@ -150,6 +125,8 @@ export class ProviderRouter {
         source: 'gb_carbon_intensity',
         isForecast: gbSignal.isForecast,
         confidence: validation.adjustedConfidence,
+        signalMode: 'average',
+        accountingMethod: 'average',
         provenance: {
           sourceUsed: 'GB_CARBON_INTENSITY_API',
           contributingSources: ['gb_carbon_intensity'],
@@ -164,8 +141,7 @@ export class ProviderRouter {
     }
 
     // ── TIER 1c: Denmark regions → Energi Data Service (free, CO2 forecast + realtime) ──
-    const dkSignal =
-      allowsSignalType('average_operational') ? await this.getDenmarkSignal(region) : null
+    const dkSignal = await this.getDenmarkSignal(region)
     if (dkSignal) {
       const validation = await this.validateWithEmber(dkSignal, region, timestamp, [dkSignal])
 
@@ -174,6 +150,8 @@ export class ProviderRouter {
         source: 'dk_carbon' as any,
         isForecast: dkSignal.isForecast,
         confidence: validation.adjustedConfidence,
+        signalMode: 'average',
+        accountingMethod: 'average',
         provenance: {
           sourceUsed: 'DK_ENERGI_DATA_SERVICE',
           contributingSources: ['dk_carbon'],
@@ -188,8 +166,7 @@ export class ProviderRouter {
     }
 
     // ── TIER 1d: Finland → Fingrid (free, 3-min realtime, API key) ──
-    const fiSignal =
-      allowsSignalType('consumed_emissions') ? await this.getFinlandSignal(region) : null
+    const fiSignal = await this.getFinlandSignal(region)
     if (fiSignal) {
       const validation = await this.validateWithEmber(fiSignal, region, timestamp, [fiSignal])
 
@@ -198,6 +175,8 @@ export class ProviderRouter {
         source: 'fi_carbon' as any,
         isForecast: fiSignal.isForecast,
         confidence: validation.adjustedConfidence,
+        signalMode: 'average',
+        accountingMethod: 'average',
         provenance: {
           sourceUsed: 'FI_FINGRID',
           contributingSources: ['fi_carbon'],
@@ -214,8 +193,7 @@ export class ProviderRouter {
     // ── TIER 2: EIA-930 fuel mix — US backbone / predictive telemetry ──
     // Used when WattTime is unavailable. Provides average intensity from
     // real fuel mix data using IPCC emission factors.
-    const fuelMixCI =
-      allowsSignalType('average_operational') ? await this.getGridStatusFuelMixCI(region) : null
+    const fuelMixCI = await this.getGridStatusFuelMixCI(region)
     if (fuelMixCI !== null) {
       const primarySignal: ProviderSignal = {
         carbonIntensity: fuelMixCI,
@@ -234,6 +212,8 @@ export class ProviderRouter {
         source: 'gridstatus_fuel_mix',
         isForecast: false,
         confidence: validation.adjustedConfidence,
+        signalMode: 'average',
+        accountingMethod: 'average',
         provenance: {
           sourceUsed: 'EIA930_FUEL_MIX_IPCC',
           contributingSources: ['eia930_fuel_mix'],
@@ -248,14 +228,15 @@ export class ProviderRouter {
     }
 
     // ── TIER 3: Ember baseline (global, free — structural context only) ──
-    const emberProfile =
-      allowsSignalType('average_operational') ? await this.getStructuralProfile(region) : null
+    const emberProfile = await this.getStructuralProfile(region)
     if (emberProfile?.structuralCarbonBaseline) {
       return {
         carbonIntensity: emberProfile.structuralCarbonBaseline,
         source: 'ember',
         isForecast: false,
         confidence: 0.25,
+        signalMode: 'average',
+        accountingMethod: 'average',
         provenance: {
           sourceUsed: 'EMBER_STRUCTURAL_BASELINE',
           contributingSources: ['ember'],
@@ -275,6 +256,8 @@ export class ProviderRouter {
       source: 'fallback',
       isForecast: false,
       confidence: 0.05,
+      signalMode: 'fallback',
+      accountingMethod: 'average',
       provenance: {
         sourceUsed: 'STATIC_FALLBACK',
         contributingSources: [],
@@ -311,7 +294,7 @@ export class ProviderRouter {
     try {
       // Map cloud region to WattTime v3 sub-regional name
       // ONLY try US regions — WattTime free plan covers US only (CAISO_NORTH full access)
-      const wattTimeRegion = mapRegionToWattTimeRegion(region)
+      const wattTimeRegion = ProviderRouter.WATTTIME_REGION_MAP[region]
       if (!wattTimeRegion) return null // No mapping = not a US region, skip entirely
 
       // Try current MOER first
@@ -805,6 +788,8 @@ export class ProviderRouter {
         source: cached.providers[0] as any,
         isForecast: false,
         confidence: 0.8,
+        signalMode: cached.providers[0]?.includes('watttime') ? 'marginal' : 'average',
+        accountingMethod: cached.providers[0]?.includes('watttime') ? 'marginal' : 'average',
         provenance: {
           sourceUsed: `CACHED_${cached.providers[0]}`,
           contributingSources: cached.providers,

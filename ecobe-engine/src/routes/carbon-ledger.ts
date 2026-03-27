@@ -15,32 +15,14 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/db'
 import {
-  evaluateOrgCarbonBudgets,
   getOrgCarbonSavings,
   generateCarbonReport,
-  listCarbonBudgetPolicies,
-  upsertCarbonBudgetPolicy,
   verifyLedgerEntry,
   getProviderFreshness,
   getCapacityOverview,
 } from '../lib/routing'
 
 const router = Router()
-
-const budgetPolicySchema = z.object({
-  id: z.string().optional(),
-  orgId: z.string(),
-  name: z.string().min(2).max(120),
-  workloadType: z.string().min(1).max(120).optional().nullable(),
-  budgetPeriod: z.enum(['MONTHLY', 'QUARTERLY', 'YEARLY']),
-  maxCarbonKgCo2e: z.number().positive(),
-  targetReductionPct: z.number().min(0).max(100).optional().nullable(),
-  targetLowerHalfSharePct: z.number().min(0).max(100).optional().nullable(),
-  hardEnforcement: z.boolean().optional(),
-  policyMode: z.string().min(1).max(80).optional(),
-  status: z.enum(['ACTIVE', 'PAUSED']).optional(),
-  metadata: z.record(z.unknown()).optional(),
-})
 
 /**
  * GET /api/v1/carbon-ledger/savings/:orgId
@@ -74,15 +56,9 @@ router.get('/report/:orgId', async (req, res) => {
     const startDate = req.query.start ? new Date(req.query.start as string) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
     const endDate = req.query.end ? new Date(req.query.end as string) : new Date()
 
-    const [report, budgetPolicies] = await Promise.all([
-      generateCarbonReport(orgId, startDate, endDate),
-      evaluateOrgCarbonBudgets(orgId),
-    ])
+    const report = await generateCarbonReport(orgId, startDate, endDate)
 
-    return res.json({
-      ...report,
-      budgetPolicies,
-    })
+    return res.json(report)
   } catch (error: any) {
     console.error('Carbon report error:', error)
     res.status(500).json({ error: 'Failed to generate carbon report' })
@@ -145,23 +121,6 @@ router.get('/job/:decisionFrameId', async (req, res) => {
         syntheticFlag: entry.syntheticFlag,
         confidenceScore: entry.confidenceScore,
         qualityTier: entry.qualityTier,
-        routingMode: entry.routingMode,
-        policyMode: entry.policyMode,
-        signalTypeUsed: entry.signalTypeUsed,
-        confidenceLabel: entry.confidenceLabel,
-        referenceTime: entry.referenceTime?.toISOString() ?? null,
-        dataFreshnessSeconds: entry.dataFreshnessSeconds,
-        confidenceBand: {
-          low: entry.confidenceBandLow,
-          mid: entry.confidenceBandMid,
-          high: entry.confidenceBandHigh,
-        },
-      },
-
-      governance: {
-        lowerHalfBenchmarkGPerKwh: entry.lowerHalfBenchmarkGPerKwh,
-        lowerHalfQualified: entry.lowerHalfQualified,
-        metadata: entry.metadata,
       },
 
       gridIntelligence: {
@@ -291,65 +250,6 @@ router.get('/capacity-overview', async (req, res) => {
   } catch (error: any) {
     console.error('Capacity overview error:', error)
     res.status(500).json({ error: 'Failed to fetch capacity overview' })
-  }
-})
-
-router.get('/policies/:orgId', async (req, res) => {
-  try {
-    const { orgId } = req.params
-    const policies = await listCarbonBudgetPolicies(orgId)
-    return res.json({ orgId, policies })
-  } catch (error: any) {
-    console.error('Carbon policies list error:', error)
-    res.status(500).json({ error: 'Failed to list carbon policies' })
-  }
-})
-
-router.get('/policies/:orgId/evaluate', async (req, res) => {
-  try {
-    const { orgId } = req.params
-    const workloadType =
-      typeof req.query.workloadType === 'string' && req.query.workloadType.trim().length > 0
-        ? req.query.workloadType.trim()
-        : null
-    const evaluations = await evaluateOrgCarbonBudgets(orgId, { workloadType })
-
-    return res.json({
-      orgId,
-      workloadType,
-      evaluations,
-    })
-  } catch (error: any) {
-    console.error('Carbon policy evaluation error:', error)
-    res.status(500).json({ error: 'Failed to evaluate carbon policies' })
-  }
-})
-
-router.post('/policies', async (req, res) => {
-  try {
-    const payload = budgetPolicySchema.parse(req.body)
-    const policy = await upsertCarbonBudgetPolicy({
-      id: payload.id,
-      orgId: payload.orgId,
-      name: payload.name,
-      workloadType: payload.workloadType ?? null,
-      budgetPeriod: payload.budgetPeriod,
-      maxCarbonKgCo2e: payload.maxCarbonKgCo2e,
-      targetReductionPct: payload.targetReductionPct ?? null,
-      targetLowerHalfSharePct: payload.targetLowerHalfSharePct ?? null,
-      hardEnforcement: payload.hardEnforcement ?? false,
-      policyMode: payload.policyMode ?? 'sec_disclosure_strict',
-      status: payload.status ?? 'ACTIVE',
-      metadata: payload.metadata ?? {},
-    })
-
-    return res.status(payload.id ? 200 : 201).json({ policy })
-  } catch (error: any) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Invalid request', details: error.errors })
-    }
-    console.error('Carbon policy upsert error:', error)
-    res.status(500).json({ error: 'Failed to save carbon policy' })
   }
 })
 

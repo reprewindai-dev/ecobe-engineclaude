@@ -1,10 +1,11 @@
 import express from 'express'
-import cors, { type CorsOptions } from 'cors'
+import cors from 'cors'
 
 import { env } from './config/env'
 import { prisma } from './lib/db'
 import { redis } from './lib/redis'
 import energyRoutes from './routes/energy'
+import dekesRoutes from './routes/dekes'
 import routingRoutes from './routes/routing'
 import creditsRoutes from './routes/credits'
 import decisionsRoutes from './routes/decisions'
@@ -15,7 +16,9 @@ import carbonRoutes from './routes/carbon-command'
 import organizationsRoutes from './routes/organizations'
 import intelligenceRoutes from './routes/intelligence'
 import gridIntelligenceRoutes from './routes/intelligence/grid'
+import integrationsRoutes from './routes/integrations'
 import systemRoutes from './routes/system'
+import dekesHandoffRoutes from './routes/dekes-handoff'
 import carbonLedgerRoutes from './routes/carbon-ledger'
 import routeSimpleRoutes from './routes/route-simple'
 import routeTestRoutes from './routes/route-test'
@@ -24,50 +27,21 @@ import healthRoutes from './routes/health'
 import metricsRoutes from './routes/metrics'
 import regionMappingRoutes from './routes/region-mapping'
 import patternsRoutes from './routes/patterns'
+import dksRoutes from './routes/dks'
 import testPostRoutes from './routes/test-post'
 import routeDebugRoutes from './routes/route-debug'
 import ciRoutes from './routes/ci'
-import methodologyRoutes from './routes/methodology'
-import disclosureRoutes from './routes/disclosure'
-import automationRoutes from './routes/automation'
+import waterRoutes from './routes/water'
+import eventsRoutes from './routes/events'
+import adaptersRoutes from './routes/adapters'
+import { recordTelemetryMetric, telemetryMetricNames } from './lib/observability/telemetry'
+import { validateWaterArtifacts } from './lib/water/bundle'
 
 function rawBodySaver(_req: express.Request, _res: express.Response, buf: Buffer) {
   if (buf?.length) {
     const rawReq = _req as { rawBody?: string }
     rawReq.rawBody = buf.toString('utf8')
   }
-}
-
-function buildCorsOptions() {
-  const configuredOrigins = env.CORS_ALLOWED_ORIGINS
-  const defaultOrigins =
-    env.NODE_ENV === 'production'
-      ? [
-          'https://co2-router-dashboard-production.up.railway.app',
-          'https://dekes-saas-production.up.railway.app',
-        ]
-      : ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000']
-
-  const allowedOrigins = new Set([...defaultOrigins, ...configuredOrigins])
-
-  return {
-    origin(origin: string | undefined, callback: (error: Error | null, allow?: boolean) => void) {
-      if (!origin) {
-        callback(null, true)
-        return
-      }
-
-      if (allowedOrigins.has(origin)) {
-        callback(null, true)
-        return
-      }
-
-      callback(new Error('Origin not allowed by CORS'))
-    },
-    credentials: false,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Ecobe-Internal-Key', 'X-Api-Key', 'X-Request-Id'],
-  } satisfies CorsOptions
 }
 
 function attachHealthRoutes(app: express.Express) {
@@ -82,7 +56,8 @@ function attachHealthRoutes(app: express.Express) {
         redisOk = false
       }
 
-      const ok = redisOk
+      const waterArtifacts = validateWaterArtifacts()
+      const ok = redisOk && waterArtifacts.healthy
 
       res.status(ok ? 200 : 503).json({
         status: ok ? 'ok' : 'degraded',
@@ -102,7 +77,9 @@ function attachHealthRoutes(app: express.Express) {
         checks: {
           database: true,
           redis: redisOk,
+          waterArtifacts: waterArtifacts.checks,
         },
+        waterArtifactErrors: waterArtifacts.errors,
       })
     } catch (error) {
       res.status(503).json({
@@ -206,19 +183,10 @@ function attachUiRoute(app: express.Express) {
 
     <script>
       const base = window.location.origin
-      const byId = (id) => document.getElementById(id)
-      const baseEl = byId('base')
-      if (baseEl) baseEl.textContent = base
+      document.getElementById('base').textContent = base
 
-      const out = byId('out')
-      const bindClick = (id, handler) => {
-        const el = byId(id)
-        if (el) el.onclick = handler
-      }
-      function show(v) {
-        if (!out) return
-        out.textContent = typeof v === 'string' ? v : JSON.stringify(v, null, 2)
-      }
+      const out = document.getElementById('out')
+      function show(v) { out.textContent = typeof v === 'string' ? v : JSON.stringify(v, null, 2) }
 
       async function get(path) {
         const r = await fetch(path)
@@ -237,7 +205,6 @@ function attachUiRoute(app: express.Express) {
       }
 
       async function run(fn) {
-        if (!out) return
         out.textContent = 'Loading…'
         try {
           const res = await fn()
@@ -247,13 +214,17 @@ function attachUiRoute(app: express.Express) {
         }
       }
 
-      bindClick('health', () => run(() => get('/api/v1/health')))
-      bindClick('metrics', () => run(() => get('/api/v1/dashboard/metrics')))
-      bindClick('regions', () => run(() => get('/api/v1/dashboard/regions')))
-      bindClick('decisions', () => run(() => get('/api/v1/dashboard/decisions')))
-      bindClick('mapping', () => run(() => get('/api/v1/dashboard/region-mapping')))
+      document.getElementById('health').onclick = () => run(() => get('/api/v1/health'))
+      document.getElementById('metrics').onclick = () => run(() => get('/api/v1/dashboard/metrics'))
+      document.getElementById('regions').onclick = () => run(() => get('/api/v1/dashboard/regions'))
+      document.getElementById('decisions').onclick = () => run(() => get('/api/v1/dashboard/decisions'))
+      document.getElementById('mapping').onclick = () => run(() => get('/api/v1/dashboard/region-mapping'))
 
-      bindClick('seedDecision', () => run(async () => {
+      document.getElementById('dekesHealth').onclick = () => run(() => get('/api/v1/dekes/health'))
+      document.getElementById('dekesPing').onclick = () => run(() => get('/api/v1/dekes/health?ping=true'))
+      document.getElementById('dekesAnalytics').onclick = () => run(() => get('/api/v1/dekes/analytics'))
+
+      document.getElementById('seedDecision').onclick = () => run(async () => {
         const now = new Date().toISOString()
         const body = {
           ts: now,
@@ -273,13 +244,50 @@ function attachUiRoute(app: express.Express) {
           meta: { source: 'ui' }
         }
         return await post('/api/v1/decisions', body)
-      }))
+      })
 
-      bindClick('whatif', () => run(async () => {
-        const zonesRaw = byId('zones')?.value || ''
+      document.getElementById('whatif').onclick = () => run(async () => {
+        const zonesRaw = document.getElementById('zones').value
         const zones = zonesRaw.split(',').map(s => s.trim()).filter(Boolean)
         return await post('/api/v1/dashboard/what-if/intensities', { zones })
-      }))
+      })
+
+      document.getElementById('dekesOptimize').onclick = () => run(async () => {
+        const query = String(document.getElementById('dekesQuery').value || '')
+        const estimatedResults = parseInt(String(document.getElementById('dekesEstimated').value || '1000'), 10)
+        const carbonBudget = parseFloat(String(document.getElementById('dekesBudget').value || '200'))
+        const regionsRaw = String(document.getElementById('dekesRegions').value || '')
+        const regions = regionsRaw.split(',').map(s => s.trim()).filter(Boolean)
+
+        const body = {
+          query: { id: 'ui-' + Date.now(), query, estimatedResults },
+          carbonBudget,
+          regions,
+        }
+
+        return await post('/api/v1/dekes/optimize', body)
+      })
+
+      document.getElementById('dekesSchedule').onclick = () => run(async () => {
+        const lookAheadHours = parseFloat(String(document.getElementById('dekesLookAhead').value || '24'))
+        const regionsRaw = String(document.getElementById('dekesScheduleRegions').value || '')
+        const regions = regionsRaw.split(',').map(s => s.trim()).filter(Boolean)
+        const body = {
+          queries: [
+            { id: 'demo-query-1', query: 'Find carbon-efficient plans', estimatedResults: 1000 },
+            { id: 'demo-query-2', query: 'List regions with low CI', estimatedResults: 500 },
+          ],
+          regions,
+          lookAheadHours,
+        }
+        return await post('/api/v1/dekes/schedule', body)
+      })
+
+      document.getElementById('dekesReport').onclick = () => run(async () => {
+        const queryId = String(document.getElementById('dekesReportId').value || '')
+        const actualCO2 = parseFloat(String(document.getElementById('dekesReportCO2').value || '0'))
+        return await post('/api/v1/dekes/report', { queryId, actualCO2 })
+      })
     </script>
   </body>
 </html>`)
@@ -288,6 +296,7 @@ function attachUiRoute(app: express.Express) {
 
 function attachApiRoutes(app: express.Express) {
   app.use('/api/v1/energy', energyRoutes)
+  app.use('/api/v1/dekes', dekesRoutes)
   app.use('/api/v1/route', routingRoutes)
   app.use('/api/v1/credits', creditsRoutes)
   app.use('/api/v1/decisions', decisionsRoutes)
@@ -298,24 +307,26 @@ function attachApiRoutes(app: express.Express) {
   app.use('/api/v1/organizations', organizationsRoutes)
   app.use('/api/v1/intelligence', intelligenceRoutes)
   app.use('/api/v1/intelligence/grid', gridIntelligenceRoutes)
+  app.use('/api/v1/integrations', integrationsRoutes)
   app.use('/api/v1/system', systemRoutes)
+  // DEKES SaaS integration endpoints (prospects, tenants, demos, handoffs, route, workloads)
+  app.use('/api/v1', dekesHandoffRoutes)
   // Carbon Ledger — audit-grade accounting + reporting
   app.use('/api/v1/carbon-ledger', carbonLedgerRoutes)
   // CI/CD green routing
   app.use('/api/v1/ci', ciRoutes)
-  // Internal automation only. External products must integrate through explicit
-  // service contracts instead of engine-owned DEKES HTTP surfaces.
-  app.use('/api/v1', automationRoutes)
+  app.use('/api/v1/events', eventsRoutes)
+  app.use('/api/v1/adapters', adaptersRoutes)
+  app.use('/api/v1/water', waterRoutes)
   // Additional routes from remote merge
   app.use('/api/v1/route-simple', routeSimpleRoutes)
   app.use('/api/v1/route-test', routeTestRoutes)
   app.use('/api/v1/simple-test', simpleTestRoutes)
   app.use('/api/v1/health-ext', healthRoutes)
   app.use('/api/v1/metrics', metricsRoutes)
-  app.use('/api/v1/methodology', methodologyRoutes)
-  app.use('/api/v1/disclosure', disclosureRoutes)
   app.use('/api/v1/region-mapping', regionMappingRoutes)
   app.use('/api/v1/patterns', patternsRoutes)
+  app.use('/api/v1/dks', dksRoutes)
   app.use('/api/v1/test-post', testPostRoutes)
   app.use('/api/v1/route-debug', routeDebugRoutes)
 }
@@ -336,9 +347,20 @@ export function createApp() {
   const app = express()
 
   app.set('trust proxy', 1)
-  app.use(cors(buildCorsOptions()))
+  app.use(cors())
   app.use(express.json({ limit: '1mb', verify: rawBodySaver }))
   app.use(express.urlencoded({ extended: true, limit: '1mb', verify: rawBodySaver }))
+  app.use((req, res, next) => {
+    const started = Date.now()
+    res.on('finish', () => {
+      recordTelemetryMetric(telemetryMetricNames.httpServerDurationMs, 'histogram', Date.now() - started, {
+        method: req.method,
+        route: req.path,
+        status_code: res.statusCode,
+      })
+    })
+    next()
+  })
 
   attachHealthRoutes(app)
   attachUiRoute(app)

@@ -355,17 +355,6 @@ enum OrgPlanTier {
   ENTERPRISE
 }
 
-enum CarbonBudgetPeriod {
-  MONTHLY
-  QUARTERLY
-  YEARLY
-}
-
-enum CarbonBudgetStatus {
-  ACTIVE
-  PAUSED
-}
-
 model Organization {
   id        String   @id @default(cuid())
   name      String
@@ -376,6 +365,8 @@ model Organization {
   status    OrganizationStatus @default(ACTIVE)
   monthlyCommandLimit Int      @default(1000)
   enforceCreditCoverage Boolean @default(false)
+  featureFlags Json    @default("{}")
+  proofRetentionDays Int @default(30)
   metadata  Json     @default("{}")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -383,8 +374,6 @@ model Organization {
   commands CarbonCommand[]
   outcomes CarbonCommandOutcome[]
   usageCounters OrgUsageCounter[]
-  carbonBudgetPolicies CarbonBudgetPolicy[]
-  disclosureExportBatches DisclosureExportBatch[]
 }
 
 model OrgUsageCounter {
@@ -769,6 +758,7 @@ model IntegrationMetric {
 model IntegrationEvent {
   id         String   @id @default(cuid())
   source     String
+  eventType  String?
   success    Boolean
   durationMs Float?
   statusCode Int?
@@ -778,6 +768,60 @@ model IntegrationEvent {
 
   @@index([source, createdAt])
   @@index([source, success, createdAt])
+}
+
+enum IntegrationWebhookSinkStatus {
+  ACTIVE
+  PAUSED
+  DISABLED
+}
+
+model IntegrationWebhookSink {
+  id               String                       @id @default(cuid())
+  name             String
+  targetUrl        String
+  authToken        String?
+  signingSecret    String?
+  status           IntegrationWebhookSinkStatus @default(ACTIVE)
+  metadata         Json                         @default("{}")
+  lastSuccessAt    DateTime?
+  lastFailureAt    DateTime?
+  lastResponseCode Int?
+  lastError        String?
+  createdAt        DateTime                     @default(now())
+  updatedAt        DateTime                     @updatedAt
+
+  outbox DecisionEventOutbox[]
+
+  @@index([status, createdAt])
+}
+
+enum DecisionEventOutboxStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+  DEAD_LETTER
+}
+
+model DecisionEventOutbox {
+  id               String                    @id @default(cuid())
+  eventType        String
+  eventKey         String                    @unique
+  sinkId           String?
+  sink             IntegrationWebhookSink?   @relation(fields: [sinkId], references: [id], onDelete: SetNull)
+  payload          Json
+  status           DecisionEventOutboxStatus @default(PENDING)
+  attemptCount     Int                       @default(0)
+  nextAttemptAt    DateTime
+  lastResponseCode Int?
+  lastError        String?
+  processedAt      DateTime?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  @@index([status, nextAttemptAt, createdAt])
+  @@index([sinkId, createdAt])
 }
 
 // ============================================================================
@@ -1007,52 +1051,6 @@ model DekesHandoffEvent {
 // CARBON LEDGER — AUDIT-GRADE ACCOUNTING
 // ============================================================================
 
-model CarbonBudgetPolicy {
-  id                      String             @id @default(cuid())
-  orgId                   String
-  organization            Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  name                    String
-  workloadType            String?
-  budgetPeriod            CarbonBudgetPeriod @default(MONTHLY)
-  maxCarbonKgCo2e         Float
-  targetReductionPct      Float?
-  targetLowerHalfSharePct Float?
-  hardEnforcement         Boolean            @default(false)
-  policyMode              String             @default("sec_disclosure_strict")
-  status                  CarbonBudgetStatus @default(ACTIVE)
-  metadata                Json               @default("{}")
-  createdAt               DateTime           @default(now())
-  updatedAt               DateTime           @updatedAt
-
-  @@unique([orgId, name])
-  @@index([orgId, status])
-  @@index([orgId, workloadType, status])
-}
-
-model DisclosureExportBatch {
-  id                 String        @id @default(cuid())
-  batchId            String        @unique
-  orgId              String?
-  organization       Organization? @relation(fields: [orgId], references: [id], onDelete: SetNull)
-  scope              String
-  format             String
-  routingMode        String
-  policyMode         String?
-  recordCount        Int
-  payloadDigest      String
-  digestAlgorithm    String        @default("sha256")
-  signature          String?
-  signatureAlgorithm String?
-  fromTs             DateTime
-  toTs               DateTime
-  generatedAt        DateTime
-  metadata           Json          @default("{}")
-  createdAt          DateTime      @default(now())
-
-  @@index([orgId, createdAt])
-  @@index([scope, createdAt])
-}
-
 model CarbonLedgerEntry {
   id                    String   @id @default(cuid())
   orgId                 String
@@ -1097,18 +1095,6 @@ model CarbonLedgerEntry {
   forecastStability     String?  // stable | medium | unstable
   disagreementFlag      Boolean  @default(false)
   disagreementPct       Float?
-  routingMode           String   @default("optimize")
-  policyMode            String   @default("default")
-  signalTypeUsed        String   @default("unknown")
-  confidenceLabel       String?
-  referenceTime         DateTime?
-  dataFreshnessSeconds  Int?
-  confidenceBandLow     Float?
-  confidenceBandMid     Float?
-  confidenceBandHigh    Float?
-  lowerHalfBenchmarkGPerKwh Float?
-  lowerHalfQualified    Boolean?
-  metadata              Json     @default("{}")
 
   // Grid intelligence at decision time
   balancingAuthority    String?
@@ -1131,8 +1117,6 @@ model CarbonLedgerEntry {
   @@index([commandId])
   @@index([chosenRegion, createdAt])
   @@index([jobClass, createdAt])
-  @@index([orgId, workloadType, createdAt])
-  @@index([routingMode, policyMode, createdAt])
 }
 
 // ============================================================================
@@ -1197,6 +1181,72 @@ model ProviderSnapshot {
   @@unique([provider, zone, signalType, observedAt])
 }
 
+model WaterProviderSnapshot {
+  id             String   @id @default(cuid())
+  provider       String
+  authorityRole  String
+  region         String
+  scenario       String   @default("current")
+  authorityMode  String
+  confidence     Float?
+  evidenceRefs   Json     @default("[]")
+  observedAt     DateTime
+  metadata       Json     @default("{}")
+  createdAt      DateTime @default(now())
+
+  @@index([provider, observedAt])
+  @@index([region, scenario, observedAt])
+}
+
+model FacilityWaterTelemetry {
+  id                 String   @id @default(cuid())
+  facilityId         String
+  region             String
+  scenario           String   @default("current")
+  waterIntensityLPerKwh Float?
+  waterStressIndex   Float?
+  scarcityImpact     Float?
+  confidence         Float?
+  telemetryRef       String
+  evidenceRefs       Json     @default("[]")
+  createdAt          DateTime @default(now())
+
+  @@index([facilityId, createdAt])
+  @@index([region, scenario, createdAt])
+}
+
+model WaterScenarioRun {
+  id             String   @id @default(cuid())
+  decisionFrameId String
+  scenario       String
+  requestPayload Json
+  resultPayload  Json
+  createdAt      DateTime @default(now())
+
+  @@index([decisionFrameId, createdAt])
+  @@index([scenario, createdAt])
+}
+
+model WaterPolicyEvidence {
+  id                  String   @id @default(cuid())
+  decisionFrameId     String
+  proofHash           String
+  authorityMode       String
+  scenario            String   @default("current")
+  facilityId          String?
+  supplierRefs        Json     @default("[]")
+  evidenceRefs        Json     @default("[]")
+  providerSnapshotRefs Json    @default("[]")
+  externalPolicyRefs  Json     @default("[]")
+  bundleHash          String?
+  manifestHash        String?
+  metadata            Json     @default("{}")
+  createdAt           DateTime @default(now())
+
+  @@index([decisionFrameId, createdAt])
+  @@index([proofHash])
+}
+
 // ============================================================================
 // CAPACITY BUCKETS — FLEET-AWARE RESOURCE MANAGEMENT
 // ============================================================================
@@ -1247,6 +1297,27 @@ model CIDecision {
   
   // Recommendation
   recommendation        String   // Routing recommendation text
+
+  // Deterministic policy outcome
+  decisionAction        String?  // run_now | reroute | delay | throttle | deny
+  decisionMode          String?  // runtime_authorization | scenario_planning
+  reasonCode            String?
+  signalConfidence      Float?
+  fallbackUsed          Boolean  @default(false)
+
+  // Water-proof metrics
+  waterImpactLiters     Float?
+  waterBaselineLiters   Float?
+  waterScarcityImpact   Float?
+  waterStressIndex      Float?
+  waterConfidence       Float?
+  waterAuthorityMode    String?
+  waterScenario         String?
+  facilityId            String?
+  proofHash             String?
+  waterEvidenceRefs     Json     @default("[]")
+  policyTrace           Json     @default("{}")
+  datasetVersions       Json     @default("{}")
   
   // Metadata
   metadata              Json     @default("{}")

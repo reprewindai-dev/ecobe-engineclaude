@@ -13,7 +13,9 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/db'
 import { getIntegrationMetricsSummary, computeIntegrationSuccessRate } from '../lib/integration-metrics'
 import { getForecastRefreshSummary, getLastForecastRefreshState } from '../lib/forecast-refresh'
+import { getTelemetrySnapshot } from '../lib/observability/telemetry'
 import { getProviderFreshness, getCapacityOverview } from '../lib/routing'
+import { summarizeWaterProviders } from '../lib/water/bundle'
 
 const router = Router()
 
@@ -456,6 +458,7 @@ router.get('/metrics', async (req, res) => {
       dataFreshnessMaxSeconds,
       providerSignals: providerSignalsMetric,
       forecastRefresh,
+      observability: getTelemetrySnapshot(),
     })
   } catch (error: any) {
     if (error instanceof z.ZodError) {
@@ -1445,7 +1448,7 @@ router.get('/carbon-ledger-decisions', async (req, res) => {
  */
 router.get('/provider-trust', async (_req, res) => {
   try {
-    const [freshness, recentSnapshots] = await Promise.all([
+    const [freshness, recentSnapshots, waterProviderSnapshots] = await Promise.all([
       getProviderFreshness(),
       prisma.providerSnapshot.findMany({
         orderBy: { observedAt: 'desc' },
@@ -1458,8 +1461,13 @@ router.get('/provider-trust', async (_req, res) => {
           confidence: true,
           freshnessSec: true,
           observedAt: true,
+          metadata: true,
         },
       }),
+      prisma.waterProviderSnapshot.findMany({
+        orderBy: { observedAt: 'desc' },
+        take: 100,
+      }).catch(() => []),
     ])
 
     // Group snapshots by provider
@@ -1470,16 +1478,31 @@ router.get('/provider-trust', async (_req, res) => {
         zone: snap.zone,
         signalType: snap.signalType,
         value: snap.signalValue,
-        confidence: snap.confidence,
-        freshnessSec: snap.freshnessSec,
-        observedAt: snap.observedAt?.toISOString() ?? null,
-      })
+          confidence: snap.confidence,
+          freshnessSec: snap.freshnessSec,
+          observedAt: snap.observedAt?.toISOString() ?? null,
+          metadata: snap.metadata ?? null,
+        })
       providerMap.set(snap.provider, existing)
     }
 
     return res.json({
       freshness,
       providers: Object.fromEntries(providerMap),
+      waterProviders:
+        waterProviderSnapshots.length > 0
+          ? waterProviderSnapshots.map((snapshot: any) => ({
+              provider: snapshot.provider,
+              authorityRole: snapshot.authorityRole,
+              region: snapshot.region,
+              scenario: snapshot.scenario,
+              authorityMode: snapshot.authorityMode,
+              confidence: snapshot.confidence,
+              observedAt: snapshot.observedAt?.toISOString?.() ?? snapshot.observedAt ?? null,
+              evidenceRefs: snapshot.evidenceRefs ?? [],
+              metadata: snapshot.metadata ?? {},
+            }))
+          : summarizeWaterProviders(),
     })
   } catch (error: any) {
     console.error('Provider trust error:', error)

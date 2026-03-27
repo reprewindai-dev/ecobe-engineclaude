@@ -21,22 +21,6 @@ export interface LedgerEntryInput {
   scoringResult: ScoringResult
   energyEstimateKwh: number
   baselineRegion: string
-  sourceUsed?: string | null
-  validationSource?: string | null
-  fallbackUsed?: boolean
-  estimatedFlag?: boolean
-  syntheticFlag?: boolean
-  confidenceLabel?: string | null
-  routingMode?: string
-  policyMode?: string
-  signalTypeUsed?: string
-  referenceTime?: Date | null
-  dataFreshnessSeconds?: number | null
-  confidenceBand?: { low: number; mid: number; high: number } | null
-  forecastStability?: string | null
-  disagreementFlag?: boolean
-  disagreementPct?: number | null
-  metadata?: Record<string, unknown>
 }
 
 /**
@@ -44,32 +28,7 @@ export interface LedgerEntryInput {
  * Called immediately after candidate selection, before dispatch.
  */
 export async function recordLedgerEntry(input: LedgerEntryInput): Promise<string> {
-  const {
-    orgId,
-    commandId,
-    decisionFrameId,
-    classification,
-    workloadType,
-    scoringResult,
-    energyEstimateKwh,
-    baselineRegion,
-    sourceUsed,
-    validationSource,
-    fallbackUsed,
-    estimatedFlag,
-    syntheticFlag,
-    confidenceLabel,
-    routingMode,
-    policyMode,
-    signalTypeUsed,
-    referenceTime,
-    dataFreshnessSeconds,
-    confidenceBand,
-    forecastStability,
-    disagreementFlag,
-    disagreementPct,
-    metadata,
-  } = input
+  const { orgId, commandId, decisionFrameId, classification, workloadType, scoringResult, energyEstimateKwh, baselineRegion } = input
 
   const selected = scoringResult.selected
   if (!selected) {
@@ -83,11 +42,6 @@ export async function recordLedgerEntry(input: LedgerEntryInput): Promise<string
   const baselineCarbonG = baselineCarbonGPerKwh * energyEstimateKwh
   const chosenCarbonG = chosenCarbonGPerKwh * energyEstimateKwh
   const carbonSavedG = Math.max(0, baselineCarbonG - chosenCarbonG)
-  const lowerHalfBenchmark = getLowerHalfBenchmark(scoringResult)
-  const lowerHalfQualified =
-    lowerHalfBenchmark != null && selected.carbonEstimateGPerKwh != null
-      ? selected.carbonEstimateGPerKwh <= lowerHalfBenchmark
-      : null
 
   const entry = await prisma.carbonLedgerEntry.create({
     data: {
@@ -111,29 +65,17 @@ export async function recordLedgerEntry(input: LedgerEntryInput): Promise<string
 
       accountingMethod: 'flow-traced',
 
-      sourceUsed: sourceUsed ?? null,
-      validationSource: validationSource ?? null,
-      fallbackUsed: fallbackUsed ?? selected.syntheticFlag,
-      estimatedFlag: estimatedFlag ?? selected.estimatedFlag,
-      syntheticFlag: syntheticFlag ?? selected.syntheticFlag,
+      sourceUsed: null, // Filled from provider signal
+      validationSource: null,
+      fallbackUsed: selected.syntheticFlag,
+      estimatedFlag: selected.estimatedFlag,
+      syntheticFlag: selected.syntheticFlag,
 
       confidenceScore: selected.confidenceScore,
       qualityTier: getQualityTier(selected.confidenceScore ?? 0),
-      forecastStability: forecastStability ?? null,
-      disagreementFlag: disagreementFlag ?? false,
-      disagreementPct: disagreementPct ?? null,
-      routingMode: routingMode ?? 'optimize',
-      policyMode: policyMode ?? 'default',
-      signalTypeUsed: signalTypeUsed ?? 'unknown',
-      confidenceLabel: confidenceLabel ?? null,
-      referenceTime: referenceTime ?? null,
-      dataFreshnessSeconds: dataFreshnessSeconds ?? null,
-      confidenceBandLow: confidenceBand?.low ?? null,
-      confidenceBandMid: confidenceBand?.mid ?? null,
-      confidenceBandHigh: confidenceBand?.high ?? null,
-      lowerHalfBenchmarkGPerKwh: lowerHalfBenchmark,
-      lowerHalfQualified,
-      metadata: metadata ?? {},
+      forecastStability: null,
+      disagreementFlag: false,
+      disagreementPct: null,
 
       balancingAuthority: selected.balancingAuthority,
       demandRampPct: selected.demandRampPct,
@@ -324,8 +266,7 @@ export async function generateCarbonReport(
       averageReductionPct: totalBaseline > 0 ? round3((totalSaved / totalBaseline) * 100) : 0,
       topRegions,
     },
-    methodology:
-      'Tiered Ecobe signal stack using EIA-930, ISO/GridStatus telemetry, regional carbon APIs, WattTime where appropriate, and Ember structural validation. Routing decisions apply the lowest defensible signal doctrine, freshness gates, and audit-grade provenance. Energy estimates are recorded at decision time and can be replaced by verified actuals post-execution.',
+    methodology: 'Flow-traced carbon intensity via Electricity Maps (primary) + WattTime MOER (marginal amplifier) + Ember (structural validation). Energy estimates based on workload GPU/CPU hours. Baseline: default region carbon intensity at routing time.',
     generatedAt: new Date().toISOString(),
   }
 }
@@ -369,24 +310,6 @@ function getQualityTier(confidence: number): string {
   if (confidence >= 0.8) return 'high'
   if (confidence >= 0.5) return 'medium'
   return 'low'
-}
-
-function getLowerHalfBenchmark(scoringResult: ScoringResult): number | null {
-  const intensities = scoringResult.candidates
-    .filter((candidate) => candidate.isFeasible && candidate.carbonEstimateGPerKwh != null)
-    .map((candidate) => candidate.carbonEstimateGPerKwh as number)
-    .sort((a, b) => a - b)
-
-  if (intensities.length === 0) {
-    return scoringResult.selected?.carbonEstimateGPerKwh ?? null
-  }
-
-  const mid = Math.floor(intensities.length / 2)
-  if (intensities.length % 2 === 1) {
-    return intensities[mid]
-  }
-
-  return round3((intensities[mid - 1] + intensities[mid]) / 2)
 }
 
 function round3(n: number): number {

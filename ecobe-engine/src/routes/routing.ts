@@ -2,8 +2,6 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { routeGreen } from '../lib/green-routing'
 import { prisma } from '../lib/db'
-import { DEFAULT_ROUTING_WEIGHTS } from '../lib/methodology'
-import { CarbonBudgetViolationError } from '../lib/routing'
 import {
   requireActiveOrganization,
   getOrCreateUsageCounter,
@@ -19,18 +17,10 @@ const routingRequestSchema = z.object({
   preferredRegions: z.array(z.string()).min(1),
   maxCarbonGPerKwh: z.number().positive().optional(),
   latencyMsByRegion: z.record(z.number()).optional(),
-  costIndexByRegion: z.record(z.number().positive()).optional(),
   carbonWeight: z.number().min(0).max(1).optional(),
   latencyWeight: z.number().min(0).max(1).optional(),
   costWeight: z.number().min(0).max(1).optional(),
-  mode: z.enum(['optimize', 'assurance']).optional(),
-  policyMode: z.enum(['default', 'sec_disclosure_strict', 'eu_24x7_ready']).optional(),
-  targetTime: z.string().datetime().optional(),
-  durationMinutes: z.number().int().positive().optional(),
   orgId: z.string().optional(), // Governance: when present, enforces quota
-  workloadType: z.string().min(1).max(120).optional(),
-  workloadName: z.string().min(1).max(160).optional(),
-  energyEstimateKwh: z.number().positive().max(100000).optional(),
 })
 
 router.post('/green', async (req, res) => {
@@ -70,13 +60,6 @@ router.post('/green', async (req, res) => {
       const statusCode = error.code === 'QUOTA_EXCEEDED' ? 429 : error.code === 'ORG_NOT_FOUND' ? 404 : 403
       return res.status(statusCode).json({ error: error.message, code: error.code })
     }
-    if (error instanceof CarbonBudgetViolationError) {
-      return res.status(409).json({
-        error: error.message,
-        code: error.code,
-        evaluations: error.evaluations,
-      })
-    }
     console.error('Green routing error:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
@@ -111,14 +94,10 @@ router.get('/:decisionFrameId/replay', async (req, res) => {
       source: (decision.meta as any)?.source ?? null,
       request: {
         regions: [decision.baselineRegion, decision.chosenRegion],
-        targetTime: (decision.meta as any)?.targetTime ?? null,
-        durationMinutes: (decision.meta as any)?.durationMinutes ?? null,
+        targetTime: null,
+        durationMinutes: null,
         maxCarbonGPerKwh: null,
-        weights: {
-          carbon: (decision.meta as any)?.weights?.carbon ?? DEFAULT_ROUTING_WEIGHTS.carbon,
-          latency: (decision.meta as any)?.weights?.latency ?? DEFAULT_ROUTING_WEIGHTS.latency,
-          cost: (decision.meta as any)?.weights?.cost ?? DEFAULT_ROUTING_WEIGHTS.cost,
-        }
+        weights: { carbon: 0.5, latency: 0.3, cost: 0.2 }
       },
       signals: {
         [decision.baselineRegion]: {
@@ -139,9 +118,6 @@ router.get('/:decisionFrameId/replay', async (req, res) => {
       baselineIntensity: decision.carbonIntensityBaselineGPerKwh ?? 0,
       carbon_delta_g_per_kwh: (decision.carbonIntensityBaselineGPerKwh ?? 0) - (decision.carbonIntensityChosenGPerKwh ?? 0),
       qualityTier: (decision.meta as any)?.qualityTier ?? 'medium',
-      mode: (decision.meta as any)?.mode ?? 'optimize',
-      policyMode: (decision.meta as any)?.policyMode ?? 'default',
-      signalTypeUsed: (decision.meta as any)?.signalTypeUsed ?? 'unknown',
       forecast_stability: (decision.meta as any)?.forecast_stability ?? null,
       score: (decision.meta as any)?.score ?? 0,
       explanation: decision.reason ?? '',
@@ -159,8 +135,7 @@ router.get('/:decisionFrameId/replay', async (req, res) => {
       estimatedFlag: decision.estimatedFlag ?? false,
       syntheticFlag: decision.syntheticFlag ?? false,
       validationSource: decision.validationSource ?? null,
-      disagreementPct: decision.disagreementPct ?? null,
-      assurance: (decision.meta as any)?.assurance ?? null,
+      disagreementPct: decision.disagreementPct ?? null
     }
 
     res.json(replayResult)

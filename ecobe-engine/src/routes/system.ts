@@ -1,23 +1,25 @@
 import { Router, Request, Response } from 'express'
-import { env } from '../config/env'
 import { redis } from '../lib/redis'
 import { prisma } from '../lib/db'
 import { GridSignalCache } from '../lib/grid-signals/grid-signal-cache'
-import { internalServiceGuard } from '../middleware/internal-auth'
-import { getScheduledIntelligenceJobs } from '../workers/intelligence-scheduler'
 
 const router = Router()
-router.use(internalServiceGuard)
 
 // Track worker status in memory
-let workerStatus = {
-  forecastPoller: { running: false, lastRun: null as string | null, nextRun: null as string | null, activeRunId: null as string | null },
-  eiaIngestion: { running: false, lastRun: null as string | null, nextRun: null as string | null, activeRunId: null as string | null },
-  intelligenceJobs: { running: false, lastRun: null as string | null, nextRun: null as string | null, activeRunId: null as string | null }
+type WorkerStatusEntry = { running: boolean; lastRun: string | null; nextRun: string | null }
+type WorkerRegistry = Record<string, WorkerStatusEntry>
+
+let workerStatus: WorkerRegistry = {
+  forecastPoller: { running: false, lastRun: null as string | null, nextRun: null as string | null },
+  eiaIngestion: { running: false, lastRun: null as string | null, nextRun: null as string | null },
+  intelligenceJobs: { running: false, lastRun: null as string | null, nextRun: null as string | null },
+  learningLoop: { running: false, lastRun: null as string | null, nextRun: null as string | null },
+  runtimeSupervisor: { running: false, lastRun: null as string | null, nextRun: null as string | null },
+  decisionEventDispatcher: { running: false, lastRun: null as string | null, nextRun: null as string | null },
 }
 
-export function setWorkerStatus(worker: keyof typeof workerStatus, status: Partial<typeof workerStatus.forecastPoller>) {
-  workerStatus[worker] = { ...workerStatus[worker], ...status }
+export function setWorkerStatus(worker: keyof WorkerRegistry, status: Partial<WorkerStatusEntry>) {
+  workerStatus[worker] = { ...(workerStatus[worker] ?? { running: false, lastRun: null, nextRun: null }), ...status }
 }
 
 export function getWorkerStatus() {
@@ -72,18 +74,33 @@ router.get('/status', async (req: Request, res: Response) => {
       console.warn('Failed to get cache stats:', error)
     }
 
-    let scheduledJobsCount = 0
-    let scheduledJobsHealthy = false
-    try {
-      const schedules = await getScheduledIntelligenceJobs()
-      scheduledJobsCount = schedules.length
-      scheduledJobsHealthy = schedules.length > 0 || !env.QSTASH_TOKEN
-    } catch (error) {
-      console.warn('Failed to get scheduled intelligence jobs:', error)
-    }
-
     // Get memory usage
     const memUsage = process.memoryUsage()
+
+    // Decision outbox health (best effort)
+    let decisionEventOutbox: null | {
+      pending: number
+      processing: number
+      failed: number
+      deadLetter: number
+      sent: number
+    } = null
+
+    if (dbHealthy) {
+      try {
+        const [pending, processing, failed, deadLetter, sent] = await Promise.all([
+          prisma.decisionEventOutbox.count({ where: { status: 'PENDING' } }),
+          prisma.decisionEventOutbox.count({ where: { status: 'PROCESSING' } }),
+          prisma.decisionEventOutbox.count({ where: { status: 'FAILED' } }),
+          prisma.decisionEventOutbox.count({ where: { status: 'DEAD_LETTER' } }),
+          prisma.decisionEventOutbox.count({ where: { status: 'SENT' } }),
+        ])
+
+        decisionEventOutbox = { pending, processing, failed, deadLetter, sent }
+      } catch (error) {
+        console.warn('Failed to gather decision outbox health:', error)
+      }
+    }
 
     // Overall health
     const isHealthy = dbHealthy && redisHealthy
@@ -106,35 +123,6 @@ router.get('/status', async (req: Request, res: Response) => {
         redis: {
           healthy: redisHealthy,
           latencyMs: redisLatency >= 0 ? redisLatency : null
-        },
-        qstash: {
-          configured: Boolean(env.QSTASH_TOKEN),
-          healthy: scheduledJobsHealthy,
-          scheduledJobsCount
-        },
-        vectorStore: {
-          configured: Boolean(env.UPSTASH_VECTOR_REST_URL && env.UPSTASH_VECTOR_REST_TOKEN),
-          indexName: env.UPSTASH_VECTOR_INDEX_NAME || null
-        },
-        embeddings: {
-          configured: Boolean(env.OPENAI_API_KEY),
-          model: env.OPENAI_EMBEDDING_MODEL
-        }
-      },
-      configuration: {
-        providers: {
-          watttime: Boolean(env.WATTTIME_USERNAME && env.WATTTIME_PASSWORD),
-          gridstatus: Boolean(env.GRIDSTATUS_API_KEY || env.EIA_API_KEY),
-          ember: Boolean(env.EMBER_API_KEY),
-          fingrid: Boolean(env.FINGRID_API_KEY)
-        },
-        dekesIntegration: {
-          configured: Boolean(env.DEKES_API_KEY && env.DEKES_WEBHOOK_URL)
-        },
-        workerMode: {
-          backgroundWorkersEnabled: env.ENGINE_BACKGROUND_WORKERS_ENABLED,
-          forecastRefreshEnabled: env.FORECAST_REFRESH_ENABLED,
-          uiEnabled: env.UI_ENABLED
         }
       },
       cache: cacheStats ? {
@@ -154,7 +142,8 @@ router.get('/status', async (req: Request, res: Response) => {
       },
       performance: {
         statusCheckMs: totalTime
-      }
+      },
+      decisionEventOutbox,
     })
   } catch (error) {
     console.error('Error in system status endpoint:', error)

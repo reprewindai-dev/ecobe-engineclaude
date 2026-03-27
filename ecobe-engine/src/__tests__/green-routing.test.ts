@@ -16,12 +16,9 @@ const makeSignal = (carbonIntensity: number, fallback = false) => ({
   },
 })
 
-// Mock providerRouter — green-routing.ts calls providerRouter.getRoutingSignal
-jest.mock('../lib/carbon/provider-router', () => ({
-  providerRouter: {
-    getRoutingSignal: jest.fn(),
-    validateSignalQuality: jest.fn(),
-    recordSignalProvenance: jest.fn(),
+jest.mock('../services/fingard-control', () => ({
+  fingard: {
+    getNormalizedSignal: jest.fn(),
   },
 }))
 jest.mock('../lib/db')
@@ -32,22 +29,17 @@ jest.mock('../lib/grid-signals/grid-signal-audit')
 describe('Green Routing', () => {
   beforeEach(() => {
     jest.clearAllMocks()
-    const { providerRouter } = require('../lib/carbon/provider-router')
-    providerRouter.getRoutingSignal.mockResolvedValue(makeSignal(250))
-    providerRouter.validateSignalQuality.mockResolvedValue({
-      qualityTier: 'high',
-      meetsRequirements: true,
-      reasons: [],
-    })
+    const { fingard } = require('../services/fingard-control')
+    fingard.getNormalizedSignal.mockResolvedValue({ signal: makeSignal(250) })
   })
 
   describe('routeGreen', () => {
     it('should select region with lowest carbon intensity', async () => {
-      const { providerRouter } = require('../lib/carbon/provider-router')
-      providerRouter.getRoutingSignal
-        .mockResolvedValueOnce(makeSignal(350)) // FR
-        .mockResolvedValueOnce(makeSignal(200)) // DE — lowest
-        .mockResolvedValueOnce(makeSignal(280)) // US-CAL-CISO
+      const { fingard } = require('../services/fingard-control')
+      fingard.getNormalizedSignal
+        .mockResolvedValueOnce({ signal: makeSignal(350) })
+        .mockResolvedValueOnce({ signal: makeSignal(200) })
+        .mockResolvedValueOnce({ signal: makeSignal(280) })
 
       const result = await routeGreen({
         preferredRegions: ['FR', 'DE', 'US-CAL-CISO'],
@@ -65,10 +57,10 @@ describe('Green Routing', () => {
     })
 
     it('should respect max carbon threshold', async () => {
-      const { providerRouter } = require('../lib/carbon/provider-router')
-      providerRouter.getRoutingSignal
-        .mockResolvedValueOnce(makeSignal(80))  // FR — within budget
-        .mockResolvedValueOnce(makeSignal(90))  // DE — within budget
+      const { fingard } = require('../services/fingard-control')
+      fingard.getNormalizedSignal
+        .mockResolvedValueOnce({ signal: makeSignal(80) })
+        .mockResolvedValueOnce({ signal: makeSignal(90) })
 
       const result = await routeGreen({
         preferredRegions: ['FR', 'DE'],
@@ -79,11 +71,11 @@ describe('Green Routing', () => {
     })
 
     it('should balance multiple optimization factors', async () => {
-      const { providerRouter } = require('../lib/carbon/provider-router')
-      providerRouter.getRoutingSignal
-        .mockResolvedValueOnce(makeSignal(300))
-        .mockResolvedValueOnce(makeSignal(200))
-        .mockResolvedValueOnce(makeSignal(250))
+      const { fingard } = require('../services/fingard-control')
+      fingard.getNormalizedSignal
+        .mockResolvedValueOnce({ signal: makeSignal(300) })
+        .mockResolvedValueOnce({ signal: makeSignal(200) })
+        .mockResolvedValueOnce({ signal: makeSignal(250) })
 
       const result = await routeGreen({
         preferredRegions: ['FR', 'DE', 'US-CAL-CISO'],
@@ -99,11 +91,11 @@ describe('Green Routing', () => {
     })
 
     it('should return alternatives sorted by score', async () => {
-      const { providerRouter } = require('../lib/carbon/provider-router')
-      providerRouter.getRoutingSignal
-        .mockResolvedValueOnce(makeSignal(300))
-        .mockResolvedValueOnce(makeSignal(180))
-        .mockResolvedValueOnce(makeSignal(240))
+      const { fingard } = require('../services/fingard-control')
+      fingard.getNormalizedSignal
+        .mockResolvedValueOnce({ signal: makeSignal(300) })
+        .mockResolvedValueOnce({ signal: makeSignal(180) })
+        .mockResolvedValueOnce({ signal: makeSignal(240) })
 
       const result = await routeGreen({
         preferredRegions: ['FR', 'DE', 'GB'],
@@ -118,8 +110,8 @@ describe('Green Routing', () => {
     })
 
     it('should handle single region', async () => {
-      const { providerRouter } = require('../lib/carbon/provider-router')
-      providerRouter.getRoutingSignal.mockResolvedValueOnce(makeSignal(150))
+      const { fingard } = require('../services/fingard-control')
+      fingard.getNormalizedSignal.mockResolvedValueOnce({ signal: makeSignal(150) })
 
       const result = await routeGreen({
         preferredRegions: ['FR'],
@@ -135,24 +127,6 @@ describe('Green Routing', () => {
           preferredRegions: [],
         })
       ).rejects.toThrow()
-    })
-
-    it('should restrict assurance routing to disclosure-safe signal types', async () => {
-      const { providerRouter } = require('../lib/carbon/provider-router')
-
-      await routeGreen({
-        preferredRegions: ['us-east-1'],
-        mode: 'assurance',
-        policyMode: 'sec_disclosure_strict',
-      })
-
-      expect(providerRouter.getRoutingSignal).toHaveBeenCalledWith(
-        'us-east-1',
-        expect.any(Date),
-        expect.objectContaining({
-          allowedSignalTypes: ['average_operational'],
-        })
-      )
     })
   })
 })

@@ -1,0 +1,34 @@
+{
+  "built_at": "2026-03-24T00:00:00.000Z",
+  "schema_version": "water_bundle_v2",
+  "datasets": [
+    {
+      "name": "aqueduct",
+      "source_url": "https://www.wri.org/data/aqueduct-global-maps-40-data",
+      "file_hash": "unverified",
+      "downloaded_at": "2026-03-24T00:00:00.000Z",
+      "dataset_version": "aqueduct_4_0"
+    },
+    {
+      "name": "aware",
+      "source_url": "https://zenodo.org/records/16332127",
+      "file_hash": "unverified",
+      "downloaded_at": "2026-03-24T00:00:00.000Z",
+      "dataset_version": "aware_2_0"
+    },
+    {
+      "name": "wwf",
+      "source_url": "https://riskfilter.org/water/explore/introduction",
+      "file_hash": "unverified",
+      "downloaded_at": "2026-03-24T00:00:00.000Z",
+      "dataset_version": "wwf_water_risk_filter_v1"
+    },
+    {
+      "name": "nrel",
+      "source_url": "https://research-hub.nrel.gov/en/publications/operational-water-consumption-and-withdrawal-factors-for-electric-4/",
+      "file_hash": "unverified",
+      "downloaded_at": "2026-03-24T00:00:00.000Z",
+      "dataset_version": "nrel_water_factors_v1"
+    }
+  ]
+}

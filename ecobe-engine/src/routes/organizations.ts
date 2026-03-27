@@ -35,6 +35,8 @@ const provisionSchema = z.object({
   billingEmail: z.string().email().optional(),
   enforceCreditCoverage: z.boolean().optional(),
   monthlyCommandLimit: z.number().int().positive().optional(),
+  featureFlags: z.record(z.any()).optional(),
+  proofRetentionDays: z.number().int().positive().max(3650).optional(),
 })
 
 router.post('/', adminGuard, async (req, res) => {

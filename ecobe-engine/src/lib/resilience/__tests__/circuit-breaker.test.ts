@@ -157,7 +157,9 @@ describe('timeoutWrapper', () => {
   })
 
   it('should timeout if promise takes too long', async () => {
-    const promise = new Promise((resolve) => setTimeout(() => resolve('delayed'), 5000))
+    const promise = new Promise<string>(() => {
+      // Intentionally never resolves to verify timeout behavior without leaking timers.
+    })
     await expect(timeoutWrapper(promise, { timeoutMs: 100 })).rejects.toThrow()
   })
 })

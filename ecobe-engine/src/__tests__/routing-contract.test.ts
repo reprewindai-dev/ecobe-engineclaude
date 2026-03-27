@@ -1,51 +1,83 @@
-import { routeGreen, type RoutingResult } from '../lib/green-routing'
+import { routeGreen } from '../lib/green-routing'
 
 // Mock dependencies
-jest.mock('../lib/electricity-maps')
 jest.mock('../lib/db')
 jest.mock('../lib/redis')
-jest.mock('../lib/watttime')
-jest.mock('../lib/carbon/provider-router', () => ({
-  providerRouter: {
-    getRoutingSignal: jest.fn(),
-    validateSignalQuality: jest.fn(),
-    recordSignalProvenance: jest.fn(),
-  }
+jest.mock('../lib/watttime', () => ({
+  wattTime: {
+    getPredictedCleanWindows: jest.fn().mockResolvedValue([]),
+  },
 }))
-jest.mock('../lib/grid-signals/grid-signal-cache')
-jest.mock('../lib/grid-signals/grid-signal-audit')
+jest.mock('../services/fingard-control', () => ({
+  fingard: {
+    getNormalizedSignal: jest.fn(),
+  },
+}))
+jest.mock('../lib/grid-signals/grid-signal-cache', () => ({
+  GridSignalCache: {
+    getCachedSnapshots: jest.fn().mockResolvedValue(null),
+  },
+}))
+jest.mock('../lib/grid-signals/grid-signal-audit', () => ({
+  GridSignalAudit: {
+    recordRoutingDecision: jest.fn().mockResolvedValue(undefined),
+  },
+}))
+jest.mock('../lib/routing', () => ({
+  classifyJob: jest.fn().mockReturnValue('immediate'),
+  recordLedgerEntry: jest.fn().mockResolvedValue(undefined),
+  storeProviderSnapshot: jest.fn().mockResolvedValue(undefined),
+}))
 
 describe('Routing Contract', () => {
+  const nowIso = () => new Date().toISOString()
+
+  const buildDecision = (region: string, carbonIntensity: number, overrides?: Partial<any>) => ({
+    signal: {
+      carbonIntensity,
+      source: 'electricity_maps',
+      isForecast: false,
+      estimatedFlag: false,
+      syntheticFlag: false,
+      confidence: 0.85,
+      provenance: {
+        sourceUsed: 'ELECTRICITY_MAPS',
+        contributingSources: ['electricity_maps'],
+        referenceTime: nowIso(),
+        fetchedAt: nowIso(),
+        fallbackUsed: false,
+        disagreementFlag: false,
+        disagreementPct: 0,
+        trustLevel: 'high',
+      },
+      ...overrides?.signal,
+    },
+    alternatives: [],
+    providerStatus: {},
+    arbitrationLog: [`mock:${region}`],
+    ...overrides,
+  })
+
+  const setSignalsByRegion = (signals: Record<string, ReturnType<typeof buildDecision>>) => {
+    const { fingard } = require('../services/fingard-control')
+    fingard.getNormalizedSignal.mockImplementation(async (region: string) => {
+      const decision = signals[region]
+      if (!decision) throw new Error(`No mock signal for region: ${region}`)
+      return decision
+    })
+  }
+
   beforeEach(() => {
     jest.clearAllMocks()
+    setSignalsByRegion({
+      'us-east-1': buildDecision('us-east-1', 250),
+      'us-west-1': buildDecision('us-west-1', 200),
+      'eu-west-1': buildDecision('eu-west-1', 220),
+    })
   })
 
   describe('routeGreen response contract', () => {
     it('should return all required fields in routing result', async () => {
-      const { providerRouter } = require('../lib/carbon/provider-router')
-
-      providerRouter.getRoutingSignal.mockResolvedValue({
-        carbonIntensity: 250,
-        source: 'electricity_maps',
-        isForecast: false,
-        confidence: 0.85,
-        provenance: {
-          sourceUsed: 'ELECTRICITY_MAPS',
-          contributingSources: ['electricity_maps'],
-          referenceTime: new Date().toISOString(),
-          fetchedAt: new Date().toISOString(),
-          fallbackUsed: false,
-          disagreementFlag: false,
-          disagreementPct: 0,
-        }
-      })
-
-      providerRouter.validateSignalQuality.mockResolvedValue({
-        qualityTier: 'high',
-        meetsRequirements: true,
-        reasons: []
-      })
-
       const result = await routeGreen({
         preferredRegions: ['us-east-1']
       })
@@ -70,52 +102,13 @@ describe('Routing Contract', () => {
       expect(result).toHaveProperty('syntheticFlag')
       expect(result).toHaveProperty('predicted_clean_window')
       expect(result).toHaveProperty('decisionFrameId')
-      expect(result).toHaveProperty('confidenceBand')
-      expect(result).toHaveProperty('weights')
-      expect(result).toHaveProperty('legalDisclaimer')
-      expect(result).toHaveProperty('doctrine')
       expect(result).toHaveProperty('alternatives')
     })
 
     it('should populate selectedRegion with lowest carbon option', async () => {
-      const { providerRouter } = require('../lib/carbon/provider-router')
-
-      providerRouter.getRoutingSignal
-        .mockResolvedValueOnce({
-          carbonIntensity: 300,
-          source: 'electricity_maps',
-          isForecast: false,
-          confidence: 0.85,
-          provenance: {
-            sourceUsed: 'ELECTRICITY_MAPS',
-            contributingSources: ['electricity_maps'],
-            referenceTime: new Date().toISOString(),
-            fetchedAt: new Date().toISOString(),
-            fallbackUsed: false,
-            disagreementFlag: false,
-            disagreementPct: 0,
-          }
-        })
-        .mockResolvedValueOnce({
-          carbonIntensity: 150,
-          source: 'electricity_maps',
-          isForecast: false,
-          confidence: 0.85,
-          provenance: {
-            sourceUsed: 'ELECTRICITY_MAPS',
-            contributingSources: ['electricity_maps'],
-            referenceTime: new Date().toISOString(),
-            fetchedAt: new Date().toISOString(),
-            fallbackUsed: false,
-            disagreementFlag: false,
-            disagreementPct: 0,
-          }
-        })
-
-      providerRouter.validateSignalQuality.mockResolvedValue({
-        qualityTier: 'high',
-        meetsRequirements: true,
-        reasons: []
+      setSignalsByRegion({
+        'us-east-1': buildDecision('us-east-1', 300),
+        'us-west-1': buildDecision('us-west-1', 150),
       })
 
       const result = await routeGreen({
@@ -127,28 +120,22 @@ describe('Routing Contract', () => {
     })
 
     it('should set qualityTier from validation result', async () => {
-      const { providerRouter } = require('../lib/carbon/provider-router')
-
-      providerRouter.getRoutingSignal.mockResolvedValue({
-        carbonIntensity: 250,
-        source: 'electricity_maps',
-        isForecast: false,
-        confidence: 0.85,
-        provenance: {
-          sourceUsed: 'ELECTRICITY_MAPS',
-          contributingSources: ['electricity_maps'],
-          referenceTime: new Date().toISOString(),
-          fetchedAt: new Date().toISOString(),
-          fallbackUsed: false,
-          disagreementFlag: false,
-          disagreementPct: 0,
-        }
-      })
-
-      providerRouter.validateSignalQuality.mockResolvedValue({
-        qualityTier: 'medium',
-        meetsRequirements: true,
-        reasons: ['Moderate confidence']
+      setSignalsByRegion({
+        'us-east-1': buildDecision('us-east-1', 250, {
+          signal: {
+            confidence: 0.65,
+            provenance: {
+              sourceUsed: 'ELECTRICITY_MAPS',
+              contributingSources: ['electricity_maps'],
+              referenceTime: nowIso(),
+              fetchedAt: nowIso(),
+              fallbackUsed: false,
+              disagreementFlag: false,
+              disagreementPct: 0,
+              trustLevel: 'medium',
+            },
+          },
+        }),
       })
 
       const result = await routeGreen({
@@ -159,28 +146,22 @@ describe('Routing Contract', () => {
     })
 
     it('should include provider disagreement in contract', async () => {
-      const { providerRouter } = require('../lib/carbon/provider-router')
-
-      providerRouter.getRoutingSignal.mockResolvedValue({
-        carbonIntensity: 250,
-        source: 'electricity_maps',
-        isForecast: false,
-        confidence: 0.75,
-        provenance: {
-          sourceUsed: 'ELECTRICITY_MAPS::WATTTIME_30%',
-          contributingSources: ['electricity_maps', 'watttime'],
-          referenceTime: new Date().toISOString(),
-          fetchedAt: new Date().toISOString(),
-          fallbackUsed: false,
-          disagreementFlag: true,
-          disagreementPct: 15,
-        }
-      })
-
-      providerRouter.validateSignalQuality.mockResolvedValue({
-        qualityTier: 'high',
-        meetsRequirements: true,
-        reasons: []
+      setSignalsByRegion({
+        'us-east-1': buildDecision('us-east-1', 250, {
+          signal: {
+            confidence: 0.75,
+            provenance: {
+              sourceUsed: 'ELECTRICITY_MAPS::WATTTIME_30%',
+              contributingSources: ['electricity_maps', 'watttime'],
+              referenceTime: nowIso(),
+              fetchedAt: nowIso(),
+              fallbackUsed: false,
+              disagreementFlag: true,
+              disagreementPct: 15,
+              trustLevel: 'high',
+            },
+          },
+        }),
       })
 
       const result = await routeGreen({
@@ -194,30 +175,6 @@ describe('Routing Contract', () => {
     })
 
     it('should include grid signals in contract (balancingAuthority, demandRamp, etc)', async () => {
-      const { providerRouter } = require('../lib/carbon/provider-router')
-
-      providerRouter.getRoutingSignal.mockResolvedValue({
-        carbonIntensity: 250,
-        source: 'electricity_maps',
-        isForecast: false,
-        confidence: 0.85,
-        provenance: {
-          sourceUsed: 'ELECTRICITY_MAPS',
-          contributingSources: ['electricity_maps'],
-          referenceTime: new Date().toISOString(),
-          fetchedAt: new Date().toISOString(),
-          fallbackUsed: false,
-          disagreementFlag: false,
-          disagreementPct: 0,
-        }
-      })
-
-      providerRouter.validateSignalQuality.mockResolvedValue({
-        qualityTier: 'high',
-        meetsRequirements: true,
-        reasons: []
-      })
-
       const result = await routeGreen({
         preferredRegions: ['us-east-1']
       })
@@ -231,30 +188,6 @@ describe('Routing Contract', () => {
     })
 
     it('should include source and validation metadata', async () => {
-      const { providerRouter } = require('../lib/carbon/provider-router')
-
-      providerRouter.getRoutingSignal.mockResolvedValue({
-        carbonIntensity: 250,
-        source: 'electricity_maps',
-        isForecast: false,
-        confidence: 0.85,
-        provenance: {
-          sourceUsed: 'ELECTRICITY_MAPS',
-          contributingSources: ['electricity_maps'],
-          referenceTime: new Date().toISOString(),
-          fetchedAt: new Date().toISOString(),
-          fallbackUsed: false,
-          disagreementFlag: false,
-          disagreementPct: 0,
-        }
-      })
-
-      providerRouter.validateSignalQuality.mockResolvedValue({
-        qualityTier: 'high',
-        meetsRequirements: true,
-        reasons: []
-      })
-
       const result = await routeGreen({
         preferredRegions: ['us-east-1']
       })
@@ -266,30 +199,6 @@ describe('Routing Contract', () => {
     })
 
     it('should include forecast stability in contract', async () => {
-      const { providerRouter } = require('../lib/carbon/provider-router')
-
-      providerRouter.getRoutingSignal.mockResolvedValue({
-        carbonIntensity: 250,
-        source: 'electricity_maps',
-        isForecast: false,
-        confidence: 0.85,
-        provenance: {
-          sourceUsed: 'ELECTRICITY_MAPS',
-          contributingSources: ['electricity_maps'],
-          referenceTime: new Date().toISOString(),
-          fetchedAt: new Date().toISOString(),
-          fallbackUsed: false,
-          disagreementFlag: false,
-          disagreementPct: 0,
-        }
-      })
-
-      providerRouter.validateSignalQuality.mockResolvedValue({
-        qualityTier: 'high',
-        meetsRequirements: true,
-        reasons: []
-      })
-
       const result = await routeGreen({
         preferredRegions: ['us-east-1']
       })
@@ -298,30 +207,6 @@ describe('Routing Contract', () => {
     })
 
     it('should include predicted_clean_window in contract', async () => {
-      const { providerRouter } = require('../lib/carbon/provider-router')
-
-      providerRouter.getRoutingSignal.mockResolvedValue({
-        carbonIntensity: 250,
-        source: 'electricity_maps',
-        isForecast: false,
-        confidence: 0.85,
-        provenance: {
-          sourceUsed: 'ELECTRICITY_MAPS',
-          contributingSources: ['electricity_maps'],
-          referenceTime: new Date().toISOString(),
-          fetchedAt: new Date().toISOString(),
-          fallbackUsed: false,
-          disagreementFlag: false,
-          disagreementPct: 0,
-        }
-      })
-
-      providerRouter.validateSignalQuality.mockResolvedValue({
-        qualityTier: 'high',
-        meetsRequirements: true,
-        reasons: []
-      })
-
       const result = await routeGreen({
         preferredRegions: ['us-east-1']
       })
@@ -330,30 +215,6 @@ describe('Routing Contract', () => {
     })
 
     it('should include decisionFrameId for audit/replay', async () => {
-      const { providerRouter } = require('../lib/carbon/provider-router')
-
-      providerRouter.getRoutingSignal.mockResolvedValue({
-        carbonIntensity: 250,
-        source: 'electricity_maps',
-        isForecast: false,
-        confidence: 0.85,
-        provenance: {
-          sourceUsed: 'ELECTRICITY_MAPS',
-          contributingSources: ['electricity_maps'],
-          referenceTime: new Date().toISOString(),
-          fetchedAt: new Date().toISOString(),
-          fallbackUsed: false,
-          disagreementFlag: false,
-          disagreementPct: 0,
-        }
-      })
-
-      providerRouter.validateSignalQuality.mockResolvedValue({
-        qualityTier: 'high',
-        meetsRequirements: true,
-        reasons: []
-      })
-
       const result = await routeGreen({
         preferredRegions: ['us-east-1']
       })
@@ -362,59 +223,10 @@ describe('Routing Contract', () => {
     })
 
     it('should include alternatives with scores', async () => {
-      const { providerRouter } = require('../lib/carbon/provider-router')
-
-      providerRouter.getRoutingSignal
-        .mockResolvedValueOnce({
-          carbonIntensity: 300,
-          source: 'electricity_maps',
-          isForecast: false,
-          confidence: 0.85,
-          provenance: {
-            sourceUsed: 'ELECTRICITY_MAPS',
-            contributingSources: ['electricity_maps'],
-            referenceTime: new Date().toISOString(),
-            fetchedAt: new Date().toISOString(),
-            fallbackUsed: false,
-            disagreementFlag: false,
-            disagreementPct: 0,
-          }
-        })
-        .mockResolvedValueOnce({
-          carbonIntensity: 200,
-          source: 'electricity_maps',
-          isForecast: false,
-          confidence: 0.85,
-          provenance: {
-            sourceUsed: 'ELECTRICITY_MAPS',
-            contributingSources: ['electricity_maps'],
-            referenceTime: new Date().toISOString(),
-            fetchedAt: new Date().toISOString(),
-            fallbackUsed: false,
-            disagreementFlag: false,
-            disagreementPct: 0,
-          }
-        })
-        .mockResolvedValueOnce({
-          carbonIntensity: 250,
-          source: 'electricity_maps',
-          isForecast: false,
-          confidence: 0.85,
-          provenance: {
-            sourceUsed: 'ELECTRICITY_MAPS',
-            contributingSources: ['electricity_maps'],
-            referenceTime: new Date().toISOString(),
-            fetchedAt: new Date().toISOString(),
-            fallbackUsed: false,
-            disagreementFlag: false,
-            disagreementPct: 0,
-          }
-        })
-
-      providerRouter.validateSignalQuality.mockResolvedValue({
-        qualityTier: 'high',
-        meetsRequirements: true,
-        reasons: []
+      setSignalsByRegion({
+        'us-east-1': buildDecision('us-east-1', 300),
+        'us-west-1': buildDecision('us-west-1', 200),
+        'eu-west-1': buildDecision('eu-west-1', 250),
       })
 
       const result = await routeGreen({
@@ -435,30 +247,6 @@ describe('Routing Contract', () => {
     })
 
     it('should include legacy lease fields for backward compatibility', async () => {
-      const { providerRouter } = require('../lib/carbon/provider-router')
-
-      providerRouter.getRoutingSignal.mockResolvedValue({
-        carbonIntensity: 250,
-        source: 'electricity_maps',
-        isForecast: false,
-        confidence: 0.85,
-        provenance: {
-          sourceUsed: 'ELECTRICITY_MAPS',
-          contributingSources: ['electricity_maps'],
-          referenceTime: new Date().toISOString(),
-          fetchedAt: new Date().toISOString(),
-          fallbackUsed: false,
-          disagreementFlag: false,
-          disagreementPct: 0,
-        }
-      })
-
-      providerRouter.validateSignalQuality.mockResolvedValue({
-        qualityTier: 'high',
-        meetsRequirements: true,
-        reasons: []
-      })
-
       const result = await routeGreen({
         preferredRegions: ['us-east-1']
       })
@@ -470,30 +258,6 @@ describe('Routing Contract', () => {
     })
 
     it('should calculate score between 0 and 1', async () => {
-      const { providerRouter } = require('../lib/carbon/provider-router')
-
-      providerRouter.getRoutingSignal.mockResolvedValue({
-        carbonIntensity: 250,
-        source: 'electricity_maps',
-        isForecast: false,
-        confidence: 0.85,
-        provenance: {
-          sourceUsed: 'ELECTRICITY_MAPS',
-          contributingSources: ['electricity_maps'],
-          referenceTime: new Date().toISOString(),
-          fetchedAt: new Date().toISOString(),
-          fallbackUsed: false,
-          disagreementFlag: false,
-          disagreementPct: 0,
-        }
-      })
-
-      providerRouter.validateSignalQuality.mockResolvedValue({
-        qualityTier: 'high',
-        meetsRequirements: true,
-        reasons: []
-      })
-
       const result = await routeGreen({
         preferredRegions: ['us-east-1']
       })
@@ -503,28 +267,23 @@ describe('Routing Contract', () => {
     })
 
     it('should preserve null values for unavailable grid signals', async () => {
-      const { providerRouter } = require('../lib/carbon/provider-router')
-
-      providerRouter.getRoutingSignal.mockResolvedValue({
-        carbonIntensity: 250,
-        source: 'fallback',
-        isForecast: false,
-        confidence: 0.05,
-        provenance: {
-          sourceUsed: 'STATIC_FALLBACK',
-          contributingSources: [],
-          referenceTime: new Date().toISOString(),
-          fetchedAt: new Date().toISOString(),
-          fallbackUsed: true,
-          disagreementFlag: false,
-          disagreementPct: 0,
-        }
-      })
-
-      providerRouter.validateSignalQuality.mockResolvedValue({
-        qualityTier: 'low',
-        meetsRequirements: false,
-        reasons: ['Fallback signal']
+      setSignalsByRegion({
+        'us-east-1': buildDecision('us-east-1', 250, {
+          signal: {
+            source: 'fallback',
+            confidence: 0.05,
+            provenance: {
+              sourceUsed: 'STATIC_FALLBACK',
+              contributingSources: [],
+              referenceTime: nowIso(),
+              fetchedAt: nowIso(),
+              fallbackUsed: true,
+              disagreementFlag: false,
+              disagreementPct: 0,
+              trustLevel: 'low',
+            },
+          },
+        }),
       })
 
       const result = await routeGreen({
@@ -537,41 +296,6 @@ describe('Routing Contract', () => {
       expect(result.carbonSpikeProbability).toBeNull()
       expect(result.curtailmentProbability).toBeNull()
       expect(result.importCarbonLeakageScore).toBeNull()
-    })
-
-    it('should expose disclosure-safe signal types in assurance mode', async () => {
-      const { providerRouter } = require('../lib/carbon/provider-router')
-
-      providerRouter.getRoutingSignal.mockResolvedValue({
-        carbonIntensity: 210,
-        source: 'gridstatus_fuel_mix',
-        isForecast: false,
-        confidence: 0.8,
-        provenance: {
-          sourceUsed: 'EIA930_FUEL_MIX_IPCC',
-          contributingSources: ['eia930_fuel_mix'],
-          referenceTime: new Date().toISOString(),
-          fetchedAt: new Date().toISOString(),
-          fallbackUsed: false,
-          disagreementFlag: false,
-          disagreementPct: 0,
-        }
-      })
-
-      providerRouter.validateSignalQuality.mockResolvedValue({
-        qualityTier: 'high',
-        meetsRequirements: true,
-        reasons: []
-      })
-
-      const result = await routeGreen({
-        preferredRegions: ['us-east-1'],
-        mode: 'assurance',
-        policyMode: 'sec_disclosure_strict'
-      })
-
-      expect(result.signalTypeUsed).toBe('average_operational')
-      expect(result.assurance.accountingIntensityGPerKwh).toBeGreaterThan(0)
     })
   })
 })

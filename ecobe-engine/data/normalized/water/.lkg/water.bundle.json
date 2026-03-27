@@ -1,0 +1,531 @@
+{
+  "schema_version": "water_bundle_v2",
+  "generated_at": "2026-03-24T00:00:00.000Z",
+  "regions": {
+    "us-east-1": {
+      "water_stress_score": 3.2,
+      "water_quality_index": 2.4,
+      "drought_risk_score": 2.9,
+      "scarcity_factor_annual": 1.9,
+      "scarcity_factor_monthly": {
+        "10": 1.9,
+        "11": 1.8,
+        "12": 1.7,
+        "01": 1.7,
+        "02": 1.8,
+        "03": 1.9,
+        "04": 2,
+        "05": 2.1,
+        "06": 2.3,
+        "07": 2.4,
+        "08": 2.3,
+        "09": 2.1
+      },
+      "water_intensity_l_per_kwh": 1.3,
+      "confidence": 0.83,
+      "sources": [
+        "aqueduct_4_0",
+        "aware_2_0",
+        "nrel_water_factors_v1"
+      ],
+      "dataset_versions": {
+        "aqueduct": "aqueduct_4_0",
+        "aware": "aware_2_0",
+        "nrel": "nrel_water_factors_v1"
+      },
+      "supplier_provenance": [
+        {
+          "supplier": "aqueduct",
+          "authorityRole": "baseline",
+          "datasetVersion": "aqueduct_4_0",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        },
+        {
+          "supplier": "aware",
+          "authorityRole": "overlay",
+          "datasetVersion": "aware_2_0",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        },
+        {
+          "supplier": "nrel",
+          "authorityRole": "overlay",
+          "datasetVersion": "nrel_water_factors_v1",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        }
+      ]
+    },
+    "us-west-2": {
+      "water_stress_score": 2.1,
+      "water_quality_index": 2,
+      "drought_risk_score": 2.2,
+      "scarcity_factor_annual": 1.3,
+      "scarcity_factor_monthly": {
+        "10": 1.4,
+        "11": 1.3,
+        "12": 1.2,
+        "01": 1.2,
+        "02": 1.2,
+        "03": 1.3,
+        "04": 1.3,
+        "05": 1.4,
+        "06": 1.5,
+        "07": 1.6,
+        "08": 1.6,
+        "09": 1.5
+      },
+      "water_intensity_l_per_kwh": 0.9,
+      "confidence": 0.85,
+      "sources": [
+        "aqueduct_4_0",
+        "aware_2_0",
+        "nrel_water_factors_v1"
+      ],
+      "dataset_versions": {
+        "aqueduct": "aqueduct_4_0",
+        "aware": "aware_2_0",
+        "nrel": "nrel_water_factors_v1"
+      },
+      "supplier_provenance": [
+        {
+          "supplier": "aqueduct",
+          "authorityRole": "baseline",
+          "datasetVersion": "aqueduct_4_0",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        },
+        {
+          "supplier": "aware",
+          "authorityRole": "overlay",
+          "datasetVersion": "aware_2_0",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        },
+        {
+          "supplier": "nrel",
+          "authorityRole": "overlay",
+          "datasetVersion": "nrel_water_factors_v1",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        }
+      ]
+    },
+    "us-central-1": {
+      "water_stress_score": 3.7,
+      "water_quality_index": 2.6,
+      "drought_risk_score": 3.5,
+      "scarcity_factor_annual": 2.4,
+      "scarcity_factor_monthly": {
+        "10": 2.4,
+        "11": 2.2,
+        "12": 2.1,
+        "01": 2,
+        "02": 2,
+        "03": 2.2,
+        "04": 2.3,
+        "05": 2.5,
+        "06": 2.7,
+        "07": 2.9,
+        "08": 2.8,
+        "09": 2.6
+      },
+      "water_intensity_l_per_kwh": 1.5,
+      "confidence": 0.8,
+      "sources": [
+        "aqueduct_4_0",
+        "aware_2_0",
+        "nrel_water_factors_v1"
+      ],
+      "dataset_versions": {
+        "aqueduct": "aqueduct_4_0",
+        "aware": "aware_2_0",
+        "nrel": "nrel_water_factors_v1"
+      },
+      "supplier_provenance": [
+        {
+          "supplier": "aqueduct",
+          "authorityRole": "baseline",
+          "datasetVersion": "aqueduct_4_0",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        },
+        {
+          "supplier": "aware",
+          "authorityRole": "overlay",
+          "datasetVersion": "aware_2_0",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        },
+        {
+          "supplier": "nrel",
+          "authorityRole": "overlay",
+          "datasetVersion": "nrel_water_factors_v1",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        }
+      ]
+    },
+    "eu-west-1": {
+      "water_stress_score": 1.6,
+      "water_quality_index": 1.9,
+      "drought_risk_score": 1.4,
+      "scarcity_factor_annual": 0.9,
+      "scarcity_factor_monthly": {
+        "10": 0.9,
+        "11": 0.9,
+        "12": 0.9,
+        "01": 0.9,
+        "02": 0.9,
+        "03": 0.9,
+        "04": 1,
+        "05": 1,
+        "06": 1.1,
+        "07": 1.1,
+        "08": 1.1,
+        "09": 1
+      },
+      "water_intensity_l_per_kwh": 0.6,
+      "confidence": 0.88,
+      "sources": [
+        "aqueduct_4_0",
+        "aware_2_0",
+        "nrel_water_factors_v1"
+      ],
+      "dataset_versions": {
+        "aqueduct": "aqueduct_4_0",
+        "aware": "aware_2_0",
+        "nrel": "nrel_water_factors_v1"
+      },
+      "supplier_provenance": [
+        {
+          "supplier": "aqueduct",
+          "authorityRole": "baseline",
+          "datasetVersion": "aqueduct_4_0",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        },
+        {
+          "supplier": "aware",
+          "authorityRole": "overlay",
+          "datasetVersion": "aware_2_0",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        },
+        {
+          "supplier": "nrel",
+          "authorityRole": "overlay",
+          "datasetVersion": "nrel_water_factors_v1",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        }
+      ]
+    },
+    "eu-west-2": {
+      "water_stress_score": 1.4,
+      "water_quality_index": 1.8,
+      "drought_risk_score": 1.3,
+      "scarcity_factor_annual": 0.8,
+      "scarcity_factor_monthly": {
+        "10": 0.9,
+        "11": 0.8,
+        "12": 0.8,
+        "01": 0.8,
+        "02": 0.8,
+        "03": 0.8,
+        "04": 0.9,
+        "05": 0.9,
+        "06": 1,
+        "07": 1,
+        "08": 1,
+        "09": 0.9
+      },
+      "water_intensity_l_per_kwh": 0.5,
+      "confidence": 0.9,
+      "sources": [
+        "aqueduct_4_0",
+        "aware_2_0",
+        "nrel_water_factors_v1"
+      ],
+      "dataset_versions": {
+        "aqueduct": "aqueduct_4_0",
+        "aware": "aware_2_0",
+        "nrel": "nrel_water_factors_v1"
+      },
+      "supplier_provenance": [
+        {
+          "supplier": "aqueduct",
+          "authorityRole": "baseline",
+          "datasetVersion": "aqueduct_4_0",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        },
+        {
+          "supplier": "aware",
+          "authorityRole": "overlay",
+          "datasetVersion": "aware_2_0",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        },
+        {
+          "supplier": "nrel",
+          "authorityRole": "overlay",
+          "datasetVersion": "nrel_water_factors_v1",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        }
+      ]
+    },
+    "eu-central-1": {
+      "water_stress_score": 2.3,
+      "water_quality_index": 2.2,
+      "drought_risk_score": 2.1,
+      "scarcity_factor_annual": 1.2,
+      "scarcity_factor_monthly": {
+        "10": 1.2,
+        "11": 1.2,
+        "12": 1.1,
+        "01": 1.1,
+        "02": 1.1,
+        "03": 1.2,
+        "04": 1.2,
+        "05": 1.3,
+        "06": 1.4,
+        "07": 1.4,
+        "08": 1.4,
+        "09": 1.3
+      },
+      "water_intensity_l_per_kwh": 0.8,
+      "confidence": 0.86,
+      "sources": [
+        "aqueduct_4_0",
+        "aware_2_0",
+        "nrel_water_factors_v1"
+      ],
+      "dataset_versions": {
+        "aqueduct": "aqueduct_4_0",
+        "aware": "aware_2_0",
+        "nrel": "nrel_water_factors_v1"
+      },
+      "supplier_provenance": [
+        {
+          "supplier": "aqueduct",
+          "authorityRole": "baseline",
+          "datasetVersion": "aqueduct_4_0",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        },
+        {
+          "supplier": "aware",
+          "authorityRole": "overlay",
+          "datasetVersion": "aware_2_0",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        },
+        {
+          "supplier": "nrel",
+          "authorityRole": "overlay",
+          "datasetVersion": "nrel_water_factors_v1",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        }
+      ]
+    },
+    "ap-southeast-1": {
+      "water_stress_score": 4.2,
+      "water_quality_index": 3.3,
+      "drought_risk_score": 3.9,
+      "scarcity_factor_annual": 3.1,
+      "scarcity_factor_monthly": {
+        "10": 3.1,
+        "11": 3,
+        "12": 2.9,
+        "01": 2.8,
+        "02": 2.8,
+        "03": 3,
+        "04": 3.1,
+        "05": 3.2,
+        "06": 3.3,
+        "07": 3.4,
+        "08": 3.4,
+        "09": 3.2
+      },
+      "water_intensity_l_per_kwh": 1.8,
+      "confidence": 0.79,
+      "sources": [
+        "aqueduct_4_0",
+        "aware_2_0",
+        "nrel_water_factors_v1"
+      ],
+      "dataset_versions": {
+        "aqueduct": "aqueduct_4_0",
+        "aware": "aware_2_0",
+        "nrel": "nrel_water_factors_v1"
+      },
+      "supplier_provenance": [
+        {
+          "supplier": "aqueduct",
+          "authorityRole": "baseline",
+          "datasetVersion": "aqueduct_4_0",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        },
+        {
+          "supplier": "aware",
+          "authorityRole": "overlay",
+          "datasetVersion": "aware_2_0",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        },
+        {
+          "supplier": "nrel",
+          "authorityRole": "overlay",
+          "datasetVersion": "nrel_water_factors_v1",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        }
+      ]
+    },
+    "ap-northeast-1": {
+      "water_stress_score": 2.8,
+      "water_quality_index": 2.5,
+      "drought_risk_score": 2.6,
+      "scarcity_factor_annual": 1.6,
+      "scarcity_factor_monthly": {
+        "10": 1.7,
+        "11": 1.6,
+        "12": 1.5,
+        "01": 1.4,
+        "02": 1.4,
+        "03": 1.5,
+        "04": 1.6,
+        "05": 1.7,
+        "06": 1.8,
+        "07": 1.9,
+        "08": 1.9,
+        "09": 1.8
+      },
+      "water_intensity_l_per_kwh": 1.1,
+      "confidence": 0.84,
+      "sources": [
+        "aqueduct_4_0",
+        "aware_2_0",
+        "nrel_water_factors_v1"
+      ],
+      "dataset_versions": {
+        "aqueduct": "aqueduct_4_0",
+        "aware": "aware_2_0",
+        "nrel": "nrel_water_factors_v1"
+      },
+      "supplier_provenance": [
+        {
+          "supplier": "aqueduct",
+          "authorityRole": "baseline",
+          "datasetVersion": "aqueduct_4_0",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        },
+        {
+          "supplier": "aware",
+          "authorityRole": "overlay",
+          "datasetVersion": "aware_2_0",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        },
+        {
+          "supplier": "nrel",
+          "authorityRole": "overlay",
+          "datasetVersion": "nrel_water_factors_v1",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        }
+      ]
+    },
+    "ap-south-1": {
+      "water_stress_score": 4.6,
+      "water_quality_index": 3.6,
+      "drought_risk_score": 4.1,
+      "scarcity_factor_annual": 3.6,
+      "scarcity_factor_monthly": {
+        "10": 3.6,
+        "11": 3.4,
+        "12": 3.2,
+        "01": 3.1,
+        "02": 3.1,
+        "03": 3.3,
+        "04": 3.5,
+        "05": 3.7,
+        "06": 3.9,
+        "07": 4,
+        "08": 4,
+        "09": 3.8
+      },
+      "water_intensity_l_per_kwh": 2,
+      "confidence": 0.78,
+      "sources": [
+        "aqueduct_4_0",
+        "aware_2_0",
+        "nrel_water_factors_v1"
+      ],
+      "dataset_versions": {
+        "aqueduct": "aqueduct_4_0",
+        "aware": "aware_2_0",
+        "nrel": "nrel_water_factors_v1"
+      },
+      "supplier_provenance": [
+        {
+          "supplier": "aqueduct",
+          "authorityRole": "baseline",
+          "datasetVersion": "aqueduct_4_0",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        },
+        {
+          "supplier": "aware",
+          "authorityRole": "overlay",
+          "datasetVersion": "aware_2_0",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        },
+        {
+          "supplier": "nrel",
+          "authorityRole": "overlay",
+          "datasetVersion": "nrel_water_factors_v1",
+          "fileHash": "unverified",
+          "observedAt": "2026-03-24T00:00:00.000Z"
+        }
+      ]
+    }
+  },
+  "suppliers": {
+    "aqueduct": {
+      "supplier": "aqueduct",
+      "authorityRole": "baseline",
+      "datasetVersion": "aqueduct_4_0",
+      "fileHash": "unverified",
+      "observedAt": "2026-03-24T00:00:00.000Z"
+    },
+    "aware": {
+      "supplier": "aware",
+      "authorityRole": "overlay",
+      "datasetVersion": "aware_2_0",
+      "fileHash": "unverified",
+      "observedAt": "2026-03-24T00:00:00.000Z"
+    },
+    "wwf": {
+      "supplier": "wwf",
+      "authorityRole": "overlay",
+      "datasetVersion": "wwf_water_risk_filter_v1",
+      "fileHash": "unverified",
+      "observedAt": "2026-03-24T00:00:00.000Z"
+    },
+    "nrel": {
+      "supplier": "nrel",
+      "authorityRole": "overlay",
+      "datasetVersion": "nrel_water_factors_v1",
+      "fileHash": "unverified",
+      "observedAt": "2026-03-24T00:00:00.000Z"
+    }
+  }
+}

@@ -1,431 +1,213 @@
-# ECOBE Engine
+# CO2 Router
 
-**Environmental Carbon and Optimization Backend Engine**
+CO2 Router is a deterministic pre-execution environmental authorization control plane for compute.
 
-Real-time carbon emissions monitoring and optimization platform for green computing.
+It evaluates:
 
-## Features
+- carbon
+- water
+- latency
+- cost
+- policy
 
-### Core Capabilities
-- 🌍 **Real-Time Carbon Monitoring** - Electricity Maps API integration
-- 🎯 **Smart Green Routing** - Multi-factor optimization (carbon, latency, cost)
-- ⚡ **Energy Equation Calculator** - Estimate workload carbon footprint
-- 📊 **Carbon Forecasting** - ML-based prediction (moat feature)
-- 🔗 **DEKES Integration** - Optimize lead generation workloads
-- 💳 **Carbon Credits Tracking** - Automated offset calculations
-- 📈 **Real-Time Analytics** - Live carbon intensity monitoring
+and returns exactly one binding action:
 
-### Innovation & Moat
-1. **Predictive Carbon Forecasting** - ML model predicts grid intensity 48h ahead
-2. **Dual Optimization** - Cost + carbon scoring (not just carbon)
-3. **DEKES Workload Integration** - Carbon-aware batch scheduling
-4. **Optimal Window Finding** - Smart scheduling for lowest carbon
-5. **Historical Pattern Learning** - Improves over time
+- `run_now`
+- `reroute`
+- `delay`
+- `throttle`
+- `deny`
 
-## Tech Stack
+It then emits enforcement artifacts, persists proof and replay lineage, and exposes adapter/control-point metadata for external callers.
 
-- **Backend**: Node.js/Express with TypeScript
-- **Database**: PostgreSQL (primary) + Redis (caching)
-- **Deployment**: Docker + Back4App Containers
-- **APIs**: Electricity Maps API
-- **ML**: Time-series forecasting for carbon prediction
+## What it is
 
-## Quick Start
+CO2 Router is infrastructure governance software that decides whether compute is allowed to run, where it should run, and under what environmental conditions, before execution happens.
+
+It is not:
+
+- a passive dashboard
+- an ESG reporting suite
+- a generic scheduler
+- a recommendation engine
+
+## What is real today
+
+The current engine already has:
+
+- deterministic decision doctrine
+- replay and persisted decision lineage
+- proof export chain
+- water-aware authorization
+- CI/CD enforcement bundle generation
+- Kubernetes enforcement bundle generation
+- canonical decision and proof envelopes
+- adapter entry points for HTTP, CloudEvents, queue/job, and Lambda paths
+
+## What is not fully closed yet
+
+The product is operational, but not fully assurance-ready.
+
+Why:
+
+- water source-file provenance is not fully verified yet
+- the provenance verifier currently reports missing local source files for key water datasets
+- the adapter ecosystem is structurally correct but still early
+
+Use this external qualifier:
+
+Production-grade deterministic decisioning and proof, with operational water authority today and full assurance closure still in progress.
+
+## Core runtime flow
+
+1. A caller submits a workload request with execution context, constraints, runtime target, and policy metadata.
+2. The engine resolves candidate regions and gathers carbon and water signals.
+3. It applies doctrine in fixed order:
+   - policy overrides
+   - water guardrails
+   - SLA / critical-path protection
+   - carbon optimization inside the allowed envelope
+   - cost as late influence
+4. It returns one binding action.
+5. It emits enforcement outputs and canonical proof metadata.
+6. It persists the decision for replay, evidence lookup, and export.
+
+## Canonical API surfaces
+
+### Decision API v1
+
+- `POST /api/v1/ci/authorize`
+- aliases:
+  - `POST /api/v1/ci/route`
+  - `POST /api/v1/ci/carbon-route`
+
+### Event ingress
+
+- `POST /api/v1/events/ingest`
+
+### Queue/job adapter
+
+- `POST /api/v1/adapters/queue/dispatch`
+
+### Lambda adapter
+
+- `POST /api/v1/adapters/lambda/invoke`
+
+### Execution outcome callback
+
+- `POST /api/v1/adapters/execution-outcomes`
+
+### Replay
+
+- `GET /api/v1/ci/decisions/:decisionFrameId/replay`
+
+### Proof export
+
+- `POST /api/v1/ci/exports/proof`
+
+### Water provenance
+
+- `GET /api/v1/water/provenance`
+- `POST /api/v1/water/provenance/verify`
+
+## Canonical response shape
+
+The decision response includes both the historical CI response and the canonical envelopes:
+
+- `decisionEnvelope`
+- `proofEnvelope`
+- `telemetryBridge`
+- `adapterContext`
+
+These sit alongside:
+
+- `policyTrace`
+- `decisionExplanation`
+- `proofRecord`
+- `enforcementBundle`
+- `mss`
+
+## Who it is for
+
+Primary buyers and operators:
+
+- platform engineering
+- infrastructure governance
+- CI/CD owners
+- Kubernetes platform teams
+- regulated enterprises
+- sustainability/compliance teams that need pre-execution evidence
+
+Best fit environments:
+
+- movable workloads
+- multi-region execution
+- CI/CD-heavy delivery
+- Kubernetes clusters
+- queue and batch workloads
+
+## Strengths
+
+- deterministic decisioning
+- one canonical decision and proof model
+- water as a real hard constraint
+- replay and proof lineage
+- runtime-agnostic core with thin adapters
+- honest degraded-state handling
+
+## Weaknesses
+
+- not fully assurance-ready yet
+- adapter ecosystem still early
+- strongest production wedge is still CI/CD and Kubernetes
+- local Windows Prisma build friction can block `prisma generate`
+
+## Local development
 
 ### Prerequisites
+
 - Node.js 20+
 - PostgreSQL
 - Redis
-- Electricity Maps API key (optional for dev)
 
-### Installation
+### Install
 
 ```bash
-# Clone repository
-git clone <repo>
-cd ecobe-engine
-
-# Install dependencies
 npm install
+```
 
-# Setup environment
-cp .env.example .env
-# Edit .env with your values
+### Run development server
 
-# Start local services
-docker-compose up -d
-
-# Generate Prisma client
-npm run prisma:generate
-
-# Push database schema
-npx prisma db push
-
-# Start development server
+```bash
 npm run dev
 ```
 
-Server runs at http://localhost:3000
-
-## Environment Variables
-
-```env
-PORT=3000
-NODE_ENV=development
-
-# Required
-DATABASE_URL=postgresql://ecobe:ecobe@localhost:5432/ecobe
-REDIS_URL=redis://localhost:6379
-
-# Electricity Maps (optional for dev)
-ELECTRICITY_MAPS_API_KEY=your_key_here
-ELECTRICITY_MAPS_BASE_URL=https://api.electricitymap.org
-DEFAULT_MAX_CARBON_G_PER_KWH=400
-
-# DEKES Integration (optional)
-DEKES_API_URL=http://localhost:3000
-DEKES_API_KEY=your_dekes_key
-```
-
-## API Reference
-
-### Health Check
-```bash
-GET /health
-```
-
-### Energy Equation
-Calculate carbon footprint for workload.
+### Type-check
 
 ```bash
-POST /api/v1/energy/equation
-Content-Type: application/json
-
-{
-  "requestVolume": 1000,
-  "workloadType": "inference",
-  "modelSize": "mixtral-70b",
-  "regionTargets": ["US-CAL-CISO", "FR", "DE"],
-  "carbonBudget": 1000000,
-  "deadlineWindow": {
-    "start": "2026-02-12T00:00:00.000Z",
-    "end": "2026-02-12T01:00:00.000Z"
-  },
-  "hardwareMix": {
-    "cpu": 0.6,
-    "gpu": 0.3,
-    "tpu": 0.1
-  }
-}
+npm run type-check
 ```
 
-**Response:**
-```json
-{
-  "routingRecommendation": [
-    {
-      "region": "FR",
-      "rank": 1,
-      "carbonIntensity": 58,
-      "estimatedCO2": 2320,
-      "estimatedEnergyKwh": 0.04,
-      "score": 0.95
-    }
-  ],
-  "regionEstimates": [...],
-  "totalEstimatedCO2": 2320,
-  "withinBudget": true
-}
-```
-
-### Green Routing
-Get optimal region for workload.
+### Run focused doctrine tests
 
 ```bash
-POST /api/v1/route/green
-Content-Type: application/json
-
-{
-  "preferredRegions": ["FR", "DE", "US-CAL-CISO"],
-  "maxCarbonGPerKwh": 400,
-  "latencyMsByRegion": {
-    "FR": 80,
-    "DE": 60,
-    "US-CAL-CISO": 140
-  },
-  "carbonWeight": 0.5,
-  "latencyWeight": 0.3,
-  "costWeight": 0.2
-}
+npm test -- --runTestsByPath src/__tests__/ci-doctrine.test.ts
+npm test -- --runTestsByPath src/__tests__/ci-response-v2-contract.test.ts
 ```
 
-**Response:**
-```json
-{
-  "selectedRegion": "FR",
-  "carbonIntensity": 58,
-  "estimatedLatency": 80,
-  "score": 0.92,
-  "alternatives": [
-    {
-      "region": "DE",
-      "carbonIntensity": 120,
-      "score": 0.85
-    }
-  ]
-}
-```
-
-## Carbon Credits Tracking
-
-ECOBE includes a complete carbon credits management system:
+### Verify water provenance
 
 ```bash
-# Purchase carbon credits
-POST /api/v1/credits/purchase
-Content-Type: application/json
-
-{
-  "organizationId": "org_123",
-  "amountCO2": 10000,
-  "provider": "Gold Standard",
-  "priceUsd": 150,
-  "certificateUrl": "https://registry.goldstandard.org/cert/123"
-}
-
-# Retire credits (offset emissions)
-POST /api/v1/credits/retire
-Content-Type: application/json
-
-{
-  "creditIds": ["cred_123", "cred_456"],
-  "reason": "Q4 emissions offset",
-  "workloadRequestId": "wl_789"
-}
-
-# List credits
-GET /api/v1/credits?organizationId=org_123&status=ACTIVE
-
-# Get carbon balance
-GET /api/v1/credits/balance/org_123
-
-# Auto-offset to target percentage
-POST /api/v1/credits/auto-offset
-Content-Type: application/json
-
-{
-  "organizationId": "org_123",
-  "targetOffsetPercentage": 100
-}
+npm run water:verify-provenance
 ```
 
-**Response:**
-```json
-{
-  "organizationId": "org_123",
-  "availableCO2": 50000,
-  "totalEmissions": 125000,
-  "totalOffset": 75000,
-  "netEmissions": 50000,
-  "offsetPercentage": 60,
-  "credits": {
-    "active": 5,
-    "totalValue": 750
-  }
-}
-```
+## Build note
 
-## DEKES Integration
+On the current Windows machine, `npm run build` may fail during `prisma generate` because of a Prisma DLL rename lock. Type-checking and targeted tests are the more reliable validation paths in this local environment until that lock is resolved.
 
-ECOBE optimizes DEKES lead generation workloads for minimal carbon:
+## Key docs
 
-```typescript
-import { dekesIntegration } from './lib/dekes-integration'
-
-// Optimize single query
-const result = await dekesIntegration.optimizeQuery(
-  {
-    id: 'query_123',
-    query: 'sustainable tech companies',
-    estimatedResults: 500
-  },
-  10000,  // Carbon budget (gCO2eq)
-  ['US-CAL-CISO', 'FR', 'DE']
-)
-
-// Schedule batch queries for lowest carbon window
-const schedule = await dekesIntegration.scheduleBatchQueries(
-  queries,
-  regions,
-  24  // Look ahead 24 hours
-)
-```
-
-## Carbon Forecasting (ML Moat)
-
-Predict future carbon intensity:
-
-```typescript
-import { forecastCarbonIntensity, findOptimalWindow } from './lib/carbon-forecasting'
-
-// Get 24h forecast
-const forecasts = await forecastCarbonIntensity('US-CAL-CISO', 24)
-
-// Find optimal execution window
-const window = await findOptimalWindow(
-  'US-CAL-CISO',
-  4,  // Duration hours
-  48  // Look ahead hours
-)
-
-console.log(`Best window: ${window.startTime}`)
-console.log(`Savings: ${window.savings}% vs immediate`)
-```
-
-## Production Deployment
-
-### Docker
-
-```bash
-# Build image
-docker build -t ecobe-engine .
-
-# Run container
-docker run -p 3000:3000 --env-file .env ecobe-engine
-```
-
-### Railway (Dockerized CO₂ Router Engine)
-
-The production engine runs as a Docker container on Railway. Redeployments build the root `Dockerfile`, push the image, and Railway runs it with the env vars defined in your project.
-
-1. Install the Railway CLI: `npm i -g @railway/cli`
-2. Log in: `railway login`
-3. Select project: `railway link`
-4. Deploy the Docker image: `railway up`
-
-Railway automatically applies the health check (`/health`) and restart policy defined in `railway.json`.
-
-### Note on Automated Workflows
-
-**Previous automated workflows (EIA ingestion, forecast refresh, signal verification, cache warming) have been temporarily removed** to focus on core functionality. These will be re-implemented in a future update with improved reliability and monitoring.
-
-For now, data refresh should be handled manually through the API endpoints or custom scheduling.
-
-## Architecture
-
-```
-┌─────────────────────────────────────────┐
-│     Electricity Maps API                │
-│     (Real-time carbon data)             │
-└──────────────┬──────────────────────────┘
-               │
-               ↓
-┌─────────────────────────────────────────┐
-│     ECOBE Engine                        │
-│  ┌─────────────────────────────────┐   │
-│  │  Carbon Forecasting (ML)        │   │
-│  └─────────────────────────────────┘   │
-│  ┌─────────────────────────────────┐   │
-│  │  Green Routing Algorithm        │   │
-│  └─────────────────────────────────┘   │
-│  ┌─────────────────────────────────┐   │
-│  │  Energy Equation Calculator     │   │
-│  └─────────────────────────────────┘   │
-└──────────────┬──────────────────────────┘
-               │
-               ↓
-┌─────────────────────────────────────────┐
-│     DEKES Lead Generation               │
-│     (Optimized workload execution)      │
-└─────────────────────────────────────────┘
-```
-
-## Database Schema
-
-- **CarbonIntensity** - Real-time carbon data
-- **WorkloadRequest** - Workload optimization records
-- **RoutingDecision** - Routing decisions & scores
-- **CarbonForecast** - ML predictions
-- **DekesWorkload** - DEKES integration tracking
-- **CarbonCredit** - Carbon offset management
-- **EmissionLog** - All emissions logged
-- **Region** - Supported regions metadata
-
-## Monitoring
-
-### Key Metrics
-- Total carbon saved (gCO2eq)
-- Average carbon intensity
-- Workloads optimized
-- Cost savings
-- Forecast accuracy
-
-### Health Checks
-```bash
-# Application health
-curl http://localhost:3000/health
-
-# Database connection
-psql $DATABASE_URL -c "SELECT 1"
-
-# Redis connection
-redis-cli ping
-```
-
-## Development
-
-```bash
-# Run tests
-npm test
-
-# Type check
-npx tsc --noEmit
-
-# Format code
-npm run format
-
-# Lint
-npm run lint
-```
-
-## Future Enhancements
-
-### Phase 2
-- [ ] LSTM neural network for forecasting
-- [ ] Weather API integration
-- [ ] Multi-cloud optimization (AWS/GCP/Azure)
-- [ ] Real-time dashboard (React)
-- [ ] GraphQL API
-- [ ] WebSocket for live updates
-
-### Phase 3
-- [ ] Automated carbon offsetting
-- [ ] Sustainability reporting
-- [ ] API rate limiting & auth
-- [ ] Multi-region deployment
-- [ ] Load balancing
-- [ ] Kubernetes deployment
-
-## Contributing
-
-1. Fork repository
-2. Create feature branch
-3. Commit changes
-4. Push to branch
-5. Create Pull Request
-
-## License
-
-MIT
-
-## Support
-
-- Issues: GitHub Issues
-- Email: support@ecobe.com
-- Docs: https://docs.ecobe.com
-
----
-
-**Built for a sustainable future** 🌱
-
-Optimizing workloads for minimal carbon impact.
+- [Doctrine](C:/Users/antho/.windsurf/ecobe-engineclaude/ecobe-engine/docs/co2-router-doctrine.md)
+- [Universal Adapter Spec](C:/Users/antho/.windsurf/ecobe-engineclaude/ecobe-engine/docs/universal-adapter-spec.md)
+- [Investor Brief](C:/Users/antho/.windsurf/ecobe-engineclaude/ecobe-engine/docs/investor-brief.md)
+- [Enterprise Sales Narrative](C:/Users/antho/.windsurf/ecobe-engineclaude/ecobe-engine/docs/enterprise-sales-narrative.md)

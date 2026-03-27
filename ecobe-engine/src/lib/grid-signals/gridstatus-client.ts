@@ -12,7 +12,7 @@
 import axios from 'axios'
 import { env } from '../../config/env'
 import { recordIntegrationFailure, recordIntegrationSuccess } from '../integration-metrics'
-import { gridStatusResilience } from '../resilience'
+import { eiaResilience } from '../resilience'
 import { EIABalanceData, EIAInterchangeData, GridStatusFuelMixData } from './types'
 
 const GRIDSTATUS_BASE_URL = 'https://api.gridstatus.io/v1/datasets'
@@ -72,7 +72,7 @@ export class GridStatusClient {
       params.filter_column = 'respondent'
       params.filter_value = balancingAuthority
 
-      const response = await gridStatusResilience.execute('gridstatus-regional', () =>
+      const response = await eiaResilience.execute('gridstatus-regional', () =>
         axios.get<GridStatusRegionalResponse>(
           `${GRIDSTATUS_BASE_URL}/eia_regional_hourly/query`,
           { params, timeout: REQUEST_TIMEOUT }
@@ -155,13 +155,13 @@ export class GridStatusClient {
       // Fetch BOTH directions: BA as exporter (from_ba) AND as importer (to_ba)
       // InterchangeParser needs both to calculate correct net interchange
       const [fromResponse, toResponse] = await Promise.all([
-        gridStatusResilience.execute('gridstatus-interchange-from', () =>
+        eiaResilience.execute('gridstatus-interchange-from', () =>
           axios.get<GridStatusInterchangeResponse>(
             `${GRIDSTATUS_BASE_URL}/eia_ba_interchange_hourly/query`,
             { params: { ...baseParams, filter_column: 'from_ba', filter_value: balancingAuthority }, timeout: REQUEST_TIMEOUT }
           )
         ),
-        gridStatusResilience.execute('gridstatus-interchange-to', () =>
+        eiaResilience.execute('gridstatus-interchange-to', () =>
           axios.get<GridStatusInterchangeResponse>(
             `${GRIDSTATUS_BASE_URL}/eia_ba_interchange_hourly/query`,
             { params: { ...baseParams, filter_column: 'to_ba', filter_value: balancingAuthority }, timeout: REQUEST_TIMEOUT }
@@ -228,7 +228,7 @@ export class GridStatusClient {
       params.filter_column = 'respondent'
       params.filter_value = balancingAuthority
 
-      const response = await gridStatusResilience.execute('gridstatus-fuelmix', () =>
+      const response = await eiaResilience.execute('gridstatus-fuelmix', () =>
         axios.get<GridStatusFuelMixResponse>(
           `${GRIDSTATUS_BASE_URL}/eia_fuel_mix_hourly/query`,
           { params, timeout: REQUEST_TIMEOUT }

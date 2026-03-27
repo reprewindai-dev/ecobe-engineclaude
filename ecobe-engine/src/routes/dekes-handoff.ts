@@ -3,12 +3,31 @@ import { z } from 'zod'
 import { prisma } from '../lib/db'
 import { routeGreen } from '../lib/green-routing'
 import { env } from '../config/env'
+import { createDecision, persistCiDecisionResult } from './ci'
 
 const router = Router()
 
 // ── Auth guard ─────────────────────────────────────────────────────────────────
 const DEKES_API_KEY =
   env.DEKES_API_KEY || process.env.ECOBE_API_KEY || process.env.ECOBE_ENGINE_API_KEY
+const AUTO_HANDOFF_THRESHOLD = Number(process.env.DEKES_AUTO_HANDOFF_MIN_SCORE || 70)
+const DEFAULT_HANDOFF_REGIONS = ['us-east-1', 'us-west-2', 'eu-west-1', 'ap-southeast-1']
+
+type AutoHandoffPayload = {
+  decisionFrameId: string
+  action: string
+  reasonCode: string
+  selectedRegion: string
+  selectedRunner: string
+  proofId: string
+  policyTrace: Record<string, unknown>
+  carbonReductionPct: number
+  waterImpactDeltaLiters: number
+  latencyMs: {
+    total: number
+    compute: number
+  }
+}
 
 function requireApiKey(req: any, res: any, next: any) {
   const auth = req.headers.authorization
@@ -20,6 +39,118 @@ function requireApiKey(req: any, res: any, next: any) {
     return res.status(401).json({ error: 'Unauthorized' })
   }
   next()
+}
+
+function buildCandidateRegions(region?: string | null) {
+  if (!region) return DEFAULT_HANDOFF_REGIONS
+  const normalized = region.trim().toLowerCase()
+  if (normalized.includes('eu')) return ['eu-west-1', 'eu-central-1', 'us-east-1']
+  if (normalized.includes('apac') || normalized.includes('asia')) {
+    return ['ap-southeast-1', 'ap-northeast-1', 'us-west-2']
+  }
+  return DEFAULT_HANDOFF_REGIONS
+}
+
+async function maybeCreateAutoHandoff(prospect: {
+  id: string
+  externalLeadId: string | null
+  orgName: string | null
+  orgRegion: string | null
+  intentScore: number | null
+}) {
+  const qualificationScore = prospect.intentScore ?? 0
+  if (qualificationScore < AUTO_HANDOFF_THRESHOLD) {
+    return null
+  }
+
+  const candidateRegions = buildCandidateRegions(prospect.orgRegion)
+  const started = Date.now()
+  const decisionResult = await createDecision({
+    preferredRegions: candidateRegions,
+    carbonWeight: 0.55,
+    waterWeight: 0.3,
+    latencyWeight: 0.1,
+    costWeight: 0.05,
+    jobType: 'light',
+    criticality: 'standard',
+    criticalPath: false,
+    waterPolicyProfile: 'default',
+    policyVersion: 'water_policy_v1',
+    allowDelay: true,
+    signalPolicy: 'marginal_first',
+    estimatedEnergyKwh: 0.6,
+    metadata: {
+      source: 'dekes_auto_handoff',
+      prospectId: prospect.id,
+      externalLeadId: prospect.externalLeadId,
+      organizationName: prospect.orgName,
+    },
+  })
+  const totalMs = Date.now() - started
+  const response = await persistCiDecisionResult(decisionResult, {
+    total: totalMs,
+    compute: totalMs,
+  })
+
+  const payload: AutoHandoffPayload = {
+    decisionFrameId: response.decisionFrameId,
+    action: response.decision,
+    reasonCode: response.reasonCode,
+    selectedRegion: response.selectedRegion,
+    selectedRunner: response.selectedRunner,
+    proofId: response.proofRecord.job_id,
+    policyTrace: response.policyTrace,
+    carbonReductionPct: response.savings.carbonReductionPct,
+    waterImpactDeltaLiters: response.savings.waterImpactDeltaLiters,
+    latencyMs: {
+      total: totalMs,
+      compute: totalMs,
+    },
+  }
+
+  await prisma.dekesWorkload.create({
+    data: {
+      dekesQueryId: prospect.externalLeadId ?? prospect.id,
+      queryString: prospect.orgName ?? 'DEKES auto handoff',
+      estimatedQueries: 1,
+      estimatedResults: 1,
+      carbonBudget: response.baseline.carbonIntensity,
+      scheduledTime: new Date(),
+      selectedRegion: response.selectedRegion,
+      actualCO2: response.selected.carbonIntensity,
+      status: 'ROUTED',
+      completedAt: new Date(),
+    },
+  })
+
+  const handoff = await prisma.dekesHandoffEvent.create({
+    data: {
+      prospectId: prospect.id,
+      externalLeadId: prospect.externalLeadId,
+      status: 'PROOFED',
+      qualificationScore,
+      notes: JSON.stringify(payload),
+    },
+  })
+
+  await prisma.integrationEvent.create({
+    data: {
+      source: 'DEKES_INTEGRATION',
+      eventType: 'HANDOFF_PROOF_READY',
+      message: JSON.stringify({
+        handoffId: handoff.id,
+        prospectId: prospect.id,
+        externalLeadId: prospect.externalLeadId,
+        decisionFrameId: payload.decisionFrameId,
+        proofId: payload.proofId,
+        selectedRegion: payload.selectedRegion,
+        action: payload.action,
+      }),
+      success: true,
+    },
+  }).catch(() => {})
+
+  return payload
 }
 
 // ── POST /api/v1/prospects ─────────────────────────────────────────────────────
@@ -86,10 +217,44 @@ router.post('/prospects', requireApiKey, async (req, res) => {
       },
     }).catch(() => {})
 
+    const autoHandoff = await maybeCreateAutoHandoff({
+      id: prospect.id,
+      externalLeadId: prospect.externalLeadId,
+      orgName: prospect.orgName,
+      orgRegion: prospect.orgRegion,
+      intentScore: prospect.intentScore,
+    }).catch(async (error: unknown) => {
+      await prisma.dekesHandoffEvent.create({
+        data: {
+          prospectId: prospect.id,
+          externalLeadId: prospect.externalLeadId,
+          status: 'FAILED',
+          qualificationScore: prospect.intentScore,
+          notes: JSON.stringify({
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        },
+      }).catch(() => {})
+      await prisma.integrationEvent.create({
+        data: {
+          source: 'DEKES_INTEGRATION',
+          eventType: 'HANDOFF_FAILED',
+          message: JSON.stringify({
+            prospectId: prospect.id,
+            externalLeadId: prospect.externalLeadId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+          success: false,
+        },
+      }).catch(() => {})
+      return null
+    })
+
     return res.status(201).json({
       id: prospect.id,
       status: 'RECEIVED',
       externalLeadId: prospect.externalLeadId,
+      autoHandoff,
     })
   } catch (error: any) {
     if (error instanceof z.ZodError) {
