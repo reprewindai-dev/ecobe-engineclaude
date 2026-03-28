@@ -277,6 +277,38 @@ function percentile(values: number[], p: number): number {
   return sorted[Math.max(0, idx)]
 }
 
+function isFiniteLatency(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+}
+
+async function getPersistedLatencyWindow(limit = 250) {
+  const recentDecisions = await prisma.cIDecision.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+    select: {
+      metadata: true,
+    },
+  })
+
+  const totalMs: number[] = []
+  const computeMs: number[] = []
+
+  for (const decision of recentDecisions) {
+    const latency = (decision.metadata as any)?.response?.latencyMs
+    if (isFiniteLatency(latency?.total)) {
+      totalMs.push(latency.total)
+    }
+    if (isFiniteLatency(latency?.compute)) {
+      computeMs.push(latency.compute)
+    }
+  }
+
+  return {
+    totalMs: totalMs.reverse(),
+    computeMs: computeMs.reverse(),
+  }
+}
+
 function estimateEnergyKwh(jobType: RoutingRequest['jobType'], explicit?: number): number {
   if (explicit && explicit > 0) return explicit
   if (jobType === 'heavy') return 8
@@ -2088,17 +2120,36 @@ router.get('/health', async (_req, res) => {
   })
 })
 
-router.get('/slo', (_req, res) => {
-  const p50Total = percentile(sloState.totalMs, 50)
-  const p95Total = percentile(sloState.totalMs, 95)
-  const p99Total = percentile(sloState.totalMs, 99)
-  const p50Compute = percentile(sloState.computeMs, 50)
-  const p95Compute = percentile(sloState.computeMs, 95)
-  const p99Compute = percentile(sloState.computeMs, 99)
-  const currentTotal = sloState.totalMs[sloState.totalMs.length - 1] ?? 0
-  const currentCompute = sloState.computeMs[sloState.computeMs.length - 1] ?? 0
+router.get('/slo', async (_req, res) => {
+  let totalSamples = sloState.totalMs
+  let computeSamples = sloState.computeMs
+  let sampleSource: 'memory' | 'persisted' | 'none' = 'memory'
+
+  if (totalSamples.length === 0 || computeSamples.length === 0) {
+    const persisted = await getPersistedLatencyWindow()
+    if (totalSamples.length === 0 && persisted.totalMs.length > 0) {
+      totalSamples = persisted.totalMs
+    }
+    if (computeSamples.length === 0 && persisted.computeMs.length > 0) {
+      computeSamples = persisted.computeMs
+    }
+    sampleSource =
+      totalSamples.length > 0 || computeSamples.length > 0
+        ? 'persisted'
+        : 'none'
+  }
+
+  const p50Total = percentile(totalSamples, 50)
+  const p95Total = percentile(totalSamples, 95)
+  const p99Total = percentile(totalSamples, 99)
+  const p50Compute = percentile(computeSamples, 50)
+  const p95Compute = percentile(computeSamples, 95)
+  const p99Compute = percentile(computeSamples, 99)
+  const currentTotal = totalSamples[totalSamples.length - 1] ?? 0
+  const currentCompute = computeSamples[computeSamples.length - 1] ?? 0
   res.json({
-    samples: sloState.totalMs.length,
+    samples: totalSamples.length,
+    sampleSource,
     p50: {
       totalMs: Number(p50Total.toFixed(3)),
       computeMs: Number(p50Compute.toFixed(3)),
@@ -2139,8 +2190,8 @@ router.get('/slo', (_req, res) => {
       },
     },
     counts: {
-      totalSamples: sloState.totalMs.length,
-      computeSamples: sloState.computeMs.length,
+      totalSamples: totalSamples.length,
+      computeSamples: computeSamples.length,
     },
   })
 })
