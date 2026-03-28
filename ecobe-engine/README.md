@@ -46,17 +46,18 @@ The current engine already has:
 
 ## What is not fully closed yet
 
-The product is operational, but not fully assurance-ready.
+The product is live and operational, but not every runtime-quality target is closed.
 
-Why:
+Current gaps are operational rather than conceptual:
 
-- water source-file provenance is not fully verified yet
-- the provenance verifier currently reports missing local source files for key water datasets
-- the adapter ecosystem is structurally correct but still early
+- latency budgets are still above target in live production
+- replay consistency still needs more hardening
+- provider quality and freshness still vary by source
+- the adapter ecosystem is structurally correct but still early outside the strongest wedges
 
 Use this external qualifier:
 
-Production-grade deterministic decisioning and proof, with operational water authority today and full assurance closure still in progress.
+Production-grade deterministic decisioning and proof, with live operational authority and continuous hardening still in progress.
 
 ## Core runtime flow
 
@@ -176,10 +177,24 @@ Best fit environments:
 npm install
 ```
 
+### Recommended validation posture
+
+- **Windows** is a convenience environment for local development.
+- **Railway/Linux** is the canonical validation path for production truth.
+- Do not treat a Windows Prisma DLL lock as an engine architecture failure.
+
 ### Run development server
 
 ```bash
 npm run dev
+```
+
+### Run a fresh Windows-safe development session
+
+This command cleans generated Prisma artifacts, stops repo-local Node holders when needed on Windows, regenerates the client, then starts the dev server.
+
+```bash
+npm run dev:fresh
 ```
 
 ### Type-check
@@ -201,9 +216,57 @@ npm test -- --runTestsByPath src/__tests__/ci-response-v2-contract.test.ts
 npm run water:verify-provenance
 ```
 
-## Build note
+## Windows Prisma workflow
 
-On the current Windows machine, `npm run build` may fail during `prisma generate` because of a Prisma DLL rename lock. Type-checking and targeted tests are the more reliable validation paths in this local environment until that lock is resolved.
+Windows can keep `node_modules/.prisma/client/query_engine-windows.dll.node` locked if a repo-local Node process, Prisma Studio session, or orphaned watcher is still holding the Prisma engine open.
+
+Use these scripts instead of hand-cleaning:
+
+```bash
+npm run clean:prisma
+npm run prisma:regen
+npm run prisma:reset-win
+npm run dev:fresh
+```
+
+What they do:
+
+- `clean:prisma`
+  - removes `node_modules/.prisma`
+  - on Windows, terminates repo-local Node processes that commonly lock Prisma
+- `prisma:regen`
+  - runs guarded cleanup, then `prisma generate`
+- `prisma:reset-win`
+  - same intent as `prisma:regen`, explicitly named for Windows recovery flow
+- `dev:fresh`
+  - guarded cleanup
+  - Prisma client regeneration
+  - starts the dev server only after cleanup is complete
+
+### Minimal Windows recovery procedure
+
+If Prisma locks reappear:
+
+```bash
+npm run prisma:reset-win
+```
+
+If you want the manual equivalent:
+
+1. Stop local dev servers and Prisma Studio.
+2. Remove `node_modules/.prisma`.
+3. Run `npx prisma generate`.
+4. Start the app again.
+
+### Build note
+
+`npm run build` now routes Prisma generation through the guarded cleanup path.
+
+For final release confidence:
+
+- trust Railway/Linux deploys
+- trust CI and production verification
+- treat Windows Prisma locking as a local operational nuisance, not a product blocker
 
 ## Key docs
 
