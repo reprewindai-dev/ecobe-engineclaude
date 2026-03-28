@@ -3,7 +3,8 @@ import { ember } from '../ember'
 import { gbCarbonIntensity } from '../gb-carbon-intensity'
 import { denmarkCarbon } from '../denmark-carbon'
 import { finlandCarbon } from '../finland-carbon'
-import { GridSignalCache } from '../grid-signals/grid-signal-cache'
+import { env } from '../../config/env'
+import { CachedRoutingSignalRecord, GridSignalCache } from '../grid-signals/grid-signal-cache'
 import { GridSignalAudit } from '../grid-signals/grid-signal-audit'
 import { getRegionMapping } from '../grid-signals/region-mapping'
 import { FuelMixParser } from '../grid-signals/fuel-mix-parser'
@@ -75,6 +76,41 @@ export interface RoutingSignal {
  *  - Ember baseline for region, then static 450 gCO2/kWh
  */
 export class ProviderRouter {
+  private static readonly LAST_KNOWN_GOOD_MAX_AGE_SEC = Math.max(env.GRID_SIGNAL_CACHE_TTL * 4, 3600)
+  private static readonly LAST_KNOWN_GOOD_SAFETY_MARGIN_FACTOR = 0.1
+  private static readonly LAST_KNOWN_GOOD_SAFETY_MARGIN_MIN = 25
+
+  async getRoutingSignal(region: string, timestamp: Date): Promise<RoutingSignal> {
+    const record = await this.getRoutingSignalRecord(region, timestamp)
+    return record.signal
+  }
+
+  async getRoutingSignalRecord(region: string, timestamp: Date): Promise<CachedRoutingSignalRecord> {
+    const startedAt = Date.now()
+    const signal = await this.getLiveRoutingSignal(region, timestamp)
+    const lastLatencyMs = Date.now() - startedAt
+    const record = this.buildCachedRoutingSignalRecord(signal, timestamp, lastLatencyMs)
+
+    if (!record.degraded) {
+      await GridSignalCache.cacheLastKnownGoodRoutingSignal(region, record).catch((error) => {
+        console.warn(`Failed to cache last-known-good routing signal for ${region}:`, error)
+      })
+      return record
+    }
+
+    const lastKnownGood = await GridSignalCache.getLastKnownGoodRoutingSignal(region)
+    const ageSec = lastKnownGood?.stalenessSec ?? this.computeSignalStalenessSec(lastKnownGood?.signal, timestamp)
+    if (
+      lastKnownGood &&
+      (ageSec ?? ProviderRouter.LAST_KNOWN_GOOD_MAX_AGE_SEC + 1) <=
+        ProviderRouter.LAST_KNOWN_GOOD_MAX_AGE_SEC
+    ) {
+      return this.buildConservativeLastKnownGoodRecord(lastKnownGood, timestamp)
+    }
+
+    return record
+  }
+
   /**
    * Produce a routing signal using free-first provider stack:
    *
@@ -84,7 +120,7 @@ export class ProviderRouter {
    * 4. Ember structural baseline — global fallback
    * 5. Static fallback — degraded state
    */
-  async getRoutingSignal(region: string, timestamp: Date): Promise<RoutingSignal> {
+  private async getLiveRoutingSignal(region: string, timestamp: Date): Promise<RoutingSignal> {
     const referenceTime = timestamp.toISOString()
     const fetchedAt = new Date().toISOString()
 
@@ -706,6 +742,72 @@ export class ProviderRouter {
     return emberData
   }
 
+  private computeSignalStalenessSec(
+    signal: Pick<RoutingSignal, 'provenance'> | undefined,
+    timestamp: Date
+  ): number | null {
+    if (!signal?.provenance?.referenceTime) return null
+    const referenceTime = new Date(signal.provenance.referenceTime).getTime()
+    if (!Number.isFinite(referenceTime)) return null
+    return Math.max(0, Math.round((timestamp.getTime() - referenceTime) / 1000))
+  }
+
+  private buildCachedRoutingSignalRecord(
+    signal: RoutingSignal,
+    timestamp: Date,
+    lastLatencyMs: number | null
+  ): CachedRoutingSignalRecord {
+    const stalenessSec = this.computeSignalStalenessSec(signal, timestamp)
+    const degraded =
+      signal.provenance.fallbackUsed || signal.confidence < 0.6 || signal.signalMode === 'fallback'
+
+    return {
+      signal,
+      fetchedAt: new Date().toISOString(),
+      stalenessSec,
+      lastLatencyMs,
+      degraded,
+    }
+  }
+
+  private buildConservativeLastKnownGoodRecord(
+    record: CachedRoutingSignalRecord,
+    timestamp: Date
+  ): CachedRoutingSignalRecord {
+    const safetyMargin = Math.max(
+      ProviderRouter.LAST_KNOWN_GOOD_SAFETY_MARGIN_MIN,
+      Math.round(record.signal.carbonIntensity * ProviderRouter.LAST_KNOWN_GOOD_SAFETY_MARGIN_FACTOR)
+    )
+    const adjustedSignal: RoutingSignal = {
+      ...record.signal,
+      carbonIntensity: Number((record.signal.carbonIntensity + safetyMargin).toFixed(3)),
+      confidence: Math.max(0.05, Number((record.signal.confidence - 0.2).toFixed(3))),
+      signalMode: 'fallback',
+      accountingMethod: 'average',
+      provenance: {
+        ...record.signal.provenance,
+        sourceUsed: `LKG_${record.signal.provenance.sourceUsed}`,
+        fetchedAt: new Date().toISOString(),
+        referenceTime: timestamp.toISOString(),
+        fallbackUsed: true,
+        validationNotes: [
+          record.signal.provenance.validationNotes,
+          `Using last-known-good signal with +${safetyMargin} gCO2/kWh safety margin`,
+        ]
+          .filter(Boolean)
+          .join('; '),
+      },
+    }
+
+    return {
+      signal: adjustedSignal,
+      fetchedAt: new Date().toISOString(),
+      stalenessSec: this.computeSignalStalenessSec(record.signal, timestamp),
+      lastLatencyMs: record.lastLatencyMs,
+      degraded: true,
+    }
+  }
+
   /**
    * Check if signal quality meets routing requirements
    */
@@ -758,16 +860,23 @@ export class ProviderRouter {
   /**
    * Cache routing signal for performance
    */
-  async cacheRoutingSignal(region: string, signal: RoutingSignal, timestamp: Date): Promise<void> {
-    const cacheKey = `routing-signal:${region}:${timestamp.toISOString()}`
+  async cacheRoutingSignal(
+    region: string,
+    signal: RoutingSignal | CachedRoutingSignalRecord,
+    timestamp: Date
+  ): Promise<void> {
+    const record =
+      'signal' in signal ? signal : this.buildCachedRoutingSignalRecord(signal, timestamp, null)
+
+    await GridSignalCache.cacheRoutingSignal(region, timestamp.toISOString(), record)
     await GridSignalCache.cacheProviderDisagreement(
       region,
       timestamp.toISOString(),
       {
-        level: signal.provenance.disagreementFlag ? 'medium' : 'none',
-        disagreementPct: signal.provenance.disagreementPct,
-        providers: [signal.source],
-        values: [signal.carbonIntensity]
+        level: record.signal.provenance.disagreementFlag ? 'medium' : 'none',
+        disagreementPct: record.signal.provenance.disagreementPct,
+        providers: [record.signal.source],
+        values: [record.signal.carbonIntensity]
       }
     )
   }
@@ -775,34 +884,55 @@ export class ProviderRouter {
   /**
    * Get cached routing signal
    */
-  async getCachedRoutingSignal(region: string, timestamp: Date): Promise<RoutingSignal | null> {
-    const cached = await GridSignalCache.getCachedProviderDisagreement(
+  async getCachedRoutingSignalRecord(region: string, timestamp: Date): Promise<CachedRoutingSignalRecord | null> {
+    const cachedRecord = await GridSignalCache.getCachedRoutingSignal(region, timestamp.toISOString())
+    if (cachedRecord) {
+      return {
+        ...cachedRecord,
+        stalenessSec:
+          cachedRecord.stalenessSec ?? this.computeSignalStalenessSec(cachedRecord.signal, timestamp),
+      }
+    }
+
+    const cachedDisagreement = await GridSignalCache.getCachedProviderDisagreement(
       region,
       timestamp.toISOString()
     )
 
-    if (cached && cached.level !== 'severe') {
-      // Reconstruct routing signal from cached data
-      return {
-        carbonIntensity: cached.values[0] || 400,
-        source: cached.providers[0] as any,
-        isForecast: false,
-        confidence: 0.8,
-        signalMode: cached.providers[0]?.includes('watttime') ? 'marginal' : 'average',
-        accountingMethod: cached.providers[0]?.includes('watttime') ? 'marginal' : 'average',
-        provenance: {
-          sourceUsed: `CACHED_${cached.providers[0]}`,
-          contributingSources: cached.providers,
-          referenceTime: timestamp.toISOString(),
-          fetchedAt: new Date().toISOString(),
-          fallbackUsed: false,
-          disagreementFlag: cached.level !== 'none',
-          disagreementPct: cached.disagreementPct
-        }
+    if (cachedDisagreement && cachedDisagreement.level !== 'severe') {
+      const reconstructed: CachedRoutingSignalRecord = {
+        signal: {
+          carbonIntensity: cachedDisagreement.values[0] || 400,
+          source: cachedDisagreement.providers[0] as any,
+          isForecast: false,
+          confidence: 0.8,
+          signalMode: cachedDisagreement.providers[0]?.includes('watttime') ? 'marginal' : 'average',
+          accountingMethod: cachedDisagreement.providers[0]?.includes('watttime') ? 'marginal' : 'average',
+          provenance: {
+            sourceUsed: `CACHED_${cachedDisagreement.providers[0]}`,
+            contributingSources: cachedDisagreement.providers,
+            referenceTime: timestamp.toISOString(),
+            fetchedAt: new Date().toISOString(),
+            fallbackUsed: false,
+            disagreementFlag: cachedDisagreement.level !== 'none',
+            disagreementPct: cachedDisagreement.disagreementPct,
+          },
+        },
+        fetchedAt: new Date().toISOString(),
+        stalenessSec: 0,
+        lastLatencyMs: null,
+        degraded: false,
       }
+      await GridSignalCache.cacheRoutingSignal(region, timestamp.toISOString(), reconstructed).catch(() => undefined)
+      return reconstructed
     }
 
     return null
+  }
+
+  async getCachedRoutingSignal(region: string, timestamp: Date): Promise<RoutingSignal | null> {
+    const cached = await this.getCachedRoutingSignalRecord(region, timestamp)
+    return cached?.signal ?? null
   }
 
   /**

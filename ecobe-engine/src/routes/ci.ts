@@ -52,8 +52,10 @@ import { evaluateExternalPolicyHook } from '../lib/policy/external-hook'
 import { evaluateSekedPolicyAdapter } from '../lib/policy/seked-policy-adapter'
 import { persistExportBatch } from '../lib/proof/export-chain'
 import { env } from '../config/env'
+import { trackRecentRoutingRegions } from '../lib/cache-warmer'
 import {
   buildWaterAuthority,
+  getWaterArtifactHealthSnapshot,
   getWaterArtifactMetadata,
   loadWaterArtifacts,
   resolveWaterSignal,
@@ -68,6 +70,8 @@ import type {
   WaterDecisionMode,
   WaterPolicyProfile,
   WaterScenario,
+  WaterArtifactMetadata,
+  WaterManifestDataset,
   WaterSignal,
 } from '../lib/water/types'
 import type { ExternalPolicyHookResult } from '../lib/policy/external-hook'
@@ -171,6 +175,18 @@ type CandidateEvaluation = {
   waterFreshnessSec: number | null
 }
 
+type DecisionStageTimings = {
+  artifactSnapshotMs: number
+  candidateEvaluationMs: number
+  policyHookMs: number
+  doctrineAssemblyMs: number
+}
+
+export type DecisionExecutionContext = {
+  decisionFrameId?: string
+  nowIso?: string
+}
+
 const sloState = {
   totalMs: [] as number[],
   computeMs: [] as number[],
@@ -270,6 +286,28 @@ function recordLatency(totalMs: number, computeMs: number) {
   }
 }
 
+function logSlowDecision(input: {
+  computeMs: number
+  totalMs: number
+  decisionFrameId: string
+  selectedRegion: string
+  reasonCode: string
+  stageTimings: DecisionStageTimings
+  providerResolutionMs: number
+}) {
+  if (input.computeMs <= sloState.budget.computeP95Ms) return
+
+  console.warn('Slow decision path detected', {
+    decisionFrameId: input.decisionFrameId,
+    selectedRegion: input.selectedRegion,
+    reasonCode: input.reasonCode,
+    computeMs: input.computeMs,
+    totalMs: input.totalMs,
+    providerResolutionMs: input.providerResolutionMs,
+    stageTimings: input.stageTimings,
+  })
+}
+
 function percentile(values: number[], p: number): number {
   if (values.length === 0) return 0
   const sorted = [...values].sort((a, b) => a - b)
@@ -363,15 +401,25 @@ function toCacheBucket(timestamp: Date): Date {
 async function evaluateCandidates(data: RoutingRequest, energyKwh: number, at: Date) {
   const reliabilityByRegion = await loadRegionReliabilityMultipliers(data.preferredRegions)
   const cacheBucket = toCacheBucket(at)
+  trackRecentRoutingRegions(data.preferredRegions)
   const candidates = await Promise.all(
     data.preferredRegions.map(async (region) => {
       const providerResolutionStarted = Date.now()
-      const cachedSignal = await providerRouter.getCachedRoutingSignal(region, cacheBucket)
-      const signal = cachedSignal ?? (await providerRouter.getRoutingSignal(region, at))
+      const cachedSignalRecord = await providerRouter.getCachedRoutingSignalRecord(region, cacheBucket)
+      const useWarmCache = Boolean(cachedSignalRecord && !cachedSignalRecord.degraded)
+      const signalRecord = useWarmCache
+        ? cachedSignalRecord!
+        : await providerRouter.getRoutingSignalRecord(region, at)
+      const signal = signalRecord.signal
       const providerResolutionMs = Date.now() - providerResolutionStarted
+      recordTelemetryMetric(telemetryMetricNames.providerResolutionLatencyMs, 'histogram', providerResolutionMs, {
+        region,
+        cache_status: signal.provenance.fallbackUsed ? 'fallback' : useWarmCache ? 'warm' : 'live',
+        source: signal.source,
+      })
 
-      if (!cachedSignal) {
-        providerRouter.cacheRoutingSignal(region, signal, cacheBucket).catch((error) => {
+      if (!useWarmCache) {
+        providerRouter.cacheRoutingSignal(region, signalRecord, cacheBucket).catch((error) => {
           console.warn('Failed to cache routing signal', { region, error })
         })
       }
@@ -471,7 +519,7 @@ async function evaluateCandidates(data: RoutingRequest, energyKwh: number, at: D
         guardrailReasons: guardrailCheck.trace.reasonCodes,
         providerSnapshotRef,
         waterAuthority,
-        cacheStatus: signal.provenance.fallbackUsed ? 'fallback' : cachedSignal ? 'warm' : 'live',
+        cacheStatus: signal.provenance.fallbackUsed ? 'fallback' : useWarmCache ? 'warm' : 'live',
         providerResolutionMs,
         carbonFreshnessSec: freshnessSec,
         waterFreshnessSec,
@@ -783,21 +831,28 @@ type AppliedPolicyResult = {
   reasonCodes: string[]
 }
 
-export async function createDecision(data: RoutingRequestInput) {
-  const timestampIso = data.timestamp ?? new Date().toISOString()
+export async function createDecision(
+  data: RoutingRequestInput,
+  executionContext: DecisionExecutionContext = {}
+) {
+  const timestampIso = data.timestamp ?? executionContext.nowIso ?? new Date().toISOString()
   const normalizedRequest = requestSchema.parse({
     ...data,
     policyVersion: data.policyVersion ?? WATER_POLICY_VERSION,
     decisionMode: data.decisionMode ?? 'runtime_authorization',
     timestamp: timestampIso,
   })
+  const artifactSnapshotStarted = Date.now()
   const { manifest } = loadWaterArtifacts()
-  const artifactHealth = validateWaterArtifacts()
+  const artifactHealth = getWaterArtifactHealthSnapshot()
+  const artifactSnapshotMs = Date.now() - artifactSnapshotStarted
   const now = new Date(timestampIso)
   const requestId = resolveRequestId(normalizedRequest)
   const transport = resolveTransport(normalizedRequest)
   const energyKwh = estimateEnergyKwh(normalizedRequest.jobType, normalizedRequest.estimatedEnergyKwh)
+  const candidateEvaluationStarted = Date.now()
   const candidateEvaluations = await evaluateCandidates(normalizedRequest, energyKwh, now)
+  const candidateEvaluationMs = Date.now() - candidateEvaluationStarted
   const precedenceProtected = isPrecedenceProtected(normalizedRequest)
   const delayWindow = resolveDelayWindow({
     generatedAt: now,
@@ -885,7 +940,7 @@ export async function createDecision(data: RoutingRequestInput) {
     reasonCode = 'THROTTLE_CARBON_AND_CRITICALITY'
   }
 
-  const decisionFrameId = randomUUID()
+  const decisionFrameId = executionContext.decisionFrameId ?? randomUUID()
   const policyRequest = {
     decisionFrameId,
     policyProfile: normalizedRequest.waterPolicyProfile as WaterPolicyProfile,
@@ -926,8 +981,10 @@ export async function createDecision(data: RoutingRequestInput) {
     timestamp: timestampIso,
   }
 
+  const policyHookStarted = Date.now()
   const sekedPolicy = await evaluateSekedPolicyAdapter(policyRequest)
   const externalPolicy = await evaluateExternalPolicyHook(policyRequest)
+  const policyHookMs = Date.now() - policyHookStarted
 
   const applyPolicyDirectives = (
     policy:
@@ -1033,6 +1090,7 @@ export async function createDecision(data: RoutingRequestInput) {
             : 'DENY_DELAY_NOT_PERMITTED'
   }
 
+  const doctrineAssemblyStarted = Date.now()
   const signalConfidence = computeSignalConfidence(
     selected.carbonConfidence,
     selected.waterSignal.confidence
@@ -1203,6 +1261,7 @@ export async function createDecision(data: RoutingRequestInput) {
       selectedRegion: selected.region,
       policyProfile: normalizedRequest.waterPolicyProfile,
       criticality: normalizedRequest.criticality,
+      generatedAt: now,
       notBefore: delayWindow.notBefore,
       delayMinutes: delayWindow.delayMinutes ?? undefined,
     }) as unknown as Record<string, unknown>,
@@ -1237,6 +1296,51 @@ export async function createDecision(data: RoutingRequestInput) {
     mss,
     decisionExplanation,
   })
+  const doctrineAssemblyMs = Date.now() - doctrineAssemblyStarted
+
+  const stageTimings: DecisionStageTimings = {
+    artifactSnapshotMs,
+    candidateEvaluationMs,
+    policyHookMs,
+    doctrineAssemblyMs,
+  }
+
+  recordTelemetryMetric(
+    telemetryMetricNames.authorizationArtifactSnapshotLatencyMs,
+    'histogram',
+    artifactSnapshotMs,
+    {
+      runtime: transport.runtime,
+      transport: transport.transport,
+    }
+  )
+  recordTelemetryMetric(
+    telemetryMetricNames.authorizationCandidateEvaluationLatencyMs,
+    'histogram',
+    candidateEvaluationMs,
+    {
+      runtime: transport.runtime,
+      transport: transport.transport,
+    }
+  )
+  recordTelemetryMetric(
+    telemetryMetricNames.authorizationPolicyHookLatencyMs,
+    'histogram',
+    policyHookMs,
+    {
+      runtime: transport.runtime,
+      transport: transport.transport,
+    }
+  )
+  recordTelemetryMetric(
+    telemetryMetricNames.authorizationDoctrineAssemblyLatencyMs,
+    'histogram',
+    doctrineAssemblyMs,
+    {
+      runtime: transport.runtime,
+      transport: transport.transport,
+    }
+  )
 
   return {
     response,
@@ -1250,6 +1354,9 @@ export async function createDecision(data: RoutingRequestInput) {
       candidateEvaluations,
       requestId,
       transport,
+      stageTimings,
+      manifestDatasets: manifest.datasets,
+      waterArtifactMetadata: artifactHealth.artifactMetadata,
     },
   }
 }
@@ -1330,9 +1437,8 @@ export async function persistCiDecisionResult(
   }
 ) {
   const validatedResponse = await finalizeCiDecisionResponse(result, latencyMs, options)
-
-  const { manifest } = loadWaterArtifacts()
-  const waterArtifacts = getWaterArtifactMetadata()
+  const manifestDatasets = result.persistable.manifestDatasets
+  const waterArtifacts = result.persistable.waterArtifactMetadata
   await prisma.$transaction(async (tx: any) => {
     const persisted = await tx.cIDecision.create({
       data: {
@@ -1368,7 +1474,7 @@ export async function persistCiDecisionResult(
           response: validatedResponse,
           policyTrace: validatedResponse.policyTrace,
           signalConfidence: result.persistable.signalConfidence,
-          datasetProvenance: manifest.datasets,
+          datasetProvenance: manifestDatasets,
           waterArtifacts,
           decisionAction: validatedResponse.decision,
           selectedReliabilityMultiplier: result.persistable.selected.reliabilityMultiplier,
@@ -1392,7 +1498,7 @@ export async function persistCiDecisionResult(
       confidence: validatedResponse.signalConfidence,
       signalsUsed: validatedResponse.proofRecord.signals_used,
       datasetVersions: validatedResponse.proofRecord.dataset_versions,
-      sourceProvenance: manifest.datasets as unknown as Record<string, unknown>[],
+      sourceProvenance: manifestDatasets as unknown as Record<string, unknown>[],
       canonicalDecision: validatedResponse.decisionEnvelope,
       proof: validatedResponse.proofEnvelope,
       adapter: validatedResponse.adapterContext ?? validatedResponse.decisionEnvelope.transport,
@@ -1551,6 +1657,16 @@ async function routeDecisionHandler(req: Request, res: Response) {
       console.warn('Failed to persist CI decision:', dbError)
       validatedResponse.policyTrace.reasonCodes.push('DB_PERSIST_FAILED_LOCAL_RESPONSE_ONLY')
     }
+
+    logSlowDecision({
+      computeMs,
+      totalMs,
+      decisionFrameId: result.response.decisionFrameId,
+      selectedRegion: result.response.selectedRegion,
+      reasonCode: result.response.reasonCode,
+      stageTimings: result.persistable.stageTimings,
+      providerResolutionMs: result.persistable.selected.providerResolutionMs,
+    })
 
     if (idempotencyCacheKey) {
       await writeIdempotentResponse(idempotencyCacheKey, validatedResponse)
@@ -2312,7 +2428,17 @@ router.get('/decisions/:decisionFrameId/replay', internalServiceGuard, async (re
       })
     }
 
-    const replayResult = await createDecision(requestSchema.parse(requestPayload))
+    const replayTimestamp =
+      typeof requestPayload.timestamp === 'string'
+        ? requestPayload.timestamp
+        : typeof metadata.response?.proofRecord?.timestamp === 'string'
+          ? metadata.response.proofRecord.timestamp
+          : decision.createdAt.toISOString()
+
+    const replayResult = await createDecision(requestSchema.parse(requestPayload), {
+      decisionFrameId: decision.decisionFrameId,
+      nowIso: replayTimestamp,
+    })
     const replayResponse = await finalizeCiDecisionResponse(replayResult)
     const mismatches = [
       (metadata.response?.decision ?? null) === replayResponse.decision ? null : 'decision',

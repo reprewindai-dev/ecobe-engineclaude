@@ -1,5 +1,6 @@
 import { providerRouter } from './carbon/provider-router'
 import { GridSignalCache } from './grid-signals/grid-signal-cache'
+import { env } from '../config/env'
 import { redis } from './redis'
 
 const SUPPORTED_REGIONS = [
@@ -7,23 +8,47 @@ const SUPPORTED_REGIONS = [
   'eu-central-1', 'ap-southeast-1', 'ap-northeast-1'
 ]
 
+const recentRegions = new Map<string, number>()
+let warmLoopTimer: NodeJS.Timeout | null = null
+
+function getWarmRegions() {
+  const now = Date.now()
+  const cutoff = now - 2 * 60 * 60 * 1000
+
+  for (const [region, lastSeenAt] of recentRegions.entries()) {
+    if (lastSeenAt < cutoff) {
+      recentRegions.delete(region)
+    }
+  }
+
+  return Array.from(new Set([...SUPPORTED_REGIONS, ...recentRegions.keys()]))
+}
+
+export function trackRecentRoutingRegions(regions: string[]) {
+  const now = Date.now()
+  for (const region of regions) {
+    recentRegions.set(region, now)
+  }
+}
+
 export async function warmCacheOnStartup(): Promise<void> {
   try {
-    console.log(`🔥 Starting cache warming for ${SUPPORTED_REGIONS.length} regions...`)
+    const regions = getWarmRegions()
+    console.log(`🔥 Starting cache warming for ${regions.length} regions...`)
 
     const results = await Promise.allSettled(
-      SUPPORTED_REGIONS.map(async (region) => {
+      regions.map(async (region) => {
         try {
           const timestamp = new Date()
-          const signal = await providerRouter.getRoutingSignal(region, timestamp)
+          const record = await providerRouter.getRoutingSignalRecord(region, timestamp)
           // Cache the routing signal
-          await providerRouter.cacheRoutingSignal(region, signal, timestamp)
+          await providerRouter.cacheRoutingSignal(region, record, timestamp)
           return {
             region,
             status: 'ok' as const,
-            carbonIntensity: signal.carbonIntensity,
-            confidence: signal.confidence,
-            source: signal.provenance.sourceUsed,
+            carbonIntensity: record.signal.carbonIntensity,
+            confidence: record.signal.confidence,
+            source: record.signal.provenance.sourceUsed,
           }
         } catch (error) {
           return {
@@ -36,7 +61,7 @@ export async function warmCacheOnStartup(): Promise<void> {
     )
 
     const succeeded = results.filter(r => r.status === 'fulfilled' && (r.value as any).status === 'ok').length
-    console.log(`🔥 Cache warming complete: ${succeeded}/${SUPPORTED_REGIONS.length} regions warmed`)
+    console.log(`🔥 Cache warming complete: ${succeeded}/${regions.length} regions warmed`)
 
     // Log results
     for (const result of results) {
@@ -55,6 +80,24 @@ export async function warmCacheOnStartup(): Promise<void> {
     console.error('Fatal error during cache warming:', error)
     // Don't throw - allow server to continue even if cache warming fails
   }
+}
+
+export function startRoutingSignalWarmLoop() {
+  if (warmLoopTimer) return
+
+  const intervalMs = Math.max(30_000, Math.floor((env.GRID_SIGNAL_CACHE_TTL * 1000) / 3))
+  warmLoopTimer = setInterval(() => {
+    void warmCacheOnStartup().catch((error) => {
+      console.error('Routing signal warm loop failed:', error)
+    })
+  }, intervalMs)
+  warmLoopTimer.unref?.()
+}
+
+export function stopRoutingSignalWarmLoop() {
+  if (!warmLoopTimer) return
+  clearInterval(warmLoopTimer)
+  warmLoopTimer = null
 }
 
 export async function getCacheHealthStatus(): Promise<{

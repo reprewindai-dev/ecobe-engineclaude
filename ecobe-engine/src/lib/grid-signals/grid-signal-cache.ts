@@ -6,9 +6,43 @@ export interface CacheOptions {
   keyPrefix?: string
 }
 
+export interface CachedRoutingSignalRecord {
+  signal: {
+    carbonIntensity: number
+    source:
+      | 'watttime'
+      | 'electricity_maps'
+      | 'ember'
+      | 'gb_carbon_intensity'
+      | 'dk_carbon'
+      | 'fi_carbon'
+      | 'gridstatus_fuel_mix'
+      | 'fallback'
+    isForecast: boolean
+    confidence: number
+    signalMode: 'marginal' | 'average' | 'fallback'
+    accountingMethod: 'marginal' | 'flow-traced' | 'average'
+    provenance: {
+      sourceUsed: string
+      contributingSources: string[]
+      referenceTime: string
+      fetchedAt: string
+      fallbackUsed: boolean
+      disagreementFlag: boolean
+      disagreementPct: number
+      validationNotes?: string
+    }
+  }
+  fetchedAt: string
+  stalenessSec: number | null
+  lastLatencyMs: number | null
+  degraded: boolean
+}
+
 export class GridSignalCache {
   private static readonly DEFAULT_TTL = 15 * 60 // 15 minutes
   private static readonly DEFAULT_FEATURE_TTL = 60 * 60 // 1 hour
+  private static readonly DEFAULT_LKG_TTL = 6 * 60 * 60 // 6 hours
   private static readonly KEY_PREFIX = 'grid-signal'
 
   /**
@@ -124,6 +158,64 @@ export class GridSignalCache {
     const value = JSON.stringify(disagreement)
 
     await redis.setex(key, ttl, value)
+  }
+
+  static async cacheRoutingSignal(
+    region: string,
+    timestamp: string,
+    record: CachedRoutingSignalRecord,
+    options: CacheOptions = {}
+  ): Promise<void> {
+    const ttl = options.ttl ?? this.DEFAULT_TTL
+    const keyPrefix = options.keyPrefix ?? this.KEY_PREFIX
+    const key = `${keyPrefix}:routing:${region}:${timestamp}`
+    await redis.setex(key, ttl, JSON.stringify(record))
+  }
+
+  static async getCachedRoutingSignal(
+    region: string,
+    timestamp: string,
+    options: CacheOptions = {}
+  ): Promise<CachedRoutingSignalRecord | null> {
+    const keyPrefix = options.keyPrefix ?? this.KEY_PREFIX
+    const key = `${keyPrefix}:routing:${region}:${timestamp}`
+    const cached = await redis.get(key)
+    if (!cached) return null
+
+    try {
+      return JSON.parse(cached) as CachedRoutingSignalRecord
+    } catch (error) {
+      console.warn(`Failed to parse cached routing signal for ${region} at ${timestamp}:`, error)
+      return null
+    }
+  }
+
+  static async cacheLastKnownGoodRoutingSignal(
+    region: string,
+    record: CachedRoutingSignalRecord,
+    options: CacheOptions = {}
+  ): Promise<void> {
+    const ttl = options.ttl ?? this.DEFAULT_LKG_TTL
+    const keyPrefix = options.keyPrefix ?? this.KEY_PREFIX
+    const key = `${keyPrefix}:routing-lkg:${region}`
+    await redis.setex(key, ttl, JSON.stringify(record))
+  }
+
+  static async getLastKnownGoodRoutingSignal(
+    region: string,
+    options: CacheOptions = {}
+  ): Promise<CachedRoutingSignalRecord | null> {
+    const keyPrefix = options.keyPrefix ?? this.KEY_PREFIX
+    const key = `${keyPrefix}:routing-lkg:${region}`
+    const cached = await redis.get(key)
+    if (!cached) return null
+
+    try {
+      return JSON.parse(cached) as CachedRoutingSignalRecord
+    } catch (error) {
+      console.warn(`Failed to parse last-known-good routing signal for ${region}:`, error)
+      return null
+    }
   }
 
   /**

@@ -26,7 +26,11 @@ jest.mock('../lib/grid-signals/gridstatus-client', () => ({
 
 jest.mock('../lib/grid-signals/grid-signal-cache', () => ({
   GridSignalCache: {
-    cacheProviderDisagreement: jest.fn(),
+    cacheRoutingSignal: jest.fn().mockResolvedValue(undefined),
+    getCachedRoutingSignal: jest.fn().mockResolvedValue(null),
+    cacheLastKnownGoodRoutingSignal: jest.fn().mockResolvedValue(undefined),
+    getLastKnownGoodRoutingSignal: jest.fn().mockResolvedValue(null),
+    cacheProviderDisagreement: jest.fn().mockResolvedValue(undefined),
     getCachedProviderDisagreement: jest.fn().mockResolvedValue(null),
   }
 }))
@@ -160,6 +164,8 @@ describe('ProviderRouter', () => {
         source: 'watttime',
         isForecast: false,
         confidence: 0.85,
+        signalMode: 'marginal',
+        accountingMethod: 'marginal',
         provenance: {
           sourceUsed: 'WATTTIME',
           contributingSources: ['watttime'],
@@ -181,6 +187,8 @@ describe('ProviderRouter', () => {
         source: 'fallback',
         isForecast: false,
         confidence: 0.05,
+        signalMode: 'fallback',
+        accountingMethod: 'average',
         provenance: {
           sourceUsed: 'STATIC_FALLBACK',
           contributingSources: [],
@@ -201,6 +209,8 @@ describe('ProviderRouter', () => {
         source: 'watttime',
         isForecast: true,
         confidence: 0.5,
+        signalMode: 'marginal',
+        accountingMethod: 'marginal',
         provenance: {
           sourceUsed: 'WATTTIME_FORECAST',
           contributingSources: ['watttime'],
@@ -221,6 +231,8 @@ describe('ProviderRouter', () => {
         source: 'watttime',
         isForecast: false,
         confidence: 0.8,
+        signalMode: 'marginal',
+        accountingMethod: 'marginal',
         provenance: {
           sourceUsed: 'WATTTIME',
           contributingSources: ['watttime', 'ember'],
@@ -242,6 +254,8 @@ describe('ProviderRouter', () => {
         source: 'watttime',
         isForecast: false,
         confidence: 0.8,
+        signalMode: 'marginal',
+        accountingMethod: 'marginal',
         provenance: {
           sourceUsed: 'ESTIMATED',
           contributingSources: ['watttime'],
@@ -330,6 +344,46 @@ describe('ProviderRouter', () => {
       const signal = await router.getRoutingSignal('us-east-1', new Date())
 
       expect(signal.source).toBe('fallback')
+    })
+  })
+
+  describe('getRoutingSignalRecord', () => {
+    it('uses last-known-good state conservatively when live fetch degrades', async () => {
+      const { wattTime } = require('../lib/watttime')
+      const { GridSignalCache } = require('../lib/grid-signals/grid-signal-cache')
+
+      wattTime.getCurrentMOER.mockResolvedValue(null)
+      wattTime.getMOERForecast.mockResolvedValue([])
+      GridSignalCache.getLastKnownGoodRoutingSignal.mockResolvedValue({
+        signal: {
+          carbonIntensity: 180,
+          source: 'watttime',
+          isForecast: false,
+          confidence: 0.9,
+          signalMode: 'marginal',
+          accountingMethod: 'marginal',
+          provenance: {
+            sourceUsed: 'WATTTIME_MOER',
+            contributingSources: ['watttime'],
+            referenceTime: new Date().toISOString(),
+            fetchedAt: new Date().toISOString(),
+            fallbackUsed: false,
+            disagreementFlag: false,
+            disagreementPct: 0,
+          },
+        },
+        fetchedAt: new Date().toISOString(),
+        stalenessSec: 30,
+        lastLatencyMs: 22,
+        degraded: false,
+      })
+
+      const record = await router.getRoutingSignalRecord('us-east-1', new Date())
+
+      expect(record.signal.provenance.sourceUsed.startsWith('LKG_')).toBe(true)
+      expect(record.signal.provenance.fallbackUsed).toBe(true)
+      expect(record.signal.carbonIntensity).toBeGreaterThan(180)
+      expect(record.degraded).toBe(true)
     })
   })
 })

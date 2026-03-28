@@ -60,15 +60,15 @@ export class GBCarbonIntensityClient {
     this.baseUrl = BASE_URL
   }
 
-  private async logSuccess() {
+  private async logSuccess(latencyMs?: number) {
     try {
-      await recordIntegrationSuccess('GB_CARBON' as any)
+      await recordIntegrationSuccess('GB_CARBON' as any, { latencyMs })
     } catch { /* ignore */ }
   }
 
-  private async logFailure(message: string) {
+  private async logFailure(message: string, latencyMs?: number) {
     try {
-      await recordIntegrationFailure('GB_CARBON' as any, message)
+      await recordIntegrationFailure('GB_CARBON' as any, message, { latencyMs })
     } catch { /* ignore */ }
   }
 
@@ -76,6 +76,7 @@ export class GBCarbonIntensityClient {
    * Get current national carbon intensity (Great Britain)
    */
   async getCurrentIntensity(): Promise<GBIntensityData | null> {
+    const startedAt = Date.now()
     try {
       const response = await axios.get<{ data: GBIntensityData[] }>(
         `${this.baseUrl}/intensity`,
@@ -85,11 +86,11 @@ export class GBCarbonIntensityClient {
       const data = response.data?.data?.[0]
       if (!data) return null
 
-      await this.logSuccess()
+      await this.logSuccess(Date.now() - startedAt)
       return data
     } catch (error: any) {
       console.error('GB Carbon Intensity current fetch failed:', error.message)
-      await this.logFailure(error.message)
+      await this.logFailure(error.message, Date.now() - startedAt)
       return null
     }
   }
@@ -99,6 +100,7 @@ export class GBCarbonIntensityClient {
    * Returns array of 30-min forecast points (up to 96 points)
    */
   async getForecast48h(): Promise<GBForecastPoint[]> {
+    const startedAt = Date.now()
     try {
       const response = await axios.get<{ data: GBForecastPoint[] }>(
         `${this.baseUrl}/intensity/${new Date().toISOString()}/fw48h`,
@@ -106,11 +108,11 @@ export class GBCarbonIntensityClient {
       )
 
       const data = response.data?.data || []
-      await this.logSuccess()
+      await this.logSuccess(Date.now() - startedAt)
       return data
     } catch (error: any) {
       console.error('GB Carbon Intensity 48h forecast failed:', error.message)
-      await this.logFailure(error.message)
+      await this.logFailure(error.message, Date.now() - startedAt)
       return []
     }
   }
@@ -119,6 +121,7 @@ export class GBCarbonIntensityClient {
    * Get regional intensity breakdown (14 GB regions)
    */
   async getRegionalIntensity(): Promise<GBRegionalIntensity[]> {
+    const startedAt = Date.now()
     try {
       const response = await axios.get<{ data: Array<{ regions: GBRegionalIntensity[] }> }>(
         `${this.baseUrl}/regional`,
@@ -126,11 +129,11 @@ export class GBCarbonIntensityClient {
       )
 
       const regions = response.data?.data?.[0]?.regions || []
-      await this.logSuccess()
+      await this.logSuccess(Date.now() - startedAt)
       return regions
     } catch (error: any) {
       console.error('GB Carbon Intensity regional fetch failed:', error.message)
-      await this.logFailure(error.message)
+      await this.logFailure(error.message, Date.now() - startedAt)
       return []
     }
   }
@@ -139,6 +142,7 @@ export class GBCarbonIntensityClient {
    * Get generation mix (current national)
    */
   async getGenerationMix(): Promise<GBGenerationMix[]> {
+    const startedAt = Date.now()
     try {
       const response = await axios.get<{ data: Array<{ generationmix: GBGenerationMix[] }> }>(
         `${this.baseUrl}/generation`,
@@ -146,11 +150,11 @@ export class GBCarbonIntensityClient {
       )
 
       const mix = response.data?.data?.[0]?.generationmix || []
-      await this.logSuccess()
+      await this.logSuccess(Date.now() - startedAt)
       return mix
     } catch (error: any) {
       console.error('GB Carbon Intensity generation mix failed:', error.message)
-      await this.logFailure(error.message)
+      await this.logFailure(error.message, Date.now() - startedAt)
       return []
     }
   }

@@ -151,6 +151,8 @@ export const env = {
   ...parsed.data,
   DEFAULT_MAX_CARBON_G_PER_KWH: parseInt(parsed.data.DEFAULT_MAX_CARBON_G_PER_KWH),
   PORT: parseInt(parsed.data.PORT),
+  GRID_SIGNAL_CACHE_TTL: parseInt(parsed.data.GRID_SIGNAL_CACHE_TTL),
+  GRID_FEATURE_CACHE_TTL: parseInt(parsed.data.GRID_FEATURE_CACHE_TTL),
   UI_ENABLED:
     parsed.data.UI_ENABLED !== undefined
       ? parsed.data.UI_ENABLED === 'true'

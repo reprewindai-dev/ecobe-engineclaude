@@ -5,7 +5,7 @@ import { createApp } from './app'
 import { prisma } from './lib/db'
 import { assertSchemaReadiness } from './lib/db/schema-readiness'
 import { redis } from './lib/redis'
-import { warmCacheOnStartup } from './lib/cache-warmer'
+import { startRoutingSignalWarmLoop, stopRoutingSignalWarmLoop, warmCacheOnStartup } from './lib/cache-warmer'
 import { startEIAIngestionWorker } from './workers/eia-ingestion'
 import { startForecastVerificationWorker } from './workers/forecast-verification'
 import { startForecastWorker } from './workers/forecast-poller'
@@ -47,6 +47,7 @@ async function gracefulShutdown(signal: string) {
     stopRuntimeSupervisor()
     stopLearningLoopWorker()
     stopDecisionEventDispatcherWorker()
+    stopRoutingSignalWarmLoop()
 
     console.log('Closing Redis connection...')
     await redis.quit().catch(() => undefined)
@@ -92,6 +93,7 @@ function startBackgroundWorkers() {
   warmCacheOnStartup().catch((error) => {
     console.error('Cache warming failed:', error)
   })
+  startRoutingSignalWarmLoop()
 
   try {
     startLearningLoopWorker()

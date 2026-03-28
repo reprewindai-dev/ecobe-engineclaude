@@ -4,6 +4,7 @@ import path from 'path'
 import { z } from 'zod'
 import type {
   WaterArtifactMetadata,
+  WaterArtifactHealthSnapshot,
   WaterAuthority,
   WaterBundleArtifact,
   WaterFacilityOverlay,
@@ -116,6 +117,17 @@ const waterManifestSchema = z.object({
 let cachedBundle: WaterBundleArtifact | null = null
 let cachedManifest: WaterManifestArtifact | null = null
 let cachedArtifactMetadata: WaterArtifactMetadata | null = null
+let cachedArtifactHealthSnapshot: WaterArtifactHealthSnapshot | null = null
+
+const EMPTY_WATER_ARTIFACT_METADATA: WaterArtifactMetadata = {
+  bundleHash: null,
+  manifestHash: null,
+  bundleGeneratedAt: null,
+  manifestBuiltAt: null,
+  datasetHashesPresent: false,
+  sourceCount: 0,
+  suppliers: [],
+}
 
 function sha256FileContents(filePath: string): string | null {
   try {
@@ -267,6 +279,63 @@ function computeArtifactMetadata(
   }
 }
 
+function buildWaterArtifactHealthSnapshot(args: {
+  bundlePresent: boolean
+  manifestPresent: boolean
+  schemaCompatible: boolean
+  regionCount: number
+  sourceCount: number
+  datasetHashesPresent: boolean
+  errors?: string[]
+  manifestDatasets: WaterManifestArtifact['datasets']
+  artifactMetadata: WaterArtifactMetadata
+}): WaterArtifactHealthSnapshot {
+  const errors = args.errors ?? []
+  const bundleHealthy = args.bundlePresent && args.schemaCompatible && args.regionCount > 0
+  const manifestHealthy = args.manifestPresent
+
+  return {
+    healthy: bundleHealthy && manifestHealthy,
+    bundleHealthy,
+    manifestHealthy,
+    schemaCompatible: args.schemaCompatible,
+    datasetHashesPresent: args.datasetHashesPresent,
+    checks: {
+      bundlePresent: args.bundlePresent,
+      manifestPresent: args.manifestPresent,
+      schemaCompatible: args.schemaCompatible,
+      regionCount: args.regionCount,
+      sourceCount: args.sourceCount,
+      datasetHashesPresent: args.datasetHashesPresent,
+    },
+    errors,
+    manifestDatasets: args.manifestDatasets,
+    artifactMetadata: args.artifactMetadata,
+  }
+}
+
+function setCachedWaterArtifacts(
+  bundle: WaterBundleArtifact,
+  manifest: WaterManifestArtifact,
+  artifactMetadata: WaterArtifactMetadata
+) {
+  cachedBundle = bundle
+  cachedManifest = manifest
+  cachedArtifactMetadata = artifactMetadata
+  cachedArtifactHealthSnapshot = buildWaterArtifactHealthSnapshot({
+    bundlePresent: true,
+    manifestPresent: true,
+    schemaCompatible:
+      bundle.schema_version === REQUIRED_SCHEMA_VERSION &&
+      manifest.schema_version === REQUIRED_SCHEMA_VERSION,
+    regionCount: Object.keys(bundle.regions).length,
+    sourceCount: artifactMetadata.sourceCount,
+    datasetHashesPresent: artifactMetadata.datasetHashesPresent,
+    manifestDatasets: manifest.datasets,
+    artifactMetadata,
+  })
+}
+
 function snapshotWaterArtifactsAsLastKnownGood(
   bundle: WaterBundleArtifact,
   manifest: WaterManifestArtifact
@@ -301,10 +370,8 @@ export function loadWaterArtifacts(forceReload = false): {
   const manifestRaw = fs.readFileSync(WATER_MANIFEST_PATH, 'utf8')
   const manifest = waterManifestSchema.parse(JSON.parse(manifestRaw))
   const bundle = normalizeBundle(JSON.parse(bundleRaw), manifest)
-
-  cachedBundle = bundle
-  cachedManifest = manifest
-  cachedArtifactMetadata = computeArtifactMetadata(bundle, manifest)
+  const artifactMetadata = computeArtifactMetadata(bundle, manifest)
+  setCachedWaterArtifacts(bundle, manifest, artifactMetadata)
   snapshotWaterArtifactsAsLastKnownGood(bundle, manifest)
 
   return { bundle, manifest }
@@ -315,6 +382,65 @@ export function getWaterArtifactMetadata(forceReload = false): WaterArtifactMeta
   const { bundle, manifest } = loadWaterArtifacts(forceReload)
   cachedArtifactMetadata = computeArtifactMetadata(bundle, manifest)
   return cachedArtifactMetadata
+}
+
+export function getWaterArtifactHealthSnapshot(forceReload = false): WaterArtifactHealthSnapshot {
+  if (!forceReload && cachedArtifactHealthSnapshot) {
+    return cachedArtifactHealthSnapshot
+  }
+
+  const bundlePresent = fs.existsSync(WATER_BUNDLE_PATH)
+  const manifestPresent = fs.existsSync(WATER_MANIFEST_PATH)
+
+  if (!bundlePresent || !manifestPresent) {
+    const errors: string[] = []
+    if (!bundlePresent) errors.push('water.bundle.json missing')
+    if (!manifestPresent) errors.push('manifest.json missing')
+
+    cachedArtifactHealthSnapshot = buildWaterArtifactHealthSnapshot({
+      bundlePresent,
+      manifestPresent,
+      schemaCompatible: false,
+      regionCount: 0,
+      sourceCount: 0,
+      datasetHashesPresent: false,
+      errors,
+      manifestDatasets: [],
+      artifactMetadata: EMPTY_WATER_ARTIFACT_METADATA,
+    })
+    return cachedArtifactHealthSnapshot
+  }
+
+  try {
+    const { bundle, manifest } = loadWaterArtifacts(forceReload)
+    const artifactMetadata = getWaterArtifactMetadata(forceReload)
+    cachedArtifactHealthSnapshot = buildWaterArtifactHealthSnapshot({
+      bundlePresent: true,
+      manifestPresent: true,
+      schemaCompatible:
+        bundle.schema_version === REQUIRED_SCHEMA_VERSION &&
+        manifest.schema_version === REQUIRED_SCHEMA_VERSION,
+      regionCount: Object.keys(bundle.regions).length,
+      sourceCount: artifactMetadata.sourceCount,
+      datasetHashesPresent: artifactMetadata.datasetHashesPresent,
+      manifestDatasets: manifest.datasets,
+      artifactMetadata,
+    })
+  } catch (error) {
+    cachedArtifactHealthSnapshot = buildWaterArtifactHealthSnapshot({
+      bundlePresent: true,
+      manifestPresent: true,
+      schemaCompatible: false,
+      regionCount: 0,
+      sourceCount: 0,
+      datasetHashesPresent: false,
+      errors: [error instanceof Error ? error.message : 'water artifact parse error'],
+      manifestDatasets: [],
+      artifactMetadata: EMPTY_WATER_ARTIFACT_METADATA,
+    })
+  }
+
+  return cachedArtifactHealthSnapshot
 }
 
 export function recoverWaterArtifactsFromLastKnownGood(): {
@@ -334,9 +460,8 @@ export function recoverWaterArtifactsFromLastKnownGood(): {
     ensureDir(path.dirname(WATER_BUNDLE_PATH))
     writeJsonAtomic(WATER_BUNDLE_PATH, bundle)
     writeJsonAtomic(WATER_MANIFEST_PATH, manifest)
-    cachedBundle = bundle
-    cachedManifest = manifest
-    cachedArtifactMetadata = computeArtifactMetadata(bundle, manifest)
+    const artifactMetadata = computeArtifactMetadata(bundle, manifest)
+    setCachedWaterArtifacts(bundle, manifest, artifactMetadata)
 
     return { recovered: true, reason: 'Recovered from last-known-good snapshot' }
   } catch (error) {
@@ -598,6 +723,18 @@ export function validateWaterArtifacts(): {
       errors.push(error instanceof Error ? error.message : 'water artifact parse error')
     }
   }
+  const snapshot = buildWaterArtifactHealthSnapshot({
+    bundlePresent: checks.bundlePresent,
+    manifestPresent: checks.manifestPresent,
+    schemaCompatible: checks.schemaCompatible,
+    regionCount: checks.regionCount,
+    sourceCount: checks.sourceCount,
+    datasetHashesPresent: checks.datasetHashesPresent,
+    errors,
+    manifestDatasets: cachedManifest?.datasets ?? [],
+    artifactMetadata: cachedArtifactMetadata ?? EMPTY_WATER_ARTIFACT_METADATA,
+  })
+  cachedArtifactHealthSnapshot = snapshot
 
   return {
     healthy:

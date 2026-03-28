@@ -1,4 +1,9 @@
-import { buildWaterAuthority, resolveWaterSignal, validateWaterArtifacts } from '../lib/water/bundle'
+import {
+  buildWaterAuthority,
+  getWaterArtifactHealthSnapshot,
+  resolveWaterSignal,
+  validateWaterArtifacts,
+} from '../lib/water/bundle'
 
 describe('water bundle artifacts', () => {
   it('loads a configured region without fallback', () => {
@@ -22,6 +27,17 @@ describe('water bundle artifacts', () => {
     expect(health.checks.manifestPresent).toBe(true)
     expect(health.checks.schemaCompatible).toBe(true)
     expect(health.checks.sourceCount).toBeGreaterThan(0)
+  })
+
+  it('returns a cached artifact health snapshot without forcing deep validation', () => {
+    validateWaterArtifacts()
+    const snapshot = getWaterArtifactHealthSnapshot()
+
+    expect(snapshot.bundleHealthy).toBe(true)
+    expect(snapshot.manifestHealthy).toBe(true)
+    expect(snapshot.schemaCompatible).toBe(true)
+    expect(snapshot.datasetHashesPresent).toBe(true)
+    expect(snapshot.manifestDatasets.length).toBeGreaterThan(0)
   })
 
   it('builds a water authority object for scenario planning', () => {
