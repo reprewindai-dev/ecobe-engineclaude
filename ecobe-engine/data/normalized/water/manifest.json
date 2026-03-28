@@ -5,7 +5,7 @@
     {
       "name": "aqueduct",
       "source_url": "https://www.wri.org/data/aqueduct-global-maps-21-data",
-      "file_hash": "f52978049364e1ac612a64daec813938a364f539b04f9edeb85de1d43b1c5584",
+      "file_hash": "dad8207364db1aa8c8449c88a2cde0e7e83b88b4c7f8c3fb6b159deeea68f226",
       "downloaded_at": "2026-03-28T00:00:00.000Z",
       "dataset_version": "aqueduct_2_1"
     },
@@ -19,7 +19,7 @@
     {
       "name": "wwf",
       "source_url": "https://riskfilter.org/water/explore/countryprofiles",
-      "file_hash": "6d13359becf7e94ec6b1f9a41028d64eea27a85ad8117bb10026a30b8c206f64",
+      "file_hash": "8e87134948bd916822db8c6d6d0e33dcea4b84920b74377a5aca18b1df58825a",
       "downloaded_at": "2026-03-28T00:00:00.000Z",
       "dataset_version": "wwf_water_risk_filter_v1"
     },
