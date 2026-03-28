@@ -168,6 +168,164 @@ type DecisionMetricsRow = {
   dataFreshnessSeconds: number | null
 }
 
+type CIDecisionRow = {
+  createdAt: Date
+  decisionFrameId: string
+  selectedRegion: string
+  selectedRunner: string
+  carbonIntensity: number
+  baseline: number
+  savings: number
+  decisionAction: string | null
+  decisionMode: string | null
+  reasonCode: string | null
+  signalConfidence: number | null
+  fallbackUsed: boolean
+  proofHash: string | null
+  waterImpactLiters: number | null
+  waterBaselineLiters: number | null
+  waterScarcityImpact: number | null
+  waterStressIndex: number | null
+  waterConfidence: number | null
+  waterAuthorityMode: string | null
+  waterScenario: string | null
+  waterEvidenceRefs: Prisma.JsonValue
+  policyTrace: Prisma.JsonValue
+  metadata: Prisma.JsonValue
+}
+
+type CIDecisionMetadata = {
+  request?: {
+    jobType?: string
+    metadata?: {
+      source?: string
+      workload?: string
+      auditRun?: string
+      [key: string]: unknown
+    }
+    preferredRegions?: string[]
+    [key: string]: unknown
+  }
+  response?: {
+    baseline?: {
+      region?: string
+      carbonIntensity?: number
+      waterImpactLiters?: number
+    }
+    selected?: {
+      region?: string
+      carbonIntensity?: number
+      waterImpactLiters?: number
+    }
+    latencyMs?: {
+      total?: number
+      compute?: number
+    }
+    mss?: {
+      carbonFreshnessSec?: number
+      carbonLineage?: string[]
+      providerSnapshotRefs?: string[]
+    }
+    water?: {
+      baselineLiters?: number
+      selectedLiters?: number
+      source?: string[]
+    }
+    assurance?: {
+      status?: string
+      assuranceReady?: boolean
+    }
+    [key: string]: unknown
+  }
+  [key: string]: unknown
+}
+
+const asObject = <T extends object>(value: Prisma.JsonValue | null | undefined): T | null => {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as T
+  }
+  return null
+}
+
+const asStringArray = (value: Prisma.JsonValue | null | undefined): string[] => {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is string => typeof item === 'string')
+}
+
+const parseCiMetadata = (value: Prisma.JsonValue | null | undefined): CIDecisionMetadata => {
+  return asObject<CIDecisionMetadata>(value) ?? {}
+}
+
+const normalizeCIDecisionForDashboard = (decision: CIDecisionRow) => {
+  const metadata = parseCiMetadata(decision.metadata)
+  const response = metadata.response ?? {}
+  const baseline = response.baseline ?? {}
+  const selected = response.selected ?? {}
+  const latency = response.latencyMs ?? {}
+  const mss = response.mss ?? {}
+  const workloadName =
+    metadata.request?.metadata?.workload ??
+    metadata.request?.metadata?.source ??
+    metadata.request?.jobType ??
+    decision.selectedRunner
+
+  const baselineRegion = baseline.region ?? metadata.request?.preferredRegions?.[0] ?? decision.selectedRegion
+  const chosenRegion = selected.region ?? decision.selectedRegion
+  const baselineIntensity = baseline.carbonIntensity ?? decision.baseline
+  const chosenIntensity = selected.carbonIntensity ?? decision.carbonIntensity
+  const estimatedKwh = null
+  const co2BaselineG = estimatedKwh ? baselineIntensity * estimatedKwh : null
+  const co2ChosenG = estimatedKwh ? chosenIntensity * estimatedKwh : null
+
+  return {
+    id: decision.decisionFrameId,
+    createdAt: decision.createdAt,
+    workloadName,
+    opName: decision.decisionAction ?? decision.decisionMode ?? 'unknown',
+    baselineRegion,
+    chosenRegion,
+    zoneBaseline: baselineRegion,
+    zoneChosen: chosenRegion,
+    carbonIntensityBaselineGPerKwh: Math.round(baselineIntensity),
+    carbonIntensityChosenGPerKwh: Math.round(chosenIntensity),
+    estimatedKwh,
+    co2BaselineG,
+    co2ChosenG,
+    latencyEstimateMs: latency.compute ?? null,
+    latencyActualMs: latency.total ?? null,
+    fallbackUsed: decision.fallbackUsed,
+    dataFreshnessSeconds: mss.carbonFreshnessSec ?? null,
+    requestCount: 1,
+    reason: decision.reasonCode ?? decision.decisionAction ?? 'unknown',
+    decisionAction: decision.decisionAction,
+    decisionMode: decision.decisionMode,
+    signalConfidence: decision.signalConfidence,
+    proofHash: decision.proofHash,
+    waterImpactLiters: decision.waterImpactLiters,
+    waterBaselineLiters: decision.waterBaselineLiters,
+    waterScarcityImpact: decision.waterScarcityImpact,
+    waterStressIndex: decision.waterStressIndex,
+    waterConfidence: decision.waterConfidence,
+    waterAuthorityMode: decision.waterAuthorityMode,
+    waterScenario: decision.waterScenario,
+    waterEvidenceRefs: asStringArray(decision.waterEvidenceRefs),
+    assuranceStatus: response.assurance?.status ?? null,
+    assuranceReady: response.assurance?.assuranceReady ?? null,
+    providerSnapshotRefs: asStringArray(
+      (asObject<{ providerSnapshotRefs?: Prisma.JsonValue }>(response.mss as Prisma.JsonValue)?.providerSnapshotRefs as Prisma.JsonValue) ?? null
+    ),
+  }
+}
+
+type NormalizedDashboardDecision = ReturnType<typeof normalizeCIDecisionForDashboard>
+type CarbonLedgerMetricsRow = {
+  carbonSavedG: number | null
+  baselineCarbonG: number | null
+  chosenCarbonG: number | null
+  energyEstimateKwh: number | null
+  createdAt: Date
+}
+
 const listDecisionsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(100),
 })
@@ -176,12 +334,37 @@ router.get('/decisions', async (req, res) => {
   try {
     const { limit } = listDecisionsQuerySchema.parse(req.query)
 
-    const decisions = await prisma.dashboardRoutingDecision.findMany({
+    const decisions = await prisma.cIDecision.findMany({
       orderBy: { createdAt: 'desc' },
       take: limit,
+      select: {
+        createdAt: true,
+        decisionFrameId: true,
+        selectedRegion: true,
+        selectedRunner: true,
+        carbonIntensity: true,
+        baseline: true,
+        savings: true,
+        decisionAction: true,
+        decisionMode: true,
+        reasonCode: true,
+        signalConfidence: true,
+        fallbackUsed: true,
+        proofHash: true,
+        waterImpactLiters: true,
+        waterBaselineLiters: true,
+        waterScarcityImpact: true,
+        waterStressIndex: true,
+        waterConfidence: true,
+        waterAuthorityMode: true,
+        waterScenario: true,
+        waterEvidenceRefs: true,
+        policyTrace: true,
+        metadata: true,
+      },
     })
 
-    res.json({ decisions })
+    res.json({ decisions: decisions.map((decision: CIDecisionRow) => normalizeCIDecisionForDashboard(decision)) })
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid request', details: error.errors })
@@ -200,15 +383,41 @@ router.get('/decisions/export', async (req, res) => {
   try {
     const { format, limit } = exportDecisionsQuerySchema.parse(req.query)
 
-    const decisions = await prisma.dashboardRoutingDecision.findMany({
+    const decisions = await prisma.cIDecision.findMany({
       orderBy: { createdAt: 'desc' },
       take: limit,
+      select: {
+        createdAt: true,
+        decisionFrameId: true,
+        selectedRegion: true,
+        selectedRunner: true,
+        carbonIntensity: true,
+        baseline: true,
+        savings: true,
+        decisionAction: true,
+        decisionMode: true,
+        reasonCode: true,
+        signalConfidence: true,
+        fallbackUsed: true,
+        proofHash: true,
+        waterImpactLiters: true,
+        waterBaselineLiters: true,
+        waterScarcityImpact: true,
+        waterStressIndex: true,
+        waterConfidence: true,
+        waterAuthorityMode: true,
+        waterScenario: true,
+        waterEvidenceRefs: true,
+        policyTrace: true,
+        metadata: true,
+      },
     })
+    const normalized = decisions.map((decision: CIDecisionRow) => normalizeCIDecisionForDashboard(decision))
 
     if (format === 'json') {
       res.setHeader('Content-Type', 'application/json; charset=utf-8')
       res.setHeader('Content-Disposition', 'attachment; filename="ecobe-receipts.json"')
-      return res.send(JSON.stringify({ decisions }, null, 2))
+      return res.send(JSON.stringify({ decisions: normalized }, null, 2))
     }
 
     const columns = [
@@ -242,7 +451,7 @@ router.get('/decisions/export', async (req, res) => {
 
     const lines: string[] = []
     lines.push(columns.join(','))
-    for (const d of decisions) {
+    for (const d of normalized) {
       lines.push(columns.map((c) => escape((d as any)[c])).join(','))
     }
 
@@ -304,61 +513,78 @@ router.get('/metrics', async (req, res) => {
 
     const since = new Date(Date.now() - windowHours * 60 * 60 * 1000)
 
-    const decisionsPromise = prisma.dashboardRoutingDecision.findMany({
+    const decisionsPromise = prisma.cIDecision.findMany({
       where: { createdAt: { gte: since } },
       select: {
         createdAt: true,
-        chosenRegion: true,
-        requestCount: true,
-        co2BaselineG: true,
-        co2ChosenG: true,
+        decisionFrameId: true,
+        selectedRegion: true,
+        selectedRunner: true,
+        carbonIntensity: true,
+        baseline: true,
+        savings: true,
+        decisionAction: true,
+        decisionMode: true,
+        reasonCode: true,
+        signalConfidence: true,
         fallbackUsed: true,
-        latencyEstimateMs: true,
-        latencyActualMs: true,
-        dataFreshnessSeconds: true,
+        proofHash: true,
+        waterImpactLiters: true,
+        waterBaselineLiters: true,
+        waterScarcityImpact: true,
+        waterStressIndex: true,
+        waterConfidence: true,
+        waterAuthorityMode: true,
+        waterScenario: true,
+        waterEvidenceRefs: true,
+        policyTrace: true,
+        metadata: true,
       },
     })
 
-    const topChosenRegionPromise = prisma.dashboardRoutingDecision.groupBy({
-      by: ['chosenRegion'],
+    const topChosenRegionPromise = prisma.cIDecision.groupBy({
+      by: ['selectedRegion'],
       where: { createdAt: { gte: since } },
-      _count: { chosenRegion: true },
-      orderBy: { _count: { chosenRegion: 'desc' } },
+      _count: { selectedRegion: true },
+      orderBy: { _count: { selectedRegion: 'desc' } },
       take: 1,
+    })
+    const carbonLedgerPromise = prisma.carbonLedgerEntry.findMany({
+      where: { createdAt: { gte: since } },
+      select: {
+        carbonSavedG: true,
+      },
     })
 
     const integrationMetricsPromise = getIntegrationMetricsSummary()
     const refreshSummaryPromise = getForecastRefreshSummary(windowHours)
     const refreshStatePromise = getLastForecastRefreshState()
 
-    const [decisions, topChosenRegionAgg, integrationMetrics, refreshSummary, refreshState] =
+    const [decisions, topChosenRegionAgg, carbonLedgerEntries, integrationMetrics, refreshSummary, refreshState] =
       await Promise.all([
         decisionsPromise,
         topChosenRegionPromise,
+        carbonLedgerPromise,
         integrationMetricsPromise,
         refreshSummaryPromise,
         refreshStatePromise,
       ])
 
     const totalDecisions = decisions.length
-    const typedDecisions = decisions as DecisionMetricsRow[]
-    const totalRequests = typedDecisions.reduce(
-      (sum: number, d) => sum + (d.requestCount ?? 0),
+    const normalizedDecisions: NormalizedDashboardDecision[] = decisions.map((decision: CIDecisionRow) =>
+      normalizeCIDecisionForDashboard(decision)
+    )
+    const totalRequests = totalDecisions
+    const co2SavedG = carbonLedgerEntries.reduce(
+      (sum: number, entry: { carbonSavedG: number | null }) => sum + (entry.carbonSavedG ?? 0),
       0
     )
 
-    const co2SavedG = typedDecisions.reduce((sum: number, d) => {
-      const base = d.co2BaselineG ?? 0
-      const chosen = d.co2ChosenG ?? 0
-      const delta = base - chosen
-      return sum + (delta > 0 ? delta : 0)
-    }, 0)
-
     const greenRouteRate =
       totalDecisions > 0
-        ? typedDecisions.reduce((sum: number, d) => {
-            const base = d.co2BaselineG ?? 0
-            const chosen = d.co2ChosenG ?? 0
+        ? normalizedDecisions.reduce((sum: number, d: NormalizedDashboardDecision) => {
+            const base = d.carbonIntensityBaselineGPerKwh ?? 0
+            const chosen = d.carbonIntensityChosenGPerKwh ?? 0
             return sum + (base > chosen ? 1 : 0)
           }, 0) / totalDecisions
         : 0
@@ -366,16 +592,16 @@ router.get('/metrics', async (req, res) => {
     const fallbackRate =
       totalDecisions > 0
         ?
-          typedDecisions.reduce(
-            (sum: number, d) => sum + (d.fallbackUsed ? 1 : 0),
+          normalizedDecisions.reduce(
+            (sum: number, d: NormalizedDashboardDecision) => sum + (d.fallbackUsed ? 1 : 0),
             0
           ) / totalDecisions
         : 0
 
-    const topChosenRegion = topChosenRegionAgg[0]?.chosenRegion ?? null
+    const topChosenRegion = topChosenRegionAgg[0]?.selectedRegion ?? null
 
-    const deltas = typedDecisions
-      .map((d: DecisionMetricsRow) => {
+    const deltas = normalizedDecisions
+      .map((d: NormalizedDashboardDecision) => {
         if (d.latencyActualMs === null || d.latencyActualMs === undefined) return null
         if (d.latencyEstimateMs === null || d.latencyEstimateMs === undefined) return null
         return d.latencyActualMs - d.latencyEstimateMs
@@ -385,7 +611,7 @@ router.get('/metrics', async (req, res) => {
 
     const p95LatencyDeltaMs = percentile(deltas, 0.95)
 
-    const dataFreshnessMaxSeconds = typedDecisions.reduce((max: number | null, d: DecisionMetricsRow) => {
+    const dataFreshnessMaxSeconds = normalizedDecisions.reduce((max: number | null, d: NormalizedDashboardDecision) => {
       const v = d.dataFreshnessSeconds
       if (v === null || v === undefined) return max
       if (max === null) return v
@@ -842,15 +1068,33 @@ router.get('/accuracy', async (req, res) => {
 
 router.get('/region-mapping', async (_req, res) => {
   try {
-    const decisions = await prisma.dashboardRoutingDecision.findMany({
+    const decisions = await prisma.cIDecision.findMany({
       orderBy: { createdAt: 'desc' },
       take: 2000,
       select: {
         createdAt: true,
-        baselineRegion: true,
-        chosenRegion: true,
-        zoneBaseline: true,
-        zoneChosen: true,
+        decisionFrameId: true,
+        selectedRegion: true,
+        selectedRunner: true,
+        carbonIntensity: true,
+        baseline: true,
+        savings: true,
+        decisionAction: true,
+        decisionMode: true,
+        reasonCode: true,
+        signalConfidence: true,
+        fallbackUsed: true,
+        proofHash: true,
+        waterImpactLiters: true,
+        waterBaselineLiters: true,
+        waterScarcityImpact: true,
+        waterStressIndex: true,
+        waterConfidence: true,
+        waterAuthorityMode: true,
+        waterScenario: true,
+        waterEvidenceRefs: true,
+        policyTrace: true,
+        metadata: true,
       },
     })
 
@@ -880,7 +1124,8 @@ router.get('/region-mapping', async (_req, res) => {
       }
     }
 
-    for (const d of decisions) {
+    for (const rawDecision of decisions) {
+      const d = normalizeCIDecisionForDashboard(rawDecision as CIDecisionRow)
       consider(d.baselineRegion, d.zoneBaseline, d.createdAt)
       consider(d.chosenRegion, d.zoneChosen, d.createdAt)
     }
@@ -946,11 +1191,33 @@ router.post('/what-if/intensities', async (req, res) => {
 
 router.get('/regions', async (_req, res) => {
   try {
-    const regions = (await prisma.region.findMany({
+    const configuredRegions = (await prisma.region.findMany({
       where: { enabled: true },
       select: { code: true, name: true, country: true },
       orderBy: { code: 'asc' },
     })) as { code: string; name: string | null; country: string | null }[]
+
+    let regions = configuredRegions
+    if (regions.length === 0) {
+      const recentDecisions = await prisma.cIDecision.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+        select: {
+          selectedRegion: true,
+          metadata: true,
+        },
+      })
+      const fallbackRegionCodes = new Set<string>()
+      for (const decision of recentDecisions) {
+        fallbackRegionCodes.add(decision.selectedRegion)
+        const metadata = parseCiMetadata(decision.metadata)
+        const baselineRegion = metadata.response?.baseline?.region ?? metadata.request?.preferredRegions?.[0]
+        if (baselineRegion) fallbackRegionCodes.add(baselineRegion)
+      }
+      regions = Array.from(fallbackRegionCodes)
+        .sort((a, b) => a.localeCompare(b))
+        .map((code) => ({ code, name: null, country: null }))
+    }
 
     const enriched = await Promise.all(
       regions.map(async (regionRecord: { code: string; name: string | null; country: string | null }) => {
@@ -985,28 +1252,37 @@ router.get('/savings', async (req, res) => {
     const days = range === '7d' ? 7 : range === '90d' ? 90 : 30
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
 
-    const decisions = await prisma.dashboardRoutingDecision.findMany({
-      where: { createdAt: { gte: since } },
-      select: {
-        co2BaselineG: true,
-        co2ChosenG: true,
-        estimatedKwh: true,
-        createdAt: true,
-      },
-    })
+    const [entries, recentDecisions] = await Promise.all([
+      prisma.carbonLedgerEntry.findMany({
+        where: { createdAt: { gte: since } },
+        select: {
+          carbonSavedG: true,
+          baselineCarbonG: true,
+          chosenCarbonG: true,
+          energyEstimateKwh: true,
+          createdAt: true,
+        },
+      }),
+      prisma.cIDecision.findMany({
+        where: { createdAt: { gte: since } },
+        select: { createdAt: true },
+      }),
+    ])
 
-    const totalBaseline = decisions.reduce((sum: number, d: any) => sum + (d.co2BaselineG ?? 0), 0)
-    const totalChosen = decisions.reduce((sum: number, d: any) => sum + (d.co2ChosenG ?? 0), 0)
+    const typedEntries = entries as CarbonLedgerMetricsRow[]
+
+    const totalBaseline = typedEntries.reduce((sum: number, d: CarbonLedgerMetricsRow) => sum + (d.baselineCarbonG ?? 0), 0)
+    const totalChosen = typedEntries.reduce((sum: number, d: CarbonLedgerMetricsRow) => sum + (d.chosenCarbonG ?? 0), 0)
     const totalAvoided = totalBaseline - totalChosen
-    const totalKwh = decisions.reduce((sum: number, d: any) => sum + (d.estimatedKwh ?? 0), 0)
+    const totalKwh = typedEntries.reduce((sum: number, d: CarbonLedgerMetricsRow) => sum + (d.energyEstimateKwh ?? 0), 0)
 
     // Group by day for trend
     const dailyMap = new Map<string, { baseline: number; chosen: number; count: number }>()
-    for (const d of decisions) {
+    for (const d of typedEntries) {
       const day = d.createdAt.toISOString().split('T')[0]
       const existing = dailyMap.get(day) || { baseline: 0, chosen: 0, count: 0 }
-      existing.baseline += d.co2BaselineG ?? 0
-      existing.chosen += d.co2ChosenG ?? 0
+      existing.baseline += d.baselineCarbonG ?? 0
+      existing.chosen += d.chosenCarbonG ?? 0
       existing.count++
       dailyMap.set(day, existing)
     }
@@ -1026,7 +1302,7 @@ router.get('/savings', async (req, res) => {
       co2AvoidedKg: Math.round(totalAvoided / 1000 * 100) / 100, // Convert g to kg
       avgMultiplier: totalChosen > 0 ? Math.round((totalBaseline / totalChosen) * 100) / 100 : 1.34,
       bestToday: 1.91, // Temporary static value
-      last100AvgDelta: decisions.length > 0 ? Math.round(totalAvoided / Math.min(decisions.length, 100) * 100) / 100 : 0,
+      last100AvgDelta: recentDecisions.length > 0 ? Math.round(totalAvoided / Math.min(recentDecisions.length, 100) * 100) / 100 : 0,
       timeRange: range,
       totalBaselineG: Math.round(totalBaseline),
       totalChosenG: Math.round(totalChosen),
@@ -1036,7 +1312,7 @@ router.get('/savings', async (req, res) => {
           ? Math.round((totalAvoided / totalBaseline) * 100 * 10) / 10
           : 0,
       totalKwh: Math.round(totalKwh * 1000) / 1000,
-      totalDecisions: decisions.length,
+      totalDecisions: recentDecisions.length,
       carbonReductionMultiplier:
         totalChosen > 0
           ? Math.round((totalBaseline / totalChosen) * 100) / 100
