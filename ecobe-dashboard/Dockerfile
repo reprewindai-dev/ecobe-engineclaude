@@ -19,9 +19,6 @@ ENV ECOBE_API_URL=${ECOBE_API_URL}
 # Client-side API URL — uses server-side rewrite proxy (relative path)
 ARG NEXT_PUBLIC_ECOBE_API_URL="/api/ecobe"
 ENV NEXT_PUBLIC_ECOBE_API_URL=${NEXT_PUBLIC_ECOBE_API_URL}
-# Resend email key
-ARG RESEND_API_KEY=""
-ENV RESEND_API_KEY=${RESEND_API_KEY}
 RUN npm run build
 
 FROM base AS runner
@@ -34,14 +31,14 @@ RUN addgroup --system --gid 1001 nodejs \
 # Standalone output includes server + minimal node_modules
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
 
 RUN chown -R nextjs:nodejs /app
 USER nextjs
 
-# Railway sets PORT dynamically; Next.js standalone reads it
-EXPOSE ${PORT:-3000}
+# Railway sets PORT dynamically at runtime
+EXPOSE 3000
 
 ENV HOSTNAME="0.0.0.0"
-ENV PORT=${PORT:-3000}
 
 CMD ["node", "server.js"]
