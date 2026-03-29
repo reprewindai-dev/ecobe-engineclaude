@@ -1,0 +1,18 @@
+{
+  "generatedAt": "2026-03-28T18:10:23.825Z",
+  "mode": "resolved_candidate_overrides",
+  "samples": 250,
+  "requestTimestamp": "2026-03-28T18:10:23.596Z",
+  "totals": {
+    "p50Ms": 0.353,
+    "p95Ms": 1.109,
+    "p99Ms": 3.098,
+    "maxMs": 18.169
+  },
+  "compute": {
+    "p50Ms": 0.352,
+    "p95Ms": 1.107,
+    "p99Ms": 3.096,
+    "maxMs": 18.167
+  }
+}

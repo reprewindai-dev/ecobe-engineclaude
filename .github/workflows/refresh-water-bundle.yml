@@ -1,0 +1,37 @@
+name: Refresh Water Bundle
+
+on:
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+jobs:
+  refresh-water-bundle:
+    name: Refresh Water Bundle
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Refresh normalized water bundle
+        run: npm run water:refresh
+
+      - name: Upload refreshed water artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: water-bundle-artifacts
+          path: |
+            data/normalized/water/water.bundle.json
+            data/normalized/water/manifest.json
+            data/normalized/water/.lkg/water.bundle.json
+            data/normalized/water/.lkg/manifest.json
