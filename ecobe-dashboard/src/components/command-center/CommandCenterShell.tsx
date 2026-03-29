@@ -593,7 +593,7 @@ function SaiqGovernanceEngine({ governance }: { governance: SaiqGovernanceSnapsh
         </div>
 
         <div className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Weights</div>
+          <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">SAIQ Weights</div>
           {governance.weights ? (
             <div className="mt-3 grid gap-2 text-sm text-slate-200">
               <div>Carbon {governance.weights.carbon?.toFixed(2) ?? 'Unavailable'}</div>
@@ -602,7 +602,10 @@ function SaiqGovernanceEngine({ governance }: { governance: SaiqGovernanceSnapsh
               <div>Cost {governance.weights.cost?.toFixed(2) ?? 'Unavailable'}</div>
             </div>
           ) : (
-            <div className="mt-3 text-sm text-slate-400">Unavailable</div>
+            <div className="mt-3 space-y-1 text-sm text-slate-400">
+              <div>Unavailable</div>
+              <div>Not exposed by current live decision payload</div>
+            </div>
           )}
         </div>
 

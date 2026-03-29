@@ -1,0 +1,59 @@
+name: Live System Verify
+
+on:
+  schedule:
+    - cron: '15 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: live-system-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DEFAULT_ECOBE_ENGINE_URL: https://ecobe-engineclaude-production.up.railway.app
+  ECOBE_ENGINE_URL: ${{ secrets.ECOBE_ENGINE_URL }}
+  ECOBE_ENGINE_API_KEY: ${{ secrets.ECOBE_ENGINE_API_KEY }}
+
+jobs:
+  verify-live-system:
+    name: Verify Live Engine Endpoints
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify live system
+        run: node .github/scripts/verify-live-system.mjs
+
+  failure-alert:
+    name: Failure Alert
+    runs-on: ubuntu-latest
+    needs: verify-live-system
+    if: ${{ always() && needs.verify-live-system.result == 'failure' }}
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Send failure alert
+        run: node .github/scripts/send-resend-alert.mjs
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_ALERTS: ${{ secrets.RESEND_FROM_ALERTS }}
+          ALERT_INBOX_EMAIL: ${{ secrets.ALERT_INBOX_EMAIL }}
+          ALERT_SUBJECT: 'CO2 Router live system verification failure'
+          ALERT_SUMMARY: 'The deployed engine endpoint verification workflow failed.'

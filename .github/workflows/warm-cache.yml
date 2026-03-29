@@ -1,13 +1,16 @@
 name: Warm Cache
 
-# Pre-populate signal cache by routing all supported regions through CI routing
-# Each routing call fetches live provider signals which are cached in Redis
-# Frequency: Every 2 hours
-
 on:
   schedule:
     - cron: '0 */2 * * *'
   workflow_dispatch:
+
+concurrency:
+  group: warm-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 env:
   DEFAULT_ECOBE_ENGINE_URL: https://ecobe-engineclaude-production.up.railway.app
@@ -27,7 +30,7 @@ jobs:
           echo "ENGINE_URL=${ECOBE_ENGINE_URL:-$DEFAULT_ECOBE_ENGINE_URL}" >> "$GITHUB_ENV"
 
       - name: Verify engine is up
-        run: curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -sf "${ENGINE_URL}/health" || (echo "Engine is down" && exit 1)
+        run: curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -sf "${ENGINE_URL}/health"
 
       - name: Warm - us-east-1
         run: |
@@ -66,4 +69,28 @@ jobs:
             -d '{"preferredRegions":["ap-southeast-1"],"carbonWeight":0.7,"jobType":"standard"}'
 
       - name: Confirm cache warmed
-        run: curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -sf "${ENGINE_URL}/health" && echo "Cache warming complete"
+        run: curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -sf "${ENGINE_URL}/health"
+
+  failure-alert:
+    name: Failure Alert
+    runs-on: ubuntu-latest
+    needs: warm-cache
+    if: ${{ always() && needs.warm-cache.result == 'failure' }}
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Send failure alert
+        run: node .github/scripts/send-resend-alert.mjs
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_ALERTS: ${{ secrets.RESEND_FROM_ALERTS }}
+          ALERT_INBOX_EMAIL: ${{ secrets.ALERT_INBOX_EMAIL }}
+          ALERT_SUBJECT: 'CO2 Router cache warm failure'
+          ALERT_SUMMARY: 'The scheduled cache warming workflow failed.'

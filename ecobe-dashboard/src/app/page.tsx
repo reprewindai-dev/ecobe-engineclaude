@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import axios from 'axios'
+
 import { CO2RouterLogo } from '@/components/CO2RouterLogo'
 
 interface RegionData {
@@ -47,7 +48,7 @@ export default function LandingPage() {
   const [regionsError, setRegionsError] = useState<string | null>(null)
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null)
   const [showDecision, setShowDecision] = useState(false)
-  const [decisionPayload, setDecisionPayload] = useState<any>(null)
+  const [decisionPayload, setDecisionPayload] = useState<Record<string, unknown> | null>(null)
   const [expandPayload, setExpandPayload] = useState(false)
   const [isMounted, setIsMounted] = useState(false)
 
@@ -67,12 +68,9 @@ export default function LandingPage() {
         setRegions(data)
       } catch (error) {
         if (!active) return
-        console.error('Failed to load live regions:', error)
         setRegionsError(error instanceof Error ? error.message : 'Failed to load live regions')
       } finally {
-        if (active) {
-          setRegionsLoading(false)
-        }
+        if (active) setRegionsLoading(false)
       }
     }
 
@@ -113,12 +111,12 @@ export default function LandingPage() {
 
     const carbonSaved = Math.round(
       Math.max(0, baselineRegion.carbonIntensity - cleanestRegion.carbonIntensity) *
-        (parseInt(scenarios[demoScenario].memory) / 100) *
+        (parseInt(scenarios[demoScenario].memory, 10) / 100) *
         2.5
     )
 
     const payload = {
-      timestamp: new Date().toISOString().split('T')[1].split('.')[0],
+      timestamp: new Date().toISOString().split('T')[1]?.split('.')[0],
       scenario: scenarios[demoScenario].workload,
       selectedRegion: cleanestRegion.id,
       carbonIntensity: cleanestRegion.carbonIntensity,
@@ -137,7 +135,7 @@ export default function LandingPage() {
       fallback_used: false,
       estimatedFlag: false,
       syntheticFlag: false,
-      carbonSaved: `${carbonSaved}g CO₂`,
+      carbonSaved: `${carbonSaved}g CO2`,
       deadline: scenarios[demoScenario].deadline,
     }
 
@@ -150,26 +148,31 @@ export default function LandingPage() {
 
   return (
     <div className="bg-gray-950 text-gray-100 bg-grid-mesh">
-      {/* Navigation */}
-      <nav className="border-b border-gray-800/50 bg-gray-950/80 backdrop-blur-xl sticky top-0 z-50">
-        <div className="container mx-auto px-6 py-3 flex items-center justify-between">
+      <nav className="sticky top-0 z-50 border-b border-gray-800/50 bg-gray-950/80 backdrop-blur-xl">
+        <div className="container mx-auto flex items-center justify-between px-6 py-3">
           <CO2RouterLogo size="md" />
           <div className="flex items-center gap-4">
             <a
               href="#pricing"
-              className="text-sm text-gray-400 hover:text-emerald-400 transition-colors duration-200"
+              className="text-sm text-gray-400 transition-colors duration-200 hover:text-emerald-400"
             >
               Pricing
             </a>
             <a
               href="#signals"
-              className="text-sm text-gray-400 hover:text-emerald-400 transition-colors duration-200"
+              className="text-sm text-gray-400 transition-colors duration-200 hover:text-emerald-400"
             >
               How It Works
             </a>
             <Link
+              href="/contact"
+              className="text-sm text-gray-400 transition-colors duration-200 hover:text-cyan-300"
+            >
+              Contact
+            </Link>
+            <Link
               href="/console"
-              className="px-5 py-2 bg-gradient-to-r from-emerald-500 to-cyan-500 text-gray-950 font-semibold rounded-lg hover:from-emerald-400 hover:to-cyan-400 transition-all duration-200 shadow-lg shadow-emerald-500/20"
+              className="rounded-lg bg-gradient-to-r from-emerald-500 to-cyan-500 px-5 py-2 text-gray-950 shadow-lg shadow-emerald-500/20 transition-all duration-200 hover:from-emerald-400 hover:to-cyan-400"
             >
               Open Console
             </Link>
@@ -177,47 +180,47 @@ export default function LandingPage() {
         </div>
       </nav>
 
-      {/* Hero Section */}
       <section className="relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-b from-emerald-500/8 via-gray-950 to-gray-950" />
-        <div className="absolute top-20 right-20 w-[500px] h-[500px] bg-emerald-500/5 rounded-full blur-[100px] animate-breathe" />
-        <div className="absolute bottom-0 left-10 w-[400px] h-[400px] bg-cyan-500/5 rounded-full blur-[80px]" />
-        <div className="absolute top-40 left-1/2 w-[300px] h-[300px] bg-blue-500/3 rounded-full blur-[60px]" />
+        <div className="absolute right-20 top-20 h-[500px] w-[500px] animate-breathe rounded-full bg-emerald-500/5 blur-[100px]" />
+        <div className="absolute bottom-0 left-10 h-[400px] w-[400px] rounded-full bg-cyan-500/5 blur-[80px]" />
+        <div className="absolute left-1/2 top-40 h-[300px] w-[300px] rounded-full bg-blue-500/3 blur-[60px]" />
 
         <div className="relative container mx-auto px-6 py-28">
-          <div className="text-center max-w-4xl mx-auto">
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 mb-8">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 pulse-glow" />
-              <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">Live — 6 Regions Active</span>
+          <div className="mx-auto max-w-4xl text-center">
+            <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-4 py-1.5">
+              <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 pulse-glow" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-emerald-400">
+                Live - 6 Regions Active
+              </span>
             </div>
-            <h1 className="text-5xl md:text-7xl font-black text-white mb-6 leading-[1.1] tracking-tight">
+            <h1 className="mb-6 text-5xl font-black leading-[1.1] tracking-tight text-white md:text-7xl">
               Route Compute to
               <span className="block gradient-text">Clean Energy.</span>
             </h1>
-            <p className="text-xl text-gray-400 mb-10 leading-relaxed max-w-2xl mx-auto">
-              CO₂Router is the world&apos;s most accurate carbon-aware routing engine. Cut your cloud
-              carbon footprint by 40–70% with zero code changes.
+            <p className="mx-auto mb-10 max-w-2xl text-xl leading-relaxed text-gray-400">
+              CO2 Router is the world&apos;s most accurate carbon-aware routing engine. Cut your cloud
+              carbon footprint by 40-70% with zero code changes.
             </p>
 
-            <div className="flex flex-col sm:flex-row gap-4 justify-center mb-12">
+            <div className="mb-12 flex flex-col justify-center gap-4 sm:flex-row">
               <button
                 onClick={() => {
                   document.getElementById('demo')?.scrollIntoView({ behavior: 'smooth' })
                 }}
-                className="px-8 py-3 bg-emerald-500 text-gray-950 font-semibold rounded-lg hover:bg-emerald-400 transition"
+                className="rounded-lg bg-emerald-500 px-8 py-3 font-semibold text-gray-950 transition hover:bg-emerald-400"
               >
                 Try Live Demo
               </button>
-              <a
-                href="#pricing"
-                className="px-8 py-3 border border-gray-700 text-gray-100 font-semibold rounded-lg hover:bg-gray-900 transition"
+              <Link
+                href="/contact"
+                className="rounded-lg border border-gray-700 px-8 py-3 font-semibold text-gray-100 transition hover:bg-gray-900"
               >
-                Start Free
-              </a>
+                Start Contact
+              </Link>
             </div>
 
-            {/* Stats Bar */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-8 border-t border-gray-800">
+            <div className="grid grid-cols-2 gap-4 border-t border-gray-800 pt-8 md:grid-cols-4">
               <div>
                 <div className="text-2xl font-bold text-emerald-400">4</div>
                 <div className="text-sm text-gray-500">Signal Providers</div>
@@ -239,503 +242,152 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Live Demo Section */}
       <section id="demo" className="border-t border-gray-800 bg-gray-900/50 py-24">
         <div className="container mx-auto px-6">
-          <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold text-white mb-4">See It Work in Real-Time</h2>
-            <p className="text-gray-400 text-lg">
+          <div className="mb-16 text-center">
+            <h2 className="mb-4 text-4xl font-bold text-white">See It Work in Real-Time</h2>
+            <p className="text-lg text-gray-400">
               Interactive routing decision engine with live carbon calculations
             </p>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* Demo Input */}
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
             <div className="space-y-6">
-              <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-6">
-                <h3 className="text-lg font-semibold text-white mb-4">Workload</h3>
+              <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-6">
+                <h3 className="mb-4 text-lg font-semibold text-white">Workload</h3>
                 <div className="space-y-2">
-                  {scenarios.map((s, i) => (
+                  {scenarios.map((scenario, index) => (
                     <div
-                      key={i}
+                      key={scenario.workload}
+                      className={`cursor-pointer rounded-lg border p-4 transition ${
+                        index === demoScenario
+                          ? 'border-emerald-500 bg-emerald-500/10'
+                          : 'border-gray-700 hover:border-gray-600'
+                      }`}
                       onClick={() => {
-                        setDemoScenario(i)
+                        setDemoScenario(index)
                         setSelectedRegion(null)
                         setShowDecision(false)
+                        setDecisionPayload(null)
                       }}
-                      className={`p-3 rounded-lg border cursor-pointer transition ${
-                        demoScenario === i
-                          ? 'border-emerald-500 bg-emerald-500/10'
-                          : 'border-gray-700 hover:border-gray-600 bg-gray-900/50'
-                      }`}
                     >
-                      <div className="font-medium text-gray-100">{s.workload}</div>
-                      <div className="text-xs text-gray-500 mt-1">
-                        {s.memory} • {s.compute}
+                      <div className="font-medium text-white">{scenario.workload}</div>
+                      <div className="mt-1 text-sm text-gray-400">{scenario.description}</div>
+                      <div className="mt-3 flex flex-wrap gap-4 text-xs text-gray-500">
+                        <span>{scenario.memory}</span>
+                        <span>{scenario.compute}</span>
+                        <span>Deadline {scenario.deadline}</span>
                       </div>
-                      <div className="text-xs text-emerald-400 mt-1">{s.description}</div>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-6">
-                <h3 className="text-lg font-semibold text-white mb-4">Regions</h3>
-                <div className="space-y-2">
-                  {regionsLoading && (
-                    <div className="rounded-lg border border-gray-700 bg-gray-900/50 p-3 text-sm text-gray-400">
-                      Loading live provider data...
-                    </div>
-                  )}
-                  {regionsError && (
-                    <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-300">
-                      {regionsError}
-                    </div>
-                  )}
+              <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-6">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-white">Live Region Signals</h3>
+                  <button
+                    onClick={handleRouteGreen}
+                    disabled={regionsLoading || regions.length === 0}
+                    className="rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-gray-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Route Green
+                  </button>
+                </div>
+
+                {regionsLoading ? <div className="text-sm text-gray-400">Loading live regions...</div> : null}
+                {regionsError ? <div className="text-sm text-rose-300">{regionsError}</div> : null}
+
+                <div className="space-y-3">
                   {regions.map((region) => (
-                    <div
+                    <button
                       key={region.id}
+                      type="button"
                       onClick={() => setSelectedRegion(region.id)}
-                      className={`p-3 rounded-lg border cursor-pointer transition ${
+                      className={`w-full rounded-lg border p-4 text-left transition ${
                         selectedRegion === region.id
-                          ? 'border-emerald-500 bg-emerald-500/10'
-                          : 'border-gray-700 hover:border-gray-600 bg-gray-900/50'
+                          ? 'border-cyan-400 bg-cyan-500/10'
+                          : 'border-gray-700 hover:border-gray-600'
                       }`}
                     >
                       <div className="flex items-center justify-between">
-                        <div className="font-medium text-gray-100">{region.name}</div>
-                        <div className="text-sm font-bold text-emerald-400">
-                          {region.carbonIntensity != null
-                            ? `${region.carbonIntensity} g/kWh`
-                            : 'Unavailable'}
-                        </div>
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1">
-                        {region.renewable} renewable • {region.demand} demand
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <button
-                onClick={handleRouteGreen}
-                disabled={regionsLoading || regions.length === 0}
-                className="w-full px-6 py-3 bg-emerald-500 text-gray-950 font-semibold rounded-lg hover:bg-emerald-400 transition"
-              >
-                Route Green
-              </button>
-            </div>
-
-            {/* Demo Output */}
-            <div className="space-y-6">
-              <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-6">
-                <h3 className="text-lg font-semibold text-white mb-4">Scenario</h3>
-                <div className="space-y-3 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Workload</span>
-                    <span className="font-medium text-gray-100">{scenarios[demoScenario].workload}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Memory</span>
-                    <span className="font-medium text-gray-100">{scenarios[demoScenario].memory}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Compute</span>
-                    <span className="font-medium text-gray-100">{scenarios[demoScenario].compute}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Deadline</span>
-                    <span className="font-medium text-gray-100">{scenarios[demoScenario].deadline}</span>
-                  </div>
-                </div>
-              </div>
-
-              {showDecision && selectedRegion && decisionPayload ? (
-                <>
-                  <div className="bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 border border-emerald-500/50 rounded-lg p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-lg font-semibold text-white">Decision</h3>
-                      <div className="px-3 py-1 bg-emerald-500/20 text-emerald-400 text-xs font-semibold rounded">
-                        HIGH CONFIDENCE
-                      </div>
-                    </div>
-
-                    <div className="space-y-4">
-                      <div>
-                        <div className="text-gray-500 text-sm mb-1">Selected Region</div>
-                        <div className="text-2xl font-bold text-emerald-400">
-                          {regions.find((r) => r.id === selectedRegion)?.name}
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4 pt-4 border-t border-gray-700">
                         <div>
-                          <div className="text-gray-500 text-xs mb-1">Carbon Intensity</div>
-                          <div className="text-xl font-bold text-gray-100">
-                            {decisionPayload.carbonIntensity}
-                            <span className="text-xs text-gray-500 ml-1">g/kWh</span>
+                          <div className="font-medium text-white">{region.name}</div>
+                          <div className="mt-1 text-xs uppercase tracking-[0.18em] text-gray-500">
+                            {region.source}
                           </div>
                         </div>
-                        <div>
-                          <div className="text-gray-500 text-xs mb-1">Quality Score</div>
-                          <div className="text-xl font-bold text-gray-100">
-                            {Math.round(decisionPayload.score)}
-                            <span className="text-xs text-gray-500 ml-1">/100</span>
+                        <div className="text-right">
+                          <div className="text-lg font-semibold text-emerald-300">
+                            {region.carbonIntensity != null ? `${region.carbonIntensity.toFixed(0)} gCO2/kWh` : 'N/A'}
                           </div>
-                        </div>
-                        <div>
-                          <div className="text-gray-500 text-xs mb-1">Carbon Saved</div>
-                          <div className="text-xl font-bold text-emerald-400">
-                            {decisionPayload.carbonSaved}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-gray-500 text-xs mb-1">Forecast Stability</div>
-                          <div className="text-xl font-bold text-gray-100 capitalize">
-                            {decisionPayload.forecast_stability}
+                          <div className="text-xs text-gray-500">
+                            Confidence {Math.round(region.confidence * 100)}%
                           </div>
                         </div>
                       </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-6">
-                    <button
-                      onClick={() => setExpandPayload(!expandPayload)}
-                      className="w-full flex items-center justify-between"
-                    >
-                      <span className="font-semibold text-white">Decision Payload</span>
-                      <span className="text-gray-500">{expandPayload ? '−' : '+'}</span>
                     </button>
-
-                    {expandPayload && (
-                      <div className="mt-4 p-3 bg-gray-900 rounded font-mono text-xs text-gray-400 overflow-auto max-h-64">
-                        <pre>{JSON.stringify(decisionPayload, null, 2)}</pre>
-                      </div>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-12 text-center">
-                  <div className="text-gray-500">
-                    Select a region and click &quot;Route Green&quot; to see the decision
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* How It Works Section */}
-      <section id="signals" className="py-24 border-t border-gray-800">
-        <div className="container mx-auto px-6">
-          <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold text-white mb-4">How It Works</h2>
-            <p className="text-gray-400 text-lg">Three steps to carbon-aware compute</p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {[
-              {
-                step: '1',
-                title: 'Connect',
-                description: 'Drop-in SDK, 3 lines of code. No infrastructure changes.',
-                code: 'const router = new CO2Router()',
-              },
-              {
-                step: '2',
-                title: 'Route',
-                description: 'AI selects the cleanest region in real-time based on live grid signals.',
-                code: 'await router.route(workload)',
-              },
-              {
-                step: '3',
-                title: 'Save',
-                description:
-                  'Track carbon avoided, forecast accuracy, and compliance in your dashboard.',
-                code: 'const avoided = metrics.carbonSaved',
-              },
-            ].map((item, i) => (
-              <div
-                key={i}
-                className="bg-gray-800/50 border border-gray-700 rounded-lg p-8 hover:border-emerald-500/50 transition"
-              >
-                <div className="h-12 w-12 rounded-lg bg-emerald-500/20 flex items-center justify-center mb-4">
-                  <span className="text-2xl font-bold text-emerald-400">{item.step}</span>
-                </div>
-                <h3 className="text-xl font-semibold text-white mb-2">{item.title}</h3>
-                <p className="text-gray-400 text-sm mb-4">{item.description}</p>
-                <div className="bg-gray-900 border border-gray-700 rounded p-3 font-mono text-xs text-emerald-400">
-                  {item.code}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Signal Intelligence Section */}
-      <section className="py-24 bg-gray-900/50 border-y border-gray-800">
-        <div className="container mx-auto px-6">
-          <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold text-white mb-4">Signal Intelligence</h2>
-            <p className="text-gray-400 text-lg">Four providers, one truth</p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {[
-              {
-                name: 'WattTime',
-                signal: 'MOER',
-                description: 'Real-time marginal operating emissions rate. Primary routing signal.',
-                status: 'Live',
-                color: 'emerald',
-              },
-              {
-                name: 'Carbon Signal Provider',
-                signal: 'Flow-traced Intensity',
-                description: 'Grid intelligence with electricity mix and cross-zone effects.',
-                status: 'Live',
-                color: 'cyan',
-              },
-              {
-                name: 'Ember',
-                signal: 'Structural Profile',
-                description: 'Monthly/yearly carbon baseline and generation mix trends.',
-                status: 'Live',
-                color: 'amber',
-              },
-              {
-                name: 'EIA-930',
-                signal: 'Predictive Telemetry',
-                description: 'Balance, interchange, demand ramps, and curtailment probability.',
-                status: 'Live',
-                color: 'blue',
-              },
-            ].map((provider, i) => {
-              const colorClasses: Record<string, string> = {
-                emerald: 'from-emerald-500/20 to-emerald-500/0 border-emerald-500/50',
-                cyan: 'from-cyan-500/20 to-cyan-500/0 border-cyan-500/50',
-                amber: 'from-amber-500/20 to-amber-500/0 border-amber-500/50',
-                blue: 'from-blue-500/20 to-blue-500/0 border-blue-500/50',
-              }
-
-              return (
-                <div
-                  key={i}
-                  className={`bg-gradient-to-br ${colorClasses[provider.color]} border rounded-lg p-6`}
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <h3 className="font-semibold text-white">{provider.name}</h3>
-                      <div className="text-xs font-mono text-gray-400 mt-1">{provider.signal}</div>
-                    </div>
-                    <div className="px-2 py-1 bg-green-500/20 text-green-400 text-xs font-semibold rounded">
-                      {provider.status}
-                    </div>
-                  </div>
-                  <p className="text-gray-400 text-sm">{provider.description}</p>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      </section>
-
-      {/* Pricing Section */}
-      <section id="pricing" className="py-24 border-t border-gray-800">
-        <div className="container mx-auto px-6">
-          <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold text-white mb-4">Transparent Pricing</h2>
-            <p className="text-gray-400 text-lg">Start free, scale as you grow</p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {[
-              {
-                name: 'Free',
-                price: '$0',
-                period: '/month',
-                commands: '1,000',
-                features: [
-                  'Basic routing',
-                  '1 cloud region',
-                  'Community support',
-                  'Public dashboard',
-                  '30-day retention',
-                ],
-                cta: 'Get Started',
-                highlight: false,
-              },
-              {
-                name: 'Pro',
-                price: '$99',
-                period: '/month',
-                commands: '50,000',
-                features: [
-                  'Full intelligence',
-                  'All 6 regions',
-                  'Priority support',
-                  'Private dashboard',
-                  '1-year retention',
-                  'API access',
-                ],
-                cta: 'Start Free Trial',
-                highlight: true,
-              },
-              {
-                name: 'Enterprise',
-                price: 'Custom',
-                period: 'contact sales',
-                commands: 'Unlimited',
-                features: [
-                  'Unlimited routing',
-                  'Custom regions',
-                  'Dedicated support',
-                  'SLA guaranteed',
-                  'Custom integrations',
-                  'Training included',
-                ],
-                cta: 'Contact Sales',
-                highlight: false,
-              },
-            ].map((plan, i) => (
-              <div
-                key={i}
-                className={`rounded-lg p-8 transition ${
-                  plan.highlight
-                    ? 'bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 border-2 border-emerald-500 ring-emerald-500/20 ring-2'
-                    : 'bg-gray-800/50 border border-gray-700'
-                }`}
-              >
-                <h3 className="text-2xl font-bold text-white mb-2">{plan.name}</h3>
-                <div className="mb-6">
-                  <span className="text-4xl font-bold text-white">{plan.price}</span>
-                  <span className="text-gray-400 text-sm ml-2">{plan.period}</span>
-                  <div className="text-sm text-gray-500 mt-2">{plan.commands} commands/month</div>
-                </div>
-
-                <button
-                  className={`w-full py-2.5 rounded-lg font-semibold mb-8 transition ${
-                    plan.highlight
-                      ? 'bg-emerald-500 text-gray-950 hover:bg-emerald-400'
-                      : 'border border-gray-600 text-gray-100 hover:bg-gray-700'
-                  }`}
-                >
-                  {plan.cta}
-                </button>
-
-                <div className="space-y-3">
-                  {plan.features.map((feature, j) => (
-                    <div key={j} className="flex items-center space-x-3">
-                      <div className="h-5 w-5 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                        <div className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                      </div>
-                      <span className="text-sm text-gray-300">{feature}</span>
-                    </div>
                   ))}
                 </div>
               </div>
-            ))}
-          </div>
+            </div>
 
-          <div className="mt-12 text-center">
-            <p className="text-gray-500 text-sm">
-              Overage pricing: <span className="text-emerald-400 font-semibold">$0.0015/command</span>
-            </p>
-            <p className="text-gray-500 text-sm mt-2">
-              Simulation commands count at 0.5x
-            </p>
+            <div className="space-y-6">
+              <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-6">
+                <h3 className="mb-4 text-lg font-semibold text-white">Decision Envelope</h3>
+                {showDecision && decisionPayload ? (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-4">
+                      <div>
+                        <div className="text-sm uppercase tracking-[0.18em] text-emerald-300">Routed</div>
+                        <div className="mt-1 text-2xl font-bold text-white">
+                          {String(decisionPayload.selectedRegion)}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm text-gray-400">Carbon saved</div>
+                        <div className="mt-1 text-xl font-semibold text-emerald-300">
+                          {String(decisionPayload.carbonSaved)}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-gray-700 bg-gray-900/70 p-4">
+                      <div className="mb-3 flex items-center justify-between">
+                        <div className="text-sm font-semibold text-white">Payload</div>
+                        <button
+                          type="button"
+                          onClick={() => setExpandPayload((value) => !value)}
+                          className="text-xs uppercase tracking-[0.2em] text-cyan-300"
+                        >
+                          {expandPayload ? 'Collapse' : 'Expand'}
+                        </button>
+                      </div>
+                      <pre className={`overflow-x-auto text-xs leading-6 text-slate-300 ${expandPayload ? '' : 'max-h-80 overflow-hidden'}`}>
+                        {JSON.stringify(decisionPayload, null, 2)}
+                      </pre>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed border-gray-700 p-6 text-sm text-gray-400">
+                    Select a workload and route it to the lowest-carbon region to generate a live decision envelope.
+                  </div>
+                )}
+              </div>
+
+              <div id="signals" className="rounded-lg border border-gray-700 bg-gray-800/50 p-6">
+                <h3 className="mb-4 text-lg font-semibold text-white">Signal Doctrine</h3>
+                <div className="grid gap-3 text-sm text-slate-300">
+                  <div>Signals feed the router before execution begins.</div>
+                  <div>Water authority can block unsafe execution paths.</div>
+                  <div>Proof, trace, and replay attach to every governed decision path.</div>
+                  <div>Command center and control surface show only real live data.</div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
-
-      {/* CTA Section */}
-      <section className="py-24 bg-gradient-to-r from-emerald-500/10 via-cyan-500/10 to-emerald-500/10 border-t border-gray-800">
-        <div className="container mx-auto px-6 text-center">
-          <h2 className="text-4xl font-bold text-white mb-6">Start Routing Carbon, Not Emissions</h2>
-          <p className="text-xl text-gray-400 mb-8 max-w-2xl mx-auto">
-            Join companies cutting their cloud carbon footprint by 40–70% without code changes.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <button className="px-8 py-3 bg-emerald-500 text-gray-950 font-semibold rounded-lg hover:bg-emerald-400 transition">
-              Start Free
-            </button>
-            <button className="px-8 py-3 border border-gray-700 text-gray-100 font-semibold rounded-lg hover:bg-gray-900 transition">
-              Schedule Demo
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer className="border-t border-gray-800 bg-gray-900/50">
-        <div className="container mx-auto px-6 py-12">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-12 mb-8">
-            <div>
-              <div className="mb-4">
-                <CO2RouterLogo size="sm" animated={false} />
-              </div>
-              <p className="text-gray-500 text-sm">
-                Carbon-aware compute routing engine built for a sustainable future.
-              </p>
-            </div>
-            <div>
-              <h4 className="font-semibold text-white mb-4">Product</h4>
-              <div className="space-y-2 text-sm text-gray-500">
-                <a href="#demo" className="hover:text-emerald-400 transition">
-                  Live Demo
-                </a>
-                <a href="#" className="hover:text-emerald-400 transition">
-                  Documentation
-                </a>
-                <a href="#" className="hover:text-emerald-400 transition">
-                  API Reference
-                </a>
-              </div>
-            </div>
-            <div>
-              <h4 className="font-semibold text-white mb-4">Company</h4>
-              <div className="space-y-2 text-sm text-gray-500">
-                <a href="#" className="hover:text-emerald-400 transition">
-                  Status
-                </a>
-                <a href="#" className="hover:text-emerald-400 transition">
-                  Methodology
-                </a>
-                <a href="#" className="hover:text-emerald-400 transition">
-                  Contact
-                </a>
-              </div>
-            </div>
-            <div>
-              <h4 className="font-semibold text-white mb-4">Legal</h4>
-              <div className="space-y-2 text-sm text-gray-500">
-                <a href="#" className="hover:text-emerald-400 transition">
-                  Privacy
-                </a>
-                <a href="#" className="hover:text-emerald-400 transition">
-                  Terms
-                </a>
-                <a href="#" className="hover:text-emerald-400 transition">
-                  Security
-                </a>
-              </div>
-            </div>
-          </div>
-
-          <div className="border-t border-gray-800 pt-8 flex items-center justify-between">
-            <p className="text-gray-500 text-sm">
-              © 2026 CO₂Router. Built for a carbon-neutral future.
-            </p>
-            <p className="text-gray-500 text-sm">
-              Powered by WattTime, Carbon Signal Provider, Ember, EIA-930
-            </p>
-          </div>
-        </div>
-      </footer>
     </div>
   )
 }

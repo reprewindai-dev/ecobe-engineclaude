@@ -1,12 +1,16 @@
 name: Refresh Carbon Forecasts
 
-# Pull fresh carbon forecasts via GET /api/v1/forecasting/:region/forecasts
-# Frequency: Every 30 minutes
-
 on:
   schedule:
     - cron: '*/30 * * * *'
   workflow_dispatch:
+
+concurrency:
+  group: refresh-forecasts-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 env:
   DEFAULT_ECOBE_ENGINE_URL: https://ecobe-engineclaude-production.up.railway.app
@@ -26,25 +30,43 @@ jobs:
           echo "ENGINE_URL=${ECOBE_ENGINE_URL:-$DEFAULT_ECOBE_ENGINE_URL}" >> "$GITHUB_ENV"
 
       - name: Verify engine is up
-        run: curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -sf "${ENGINE_URL}/health" || (echo "Engine is down" && exit 1)
+        run: curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -sf "${ENGINE_URL}/health"
 
       - name: Refresh forecasts - us-east-1
-        run: |
-          curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 45 -sf "${ENGINE_URL}/api/v1/forecasting/us-east-1/forecasts?hoursAhead=24"
+        run: curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 45 -sf "${ENGINE_URL}/api/v1/forecasting/us-east-1/forecasts?hoursAhead=24"
 
       - name: Refresh forecasts - us-west-2
-        run: |
-          curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 45 -sf "${ENGINE_URL}/api/v1/forecasting/us-west-2/forecasts?hoursAhead=24"
+        run: curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 45 -sf "${ENGINE_URL}/api/v1/forecasting/us-west-2/forecasts?hoursAhead=24"
 
       - name: Refresh forecasts - eu-west-1
-        run: |
-          curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 45 -sf "${ENGINE_URL}/api/v1/forecasting/eu-west-1/forecasts?hoursAhead=24"
+        run: curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 45 -sf "${ENGINE_URL}/api/v1/forecasting/eu-west-1/forecasts?hoursAhead=24"
 
       - name: Refresh forecasts - ap-southeast-1
-        run: |
-          curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 45 -sf "${ENGINE_URL}/api/v1/forecasting/ap-southeast-1/forecasts?hoursAhead=24"
+        run: curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 45 -sf "${ENGINE_URL}/api/v1/forecasting/ap-southeast-1/forecasts?hoursAhead=24"
 
       - name: Check forecast accuracy
-        run: |
-          curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -sf "${ENGINE_URL}/api/v1/forecasting/accuracy"
-          echo "Forecast refresh cycle complete"
+        run: curl --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 30 -sf "${ENGINE_URL}/api/v1/forecasting/accuracy"
+
+  failure-alert:
+    name: Failure Alert
+    runs-on: ubuntu-latest
+    needs: refresh-forecasts
+    if: ${{ always() && needs.refresh-forecasts.result == 'failure' }}
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Send failure alert
+        run: node .github/scripts/send-resend-alert.mjs
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_ALERTS: ${{ secrets.RESEND_FROM_ALERTS }}
+          ALERT_INBOX_EMAIL: ${{ secrets.ALERT_INBOX_EMAIL }}
+          ALERT_SUBJECT: 'CO2 Router forecast refresh failure'
+          ALERT_SUMMARY: 'The scheduled carbon forecast refresh workflow failed.'
