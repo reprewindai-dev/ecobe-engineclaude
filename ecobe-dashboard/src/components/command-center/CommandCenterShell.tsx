@@ -36,7 +36,7 @@ import type {
 
 function shortHash(value: string | null | undefined, length = 12) {
   if (!value) return 'Unavailable'
-  return value.length <= length ? value : `${value.slice(0, length)}…`
+  return value.length <= length ? value : `${value.slice(0, length)}...`
 }
 
 function formatAgo(timestamp: string) {

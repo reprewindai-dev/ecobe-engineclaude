@@ -124,7 +124,9 @@ export function EmberStructuralPanel() {
           })}
         </div>
       ) : !loaded ? (
-        <p className="text-slate-500 text-xs">Click "Load Ember Profiles" to fetch structural region data from Ember.</p>
+        <p className="text-slate-500 text-xs">
+          Click &quot;Load Ember Profiles&quot; to fetch structural region data from Ember.
+        </p>
       ) : (
         <p className="text-slate-500 text-xs">No structural profile data returned.</p>
       )}

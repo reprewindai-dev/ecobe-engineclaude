@@ -45,7 +45,8 @@ export function DecisionStream() {
     refetchInterval: 15_000,
   })
 
-  const decisions = data?.decisions ?? []
+  const decisionsSource = data?.decisions
+  const decisions = useMemo(() => decisionsSource ?? [], [decisionsSource])
   const { sources, orgs, workloadTypes } = useMemo(() => getFilterOptions(decisions), [decisions])
 
   const filtered = useMemo(() => {
