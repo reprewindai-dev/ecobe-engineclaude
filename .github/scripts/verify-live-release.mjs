@@ -20,6 +20,10 @@ function assert(condition, message) {
   }
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 function internalHeaders() {
   if (!internalKey) {
     return {
@@ -55,6 +59,27 @@ async function fetchJson(pathname, headers = {}) {
     response,
     json,
   }
+}
+
+async function waitForWarmCoverage() {
+  const attempts = 7
+  const delayMs = 5_000
+  let lastCache = null
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const cache = await fetchJson('/api/v1/system/cache', internalHeaders())
+    lastCache = cache
+    const requiredWarmCoveragePct = Number(cache.json?.cache?.requiredWarmCoveragePct ?? NaN)
+    if (Number.isFinite(requiredWarmCoveragePct) && requiredWarmCoveragePct >= 95) {
+      return cache
+    }
+
+    if (attempt < attempts) {
+      await sleep(delayMs)
+    }
+  }
+
+  return lastCache
 }
 
 function signBody(body) {
@@ -210,7 +235,7 @@ const provenanceMismatch = Number(
 )
 assert(provenanceVerified >= 1, 'water provenance verification missing or empty')
 
-const cache = await fetchJson('/api/v1/system/cache', internalHeaders())
+const cache = await waitForWarmCoverage()
 const requiredWarmCoveragePct = Number(cache.json?.cache?.requiredWarmCoveragePct ?? NaN)
 assert(Number.isFinite(requiredWarmCoveragePct), 'system/cache missing requiredWarmCoveragePct')
 assert(requiredWarmCoveragePct >= 95, `required warm coverage below gate: ${requiredWarmCoveragePct}`)
