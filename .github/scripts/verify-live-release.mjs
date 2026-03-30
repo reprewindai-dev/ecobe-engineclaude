@@ -129,7 +129,20 @@ assert(p95Total <= 100, `engine p95 total above gate: ${p95Total}`)
 assert(p95Compute <= 50, `engine p95 compute above gate: ${p95Compute}`)
 
 const provenance = await fetchJson('/api/v1/water/provenance')
-assert(Number(provenance.json?.verified ?? 0) >= 1, 'water provenance verification missing or empty')
+const provenanceVerified = Number(
+  provenance.json?.verified ??
+    provenance.json?.summary?.verified ??
+    provenance.json?.counts?.verified ??
+    0,
+)
+const provenanceMismatch = Number(
+  provenance.json?.mismatch ??
+    provenance.json?.mismatched ??
+    provenance.json?.summary?.mismatch ??
+    provenance.json?.counts?.mismatch ??
+    0,
+)
+assert(provenanceVerified >= 1, 'water provenance verification missing or empty')
 
 const cache = await fetchJson('/api/v1/system/cache', internalHeaders())
 const requiredWarmCoveragePct = Number(cache.json?.cache?.requiredWarmCoveragePct ?? NaN)
@@ -168,8 +181,8 @@ const result = {
     counts: slo.json?.counts ?? null,
   },
   provenance: {
-    verified: provenance.json?.verified ?? null,
-    mismatch: provenance.json?.mismatch ?? provenance.json?.mismatched ?? null,
+    verified: provenanceVerified,
+    mismatch: provenanceMismatch,
   },
   cache: {
     requiredWarmCoveragePct,
