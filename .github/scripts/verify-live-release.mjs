@@ -52,7 +52,12 @@ async function fetchJson(pathname, headers = {}) {
   }
 
   if (!response.ok) {
-    throw new Error(`${pathname} returned ${response.status}: ${typeof json === 'string' ? json : JSON.stringify(json)}`)
+    const error = new Error(
+      `${pathname} returned ${response.status}: ${typeof json === 'string' ? json : JSON.stringify(json)}`
+    )
+    error.status = response.status
+    error.payload = json
+    throw error
   }
 
   return {
@@ -80,6 +85,24 @@ async function waitForWarmCoverage() {
   }
 
   return lastCache
+}
+
+async function waitForDecisionArtifact(pathname, headers = {}, retryStatuses = [404], attempts = 6, delayMs = 2_000) {
+  let lastError = null
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fetchJson(pathname, headers)
+    } catch (error) {
+      lastError = error
+      if (!retryStatuses.includes(error?.status) || attempt === attempts) {
+        throw error
+      }
+      await sleep(delayMs)
+    }
+  }
+
+  throw lastError
 }
 
 function signBody(body) {
@@ -246,10 +269,18 @@ assert(typeof decisionFrameId === 'string' && decisionFrameId.length > 0, 'autho
 assert(Boolean(authorize.response.headers.get('Replay-Trace-ID')), 'authorize response missing Replay-Trace-ID header')
 assert(Boolean(authorize.response.headers.get('X-CO2Router-Trace-Hash')), 'authorize response missing X-CO2Router-Trace-Hash header')
 
-const trace = await fetchJson(`/api/v1/ci/decisions/${decisionFrameId}/trace`, internalHeaders())
+const trace = await waitForDecisionArtifact(
+  `/api/v1/ci/decisions/${decisionFrameId}/trace`,
+  internalHeaders(),
+  [404]
+)
 assert(trace.json?.decisionFrameId === decisionFrameId, 'trace response missing matching decisionFrameId')
 
-const replay = await fetchJson(`/api/v1/ci/decisions/${decisionFrameId}/replay`, internalHeaders())
+const replay = await waitForDecisionArtifact(
+  `/api/v1/ci/decisions/${decisionFrameId}/replay`,
+  internalHeaders(),
+  [404, 422]
+)
 assert(replay.json?.decisionFrameId === decisionFrameId, 'replay response missing matching decisionFrameId')
 assert(replay.json?.deterministicMatch === true, 'replay response is not deterministic')
 
