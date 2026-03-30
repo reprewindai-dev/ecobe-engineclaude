@@ -3,12 +3,19 @@ import type { Server } from 'http'
 import { env } from './config/env'
 import { createApp } from './app'
 import { prisma } from './lib/db'
+import { assertSchemaReadiness } from './lib/db/schema-readiness'
 import { redis } from './lib/redis'
-import { warmCacheOnStartup } from './lib/cache-warmer'
+import { startRoutingSignalWarmLoop, stopRoutingSignalWarmLoop, warmCacheOnStartup } from './lib/cache-warmer'
 import { startEIAIngestionWorker } from './workers/eia-ingestion'
 import { startForecastVerificationWorker } from './workers/forecast-verification'
 import { startForecastWorker } from './workers/forecast-poller'
 import { scheduleIntelligenceJobs } from './workers/intelligence-scheduler'
+import { startLearningLoopWorker } from './workers/learning-loop'
+import { stopLearningLoopWorker } from './workers/learning-loop'
+import { startRuntimeSupervisor, stopRuntimeSupervisor } from './workers/runtime-supervisor'
+import { startDecisionEventDispatcherWorker, stopDecisionEventDispatcherWorker } from './workers/decision-event-dispatcher'
+import { recoverWaterArtifactsFromLastKnownGood, validateWaterArtifacts } from './lib/water/bundle'
+import { ensureDecisionEventVerifierSink } from './lib/ci/event-verifier-sink'
 
 const app = createApp()
 let server: Server | null = null
@@ -37,6 +44,11 @@ async function gracefulShutdown(signal: string) {
 
     console.log('Disconnecting from database...')
     await prisma.$disconnect()
+
+    stopRuntimeSupervisor()
+    stopLearningLoopWorker()
+    stopDecisionEventDispatcherWorker()
+    stopRoutingSignalWarmLoop()
 
     console.log('Closing Redis connection...')
     await redis.quit().catch(() => undefined)
@@ -82,12 +94,49 @@ function startBackgroundWorkers() {
   warmCacheOnStartup().catch((error) => {
     console.error('Cache warming failed:', error)
   })
+  startRoutingSignalWarmLoop()
+
+  try {
+    startLearningLoopWorker()
+  } catch (error) {
+    console.error('Learning loop worker failed to start:', error)
+  }
+
+  try {
+    startRuntimeSupervisor()
+  } catch (error) {
+    console.error('Runtime supervisor failed to start:', error)
+  }
+
+  try {
+    startDecisionEventDispatcherWorker()
+  } catch (error) {
+    console.error('Decision event dispatcher failed to start:', error)
+  }
 }
 
 async function start() {
   try {
+    let waterArtifacts = validateWaterArtifacts()
+    if (!waterArtifacts.healthy) {
+      console.error('Water artifact health check failed at startup:', waterArtifacts)
+      const recovery = recoverWaterArtifactsFromLastKnownGood()
+      if (recovery.recovered) {
+        console.warn('Recovered water artifacts from last-known-good snapshot at startup')
+        waterArtifacts = validateWaterArtifacts()
+      }
+      if (env.NODE_ENV === 'production') {
+        if (!waterArtifacts.healthy) {
+          process.exit(1)
+        }
+      }
+    }
+
     await prisma.$connect()
     console.log('Database connected')
+
+    await assertSchemaReadiness()
+    console.log('Schema readiness gate passed')
 
     try {
       await redis.ping()
@@ -95,6 +144,13 @@ async function start() {
     } catch (error) {
       console.error('Redis error:', error)
       console.warn('Redis unavailable at startup; continuing without Redis')
+    }
+
+    const verifierSink = await ensureDecisionEventVerifierSink()
+    if (verifierSink.status === 'created' || verifierSink.status === 'updated') {
+      console.log(`Decision event verifier sink ${verifierSink.status}: ${verifierSink.sinkId}`)
+    } else {
+      console.warn(`Decision event verifier sink skipped: ${verifierSink.reason}`)
     }
 
     server = app.listen(env.PORT, () => {

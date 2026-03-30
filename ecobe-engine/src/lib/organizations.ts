@@ -165,6 +165,8 @@ export async function provisionOrganization(input: {
   billingEmail?: string
   enforceCreditCoverage?: boolean
   monthlyCommandLimit?: number
+  featureFlags?: Record<string, unknown>
+  proofRetentionDays?: number
 }): Promise<Organization> {
   const baseSlug = slugify(input.slug ?? input.name)
   const slug = await ensureUniqueSlug(baseSlug)
@@ -179,6 +181,8 @@ export async function provisionOrganization(input: {
       planTier: input.planTier ?? 'FREE',
       enforceCreditCoverage: input.enforceCreditCoverage ?? false,
       monthlyCommandLimit: input.monthlyCommandLimit ?? 1000,
+      featureFlags: input.featureFlags ?? {},
+      proofRetentionDays: input.proofRetentionDays ?? 30,
     },
   })
 }

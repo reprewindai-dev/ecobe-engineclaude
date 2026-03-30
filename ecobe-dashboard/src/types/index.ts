@@ -18,6 +18,13 @@ export interface CarbonIntensity {
 
 export type QualityTier = 'high' | 'medium' | 'low'
 export type ForecastStability = 'stable' | 'medium' | 'unstable'
+export type RoutingMode = 'optimize' | 'assurance'
+export type PolicyMode = 'default' | 'sec_disclosure_strict' | 'eu_24x7_ready'
+export type SignalType =
+  | 'average_operational'
+  | 'marginal_estimate'
+  | 'consumed_emissions'
+  | 'unknown'
 
 // ─── Routing ──────────────────────────────────────────────────────────────────
 
@@ -46,8 +53,24 @@ export interface GreenRoutingResult {
   carbonIntensity: number
   estimatedLatency?: number
   score: number
+  mode?: RoutingMode
+  policyMode?: PolicyMode
+  signalTypeUsed?: SignalType
+  assurance?: {
+    enabled: boolean
+    disagreementThresholdPct: number
+    confidenceLabel: 'high' | 'medium' | 'low'
+    conservativeAccounting: boolean
+  }
+  weights?: {
+    carbon: number
+    latency: number
+    cost: number
+  }
   qualityTier: QualityTier
   explanation: string
+  legalDisclaimer?: string
+  doctrine?: string
   carbon_delta_g_per_kwh: number
   forecast_stability: ForecastStability | null
   provider_disagreement: { flag: boolean; pct: number | null } | null
@@ -246,6 +269,7 @@ export interface ForecastPoint {
   forecastTime: string
   predictedIntensity: number
   confidence?: number
+  confidenceBand?: { low: number; mid: number; high: number; empirical: boolean }
 }
 
 export interface RegionForecast {
@@ -264,6 +288,7 @@ export interface OptimalWindow {
     avgIntensity: number
     minIntensity: number
     confidence: number
+    confidenceBand?: { low: number; mid: number; high: number; empirical: boolean }
   } | null
 }
 
@@ -332,6 +357,105 @@ export interface MethodologyProviders {
   providers: ProviderStatus[]
 }
 
+export interface DisclosureRecord {
+  timestamp: string
+  workload_name: string | null
+  operation: string | null
+  decision_id: string
+  decision_frame_id: string | null
+  region: string
+  baseline_region: string
+  estimated_kwh: number | null
+  emissions_gco2: number | null
+  intensity_gco2_per_kwh: number | null
+  signal_type: SignalType
+  source: string | null
+  validation_source: string | null
+  mode: RoutingMode
+  policy_mode: PolicyMode
+  assurance_mode: boolean
+  quality_tier: string | null
+  confidence_label: string | null
+  fallback_used: boolean
+  disagreement_flag: boolean
+  disagreement_pct: number | null
+  reference_time: string | null
+  data_freshness_seconds: number | null
+  location_based_scope2_gco2: number | null
+  market_based_scope2_gco2: number | null
+}
+
+export interface DisclosureBatch {
+  batchId: string | null
+  generatedAt: string
+  metadata: Record<string, unknown>
+}
+
+export interface DisclosureExportResponse {
+  batch_id: string
+  hash: string
+  generated_at: string
+  record_count: number
+  standards_mapping: MethodologyCard['standardsMapping']
+  policy_modes: MethodologyCard['policyModes']
+  records: DisclosureRecord[]
+}
+
+export interface DisclosureBatchResponse {
+  batches: DisclosureBatch[]
+}
+
+export interface MethodologyTier {
+  id: string
+  name: string
+  purpose: string
+  providers: Array<{
+    name: string
+    role: string
+    coverage: string
+  }>
+}
+
+export interface MethodologyCard {
+  title: string
+  slug: string
+  lastUpdated: string
+  doctrine: {
+    name: string
+    summary: string
+    legalDisclaimer: string
+  }
+  scoring: {
+    formula: string
+    defaultWeights: {
+      carbon: number
+      latency: number
+      cost: number
+    }
+  }
+  assuranceMode: {
+    summary: string
+    disagreementThresholdPct: number
+    exportPath: string
+  }
+  policyModes: Array<{
+    id: 'default' | 'sec_disclosure_strict' | 'eu_24x7_ready'
+    name: string
+    summary: string
+    assuranceMode: boolean
+    conservativeDisagreement: boolean
+    preferredSignalTypes: Array<'average_operational' | 'marginal_estimate' | 'consumed_emissions' | 'unknown'>
+  }>
+  standardsMapping: Array<{
+    framework: string
+    ecobeField: string
+    standardField: string
+    note: string
+  }>
+  tiers: MethodologyTier[]
+  markdown: string
+}
+
 // ─── DEKES ────────────────────────────────────────────────────────────────────
 
 export interface DekesWorkload {
@@ -349,6 +473,55 @@ export interface DekesAnalytics {
   totalCO2Saved: number
   averageCarbonIntensity: number
   workloads: DekesWorkload[]
+}
+
+export interface DekesIntegrationSummaryResponse {
+  status: string
+  integration: string
+  lastSync: string
+  metrics: {
+    totalWorkloads: number
+    successfulWorkloads: number
+    successRate: number
+    totalCO2Kg: number
+    avgCO2PerWorkload: number
+    timeRange: string
+  }
+}
+
+export interface DekesIntegrationEvent {
+  id: string
+  timestamp: string
+  type: string
+  message: unknown
+  status: 'success' | 'error'
+}
+
+export interface DekesIntegrationEventsResponse {
+  source: string
+  timeRange: string
+  total: number
+  events: DekesIntegrationEvent[]
+}
+
+export interface DekesIntegrationMetricsResponse {
+  integration: string
+  status: string
+  timeRange: string
+  metrics: {
+    successRate: number
+    failureRate: number
+    totalEvents: number
+    totalWorkloads: number
+    avgResponseTimeMs: number
+    uptime: number
+  }
+  hourlyTrend: Array<{
+    hour: string
+    requestCount: number
+    avgCO2: number
+  }>
+  lastChecked: string
 }
 
 // ─── Legacy / Compat ──────────────────────────────────────────────────────────
@@ -496,6 +669,78 @@ export interface RegionStructuralProfile {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+export interface DesignPartnerApplicationPayload {
+  companyName: string
+  companyDomain?: string | null
+  teamName?: string | null
+  teamType: 'infra' | 'platform' | 'sre' | 'data' | 'other'
+  applicantName: string
+  applicantEmail: string
+  roleTitle: string
+  mainWorkloadsPlatforms: string
+  goalsSummary: string
+  scopedWorkflow: string
+  internalChampion: string
+  commercialApprover?: string | null
+  commitmentConfirmed: true
+  anonymizedProofPermission: true
+  website?: string
+}
+
+export interface DesignPartnerRecord {
+  id: string
+  companyName: string
+  companyDomain: string | null
+  teamName: string | null
+  teamType: string | null
+  applicantName: string
+  applicantEmail: string
+  roleTitle: string
+  mainWorkloadsPlatforms: string
+  goalsSummary: string
+  scopedWorkflow: string
+  internalChampion: string
+  commercialApprover: string | null
+  partnerType: 'design'
+  cohort: string
+  status:
+    | 'applied'
+    | 'qualified'
+    | 'accepted'
+    | 'onboarding'
+    | 'active'
+    | 'graduating'
+    | 'converted'
+    | 'declined'
+    | 'churned'
+  onboardingStage:
+    | 'fit_confirmed'
+    | 'agreement_sent'
+    | 'agreement_signed'
+    | 'kickoff_scheduled'
+    | 'technical_setup'
+    | 'first_value'
+    | 'active_pilot'
+    | 'graduation_review'
+    | 'converted_paid'
+    | null
+  firstValueAt: string | null
+  convertedToPaidAt: string | null
+  totalPartnerSourcedArr: number
+  commitmentConfirmed: boolean
+  anonymizedProofPermission: boolean
+  notes: string | null
+  metadata: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+}
+
+export interface DesignPartnerApplicationResponse {
+  success: boolean
+  partner: DesignPartnerRecord
+  remainingRequestsThisWindow: number
+}
 
 export type CarbonLevel = 'low' | 'medium' | 'high'
 

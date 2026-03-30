@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express'
+import { getCacheHealthStatus } from '../lib/cache-warmer'
 import { redis } from '../lib/redis'
 import { prisma } from '../lib/db'
 import { GridSignalCache } from '../lib/grid-signals/grid-signal-cache'
@@ -6,14 +7,21 @@ import { GridSignalCache } from '../lib/grid-signals/grid-signal-cache'
 const router = Router()
 
 // Track worker status in memory
-let workerStatus = {
+type WorkerStatusEntry = { running: boolean; lastRun: string | null; nextRun: string | null }
+type WorkerRegistry = Record<string, WorkerStatusEntry>
+
+let workerStatus: WorkerRegistry = {
   forecastPoller: { running: false, lastRun: null as string | null, nextRun: null as string | null },
   eiaIngestion: { running: false, lastRun: null as string | null, nextRun: null as string | null },
-  intelligenceJobs: { running: false, lastRun: null as string | null, nextRun: null as string | null }
+  intelligenceJobs: { running: false, lastRun: null as string | null, nextRun: null as string | null },
+  learningLoop: { running: false, lastRun: null as string | null, nextRun: null as string | null },
+  routingSignalWarmLoop: { running: false, lastRun: null as string | null, nextRun: null as string | null },
+  runtimeSupervisor: { running: false, lastRun: null as string | null, nextRun: null as string | null },
+  decisionEventDispatcher: { running: false, lastRun: null as string | null, nextRun: null as string | null },
 }
 
-export function setWorkerStatus(worker: keyof typeof workerStatus, status: Partial<typeof workerStatus.forecastPoller>) {
-  workerStatus[worker] = { ...workerStatus[worker], ...status }
+export function setWorkerStatus(worker: keyof WorkerRegistry, status: Partial<WorkerStatusEntry>) {
+  workerStatus[worker] = { ...(workerStatus[worker] ?? { running: false, lastRun: null, nextRun: null }), ...status }
 }
 
 export function getWorkerStatus() {
@@ -62,14 +70,41 @@ router.get('/status', async (req: Request, res: Response) => {
 
     // Get cache statistics
     let cacheStats = null
+    let cacheHealth = null
     try {
       cacheStats = await GridSignalCache.getCacheStats()
+      cacheHealth = await getCacheHealthStatus()
     } catch (error) {
       console.warn('Failed to get cache stats:', error)
     }
 
     // Get memory usage
     const memUsage = process.memoryUsage()
+
+    // Decision outbox health (best effort)
+    let decisionEventOutbox: null | {
+      pending: number
+      processing: number
+      failed: number
+      deadLetter: number
+      sent: number
+    } = null
+
+    if (dbHealthy) {
+      try {
+        const [pending, processing, failed, deadLetter, sent] = await Promise.all([
+          prisma.decisionEventOutbox.count({ where: { status: 'PENDING' } }),
+          prisma.decisionEventOutbox.count({ where: { status: 'PROCESSING' } }),
+          prisma.decisionEventOutbox.count({ where: { status: 'FAILED' } }),
+          prisma.decisionEventOutbox.count({ where: { status: 'DEAD_LETTER' } }),
+          prisma.decisionEventOutbox.count({ where: { status: 'SENT' } }),
+        ])
+
+        decisionEventOutbox = { pending, processing, failed, deadLetter, sent }
+      } catch (error) {
+        console.warn('Failed to gather decision outbox health:', error)
+      }
+    }
 
     // Overall health
     const isHealthy = dbHealthy && redisHealthy
@@ -97,6 +132,11 @@ router.get('/status', async (req: Request, res: Response) => {
       cache: cacheStats ? {
         totalKeys: cacheStats.totalKeys,
         keyTypes: cacheStats.keyTypes,
+        l1: cacheStats.l1,
+        requiredWarmCoveragePct: cacheHealth?.requiredWarmCoveragePct ?? null,
+        requiredLkgCoveragePct: cacheHealth?.requiredLkgCoveragePct ?? null,
+        requiredRegions: cacheHealth?.requiredRegions ?? [],
+        healthy: cacheHealth?.isHealthy ?? false,
         regionCount: Object.keys(cacheStats.regions).length,
         topRegions: Object.entries(cacheStats.regions)
           .sort(([, a], [, b]) => (b as number) - (a as number))
@@ -111,7 +151,8 @@ router.get('/status', async (req: Request, res: Response) => {
       },
       performance: {
         statusCheckMs: totalTime
-      }
+      },
+      decisionEventOutbox,
     })
   } catch (error) {
     console.error('Error in system status endpoint:', error)
@@ -144,6 +185,7 @@ router.get('/workers', (req: Request, res: Response) => {
 router.get('/cache', async (req: Request, res: Response) => {
   try {
     const cacheStats = await GridSignalCache.getCacheStats()
+    const cacheHealth = await getCacheHealthStatus()
 
     res.json({
       timestamp: new Date().toISOString(),
@@ -151,7 +193,12 @@ router.get('/cache', async (req: Request, res: Response) => {
         totalKeys: cacheStats.totalKeys,
         keyTypes: cacheStats.keyTypes,
         regions: cacheStats.regions,
-        regionCount: Object.keys(cacheStats.regions).length
+        l1: cacheStats.l1,
+        regionCount: Object.keys(cacheStats.regions).length,
+        requiredWarmCoveragePct: cacheHealth.requiredWarmCoveragePct,
+        requiredLkgCoveragePct: cacheHealth.requiredLkgCoveragePct,
+        requiredRegions: cacheHealth.requiredRegions,
+        healthy: cacheHealth.isHealthy,
       }
     })
   } catch (error) {

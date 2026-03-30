@@ -51,7 +51,7 @@ type DecisionRow = {
     total: number
     compute: number
     providerResolution?: number
-    cacheStatus?: 'live' | 'warm' | 'redis' | 'fallback'
+    cacheStatus?: 'live' | 'warm' | 'redis' | 'lkg' | 'degraded-safe' | 'fallback'
     providers?: {
       electricityMaps?: number | null
       wattTime?: number | null
@@ -122,6 +122,71 @@ const REGION_ANCHORS: Record<string, { label: string; x: number; y: number }> = 
   'ap-northeast-1': { label: 'AP NorthEast 1', x: 83, y: 18 },
 }
 
+const STATIC_WATER_BUNDLE_TTL_SEC = 30 * 24 * 60 * 60
+const LIVE_PROVIDER_TTL_SEC: Record<string, number> = {
+  WATTTIME_MOER: 600,
+  GRIDSTATUS: 1800,
+  EIA_930: 1800,
+  GB_CARBON: 1800,
+  DK_CARBON: 1800,
+  FI_CARBON: 1800,
+  EMBER_STRUCTURAL_BASELINE: 86400,
+}
+
+function normalizeProviderIdentity(provider: string): string {
+  const normalized = provider.trim().toUpperCase().replace(/[\s-]+/g, '_')
+  if (normalized === 'EMBER' || normalized === 'EMBER_STRUCTURAL' || normalized === 'EMBER_STRUCTURAL_BASELINE') {
+    return 'EMBER_STRUCTURAL_BASELINE'
+  }
+  if (normalized === 'WATTTIME') return 'WATTTIME_MOER'
+  return normalized
+}
+
+function providerLabel(provider: string): string {
+  return provider.replace(/_/g, ' ')
+}
+
+function humanizeStatusReason(code: NonNullable<ControlSurfaceProviderNode['statusReasonCode']>): string {
+  return code.toLowerCase().replace(/_/g, ' ')
+}
+
+function resolveLiveProviderTtl(provider: string) {
+  return LIVE_PROVIDER_TTL_SEC[provider] ?? 3600
+}
+
+function isCanonicalCarbonProvider(provider: string) {
+  return (
+    provider === 'WATTTIME_MOER' ||
+    provider === 'GRIDSTATUS' ||
+    provider === 'EIA_930' ||
+    provider === 'GB_CARBON' ||
+    provider === 'DK_CARBON' ||
+    provider === 'FI_CARBON' ||
+    provider === 'EMBER_STRUCTURAL_BASELINE'
+  )
+}
+
+function choosePreferredCarbonRecord(
+  current:
+    | {
+        key: string
+        snapshots: ProviderTrustResponse['providers'][string]
+      }
+    | undefined,
+  next: {
+    key: string
+    snapshots: ProviderTrustResponse['providers'][string]
+  }
+) {
+  if (!current) return next
+  if (normalizeProviderIdentity(next.key) === 'EMBER_STRUCTURAL_BASELINE') {
+    const currentExact = normalizeProviderIdentity(current.key) === current.key
+    const nextExact = normalizeProviderIdentity(next.key) === next.key
+    if (nextExact && !currentExact) return next
+  }
+  return current
+}
+
 function asAction(value: string | undefined): string {
   return value ?? 'run_now'
 }
@@ -173,63 +238,237 @@ function buildCommandCenterDecisionItem(decision: DecisionRow): CommandCenterDec
   }
 }
 
-function buildProviders(providerTrust: ProviderTrustResponse): ControlSurfaceProviderNode[] {
-  const freshnessMap = new Map(providerTrust.freshness.map((item) => [item.provider.toUpperCase(), item]))
+function buildProviders(
+  providerTrust: ProviderTrustResponse,
+  provenance: WaterProvenanceResponse
+): ControlSurfaceProviderNode[] {
+  const freshnessMap = new Map(
+    providerTrust.freshness.map((item) => [normalizeProviderIdentity(item.provider), item])
+  )
+  const provenanceMap = new Map(
+    provenance.datasets.map((dataset) => [dataset.name.trim().toLowerCase(), dataset])
+  )
+  const resolveLatencyMs = (metadata: Record<string, unknown> | null | undefined) => {
+    if (!metadata) return null
 
-  const carbonProviders = Object.entries(providerTrust.providers).map(([key, snapshots]) => {
-    const fresh = freshnessMap.get(key.toUpperCase()) ?? freshnessMap.get(key.toLowerCase())
-    const latestConfidence = snapshots[0]?.confidence ?? null
-    const latestMetadata = snapshots[0]?.metadata ?? null
-    const isStale = Boolean(fresh?.isStale)
+    const candidates = [
+      metadata.lastLatencyMs,
+      metadata.latencyMs,
+      metadata.providerLatencyMs,
+    ]
+
+    for (const value of candidates) {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        return Math.round(value)
+      }
+    }
+
+    return null
+  }
+
+  const carbonProviderBuckets = new Map<
+    string,
+    {
+      key: string
+      snapshots: ProviderTrustResponse['providers'][string]
+    }
+  >()
+
+  for (const [key, snapshots] of Object.entries(providerTrust.providers)) {
+    const canonicalKey = normalizeProviderIdentity(key)
+    carbonProviderBuckets.set(
+      canonicalKey,
+      choosePreferredCarbonRecord(carbonProviderBuckets.get(canonicalKey), {
+        key,
+        snapshots,
+      })
+    )
+  }
+
+  for (const canonicalKey of Array.from(freshnessMap.keys())) {
+    if (!isCanonicalCarbonProvider(canonicalKey) || carbonProviderBuckets.has(canonicalKey)) {
+      continue
+    }
+
+    carbonProviderBuckets.set(canonicalKey, {
+      key: canonicalKey,
+      snapshots: [],
+    })
+  }
+
+  const carbonProviders = Array.from(carbonProviderBuckets.entries()).map(([canonicalKey, record]) => {
+    const fresh = freshnessMap.get(canonicalKey)
+    const latestConfidence = record.snapshots[0]?.confidence ?? null
+    const latestMetadata = record.snapshots[0]?.metadata ?? null
+    const fallbackFreshnessSec = record.snapshots[0]?.freshnessSec ?? null
+    const freshnessSec =
+      fresh && fresh.freshnessSec >= 0
+        ? fresh.freshnessSec
+        : fallbackFreshnessSec
+    const metadataText = latestMetadata ? JSON.stringify(latestMetadata).toLowerCase() : ''
+    const rateLimited =
+      metadataText.includes('429') || metadataText.includes('rate limit') || metadataText.includes('quota')
+    const isStale =
+      fresh && fresh.freshnessSec >= 0
+        ? Boolean(fresh.isStale)
+        : freshnessSec != null
+          ? freshnessSec > resolveLiveProviderTtl(canonicalKey)
+          : false
+    const statusReasonCode: ControlSurfaceProviderNode['statusReasonCode'] = isStale
+      ? rateLimited
+        ? 'DEGRADED_RATE_LIMIT'
+        : 'DEGRADED_STALE'
+      : 'HEALTHY_LIVE'
 
     return {
-      id: key,
-      label: key.replace(/_/g, ' '),
+      id: canonicalKey,
+      label: providerLabel(canonicalKey),
       providerType: 'carbon' as const,
       status: isStale ? 'degraded' : 'healthy',
-      freshnessSec: fresh?.freshnessSec ?? snapshots[0]?.freshnessSec ?? null,
+      statusReasonCode,
+      statusLabel: humanizeStatusReason(statusReasonCode),
+      freshnessSec,
+      latencyMs: resolveLatencyMs(latestMetadata),
       confidence: latestConfidence,
-      mirrored: key === 'ember',
-      lineageCount: snapshots.length,
-      mode: key === 'ember' ? 'mirrored' : isStale ? 'fallback' : 'live',
-      signalAuthority: key.toLowerCase().includes('watttime') ? 'marginal' : isStale ? 'fallback' : 'average',
-      degradedReason: isStale ? 'Freshness breached safe mirror window.' : null,
+      mirrored: canonicalKey === 'EMBER_STRUCTURAL_BASELINE',
+      lineageCount: record.snapshots.length,
+      mode: canonicalKey === 'EMBER_STRUCTURAL_BASELINE' ? 'mirrored' : isStale ? 'fallback' : 'live',
+      signalAuthority: canonicalKey.includes('WATTTIME') ? 'marginal' : isStale ? 'fallback' : 'average',
+      degradedReason: isStale
+        ? rateLimited
+          ? 'Provider is rate limited or quota constrained.'
+          : 'Freshness breached the safe live-signal window.'
+        : null,
       mirrorVersion: typeof latestMetadata?.version === 'string' ? latestMetadata.version : null,
     } satisfies ControlSurfaceProviderNode
   })
 
-  const waterProviders = (providerTrust.waterProviders ?? []).map((provider) => {
+  const knownWaterProviderOrder = ['aqueduct', 'aware', 'wwf', 'nrel']
+  const waterProviderBuckets = new Map<string, NonNullable<ProviderTrustResponse['waterProviders']>[number]>()
+
+  for (const provider of providerTrust.waterProviders ?? []) {
+    if (provider.provider.toLowerCase().startsWith('facility:')) {
+      continue
+    }
+
+    if (provider.provider.trim().toLowerCase().startsWith('fallback')) {
+      continue
+    }
+
+    const key = provider.provider.trim().toLowerCase()
+    const current = waterProviderBuckets.get(key)
+    if (!current) {
+      waterProviderBuckets.set(key, provider)
+      continue
+    }
+
+    const currentConfidence = current.confidence ?? -1
+    const nextConfidence = provider.confidence ?? -1
+    const currentObservedAt = current.observedAt ? new Date(current.observedAt).getTime() : 0
+    const nextObservedAt = provider.observedAt ? new Date(provider.observedAt).getTime() : 0
+
+    if (nextConfidence > currentConfidence || nextObservedAt > currentObservedAt) {
+      waterProviderBuckets.set(key, provider)
+    }
+  }
+
+  for (const dataset of provenance.datasets) {
+    const key = dataset.name.trim().toLowerCase()
+    if (waterProviderBuckets.has(key)) continue
+    waterProviderBuckets.set(key, {
+      provider: dataset.name.toLowerCase(),
+      authorityRole: dataset.name.toLowerCase() === 'aqueduct' ? 'baseline' : 'overlay',
+      authorityStatus: dataset.verificationStatus === 'verified' ? 'advisory' : 'fallback',
+      scenario: 'current',
+      authorityMode: 'basin',
+      confidence: null,
+      observedAt: null,
+      evidenceRefs: [],
+      metadata: {},
+      freshnessSec: null,
+      datasetVersion: dataset.datasetVersion,
+    })
+  }
+
+  const waterProviders = Array.from(waterProviderBuckets.values()).map((provider) => {
     const freshnessSec =
       provider.freshnessSec ??
       (provider.observedAt ? Math.max(0, Math.round((Date.now() - new Date(provider.observedAt).getTime()) / 1000)) : null)
+    const provenanceRecord = provenanceMap.get(provider.provider.trim().toLowerCase())
+    const provenanceStatus = provenanceRecord?.verificationStatus ?? 'unavailable'
+    const bundleExpired = freshnessSec != null && freshnessSec > STATIC_WATER_BUNDLE_TTL_SEC
+    const authorityFallback = provider.authorityStatus === 'fallback'
+
+    let status: ControlSurfaceProviderNode['status'] = 'healthy'
+    let statusReasonCode: ControlSurfaceProviderNode['statusReasonCode'] = 'VERIFIED_STATIC'
+    let degradedReason: string | null = null
+
+    if (authorityFallback) {
+      status = 'degraded'
+      statusReasonCode = 'PROVENANCE_FAILED'
+      degradedReason = 'Water authority degraded to fallback posture.'
+    } else if (provenanceStatus === 'mismatch') {
+      status = 'degraded'
+      statusReasonCode = 'HASH_MISMATCH'
+      degradedReason = 'Verified dataset hash does not match the current manifest.'
+    } else if (provenanceStatus === 'missing_source' || provenanceStatus === 'unverified' || provenanceStatus === 'unavailable') {
+      status = 'degraded'
+      statusReasonCode = 'PROVENANCE_FAILED'
+      degradedReason = 'Water provenance could not be verified from the current bundle.'
+    } else if (bundleExpired) {
+      status = 'degraded'
+      statusReasonCode = 'EXPIRED_BUNDLE'
+      degradedReason = 'Verified static bundle is past its allowed TTL.'
+    }
 
     return {
       id: `water:${provider.provider}`,
-      label: provider.provider.replace(/_/g, ' '),
+      label: providerLabel(provider.provider),
       providerType: 'water' as const,
-      status:
-        provider.authorityStatus === 'fallback'
-          ? 'degraded'
-          : freshnessSec != null && freshnessSec > 172800
-            ? 'degraded'
-            : 'healthy',
+      status,
+      statusReasonCode,
+      statusLabel: humanizeStatusReason(statusReasonCode),
       freshnessSec,
+      latencyMs: resolveLatencyMs(provider.metadata ?? null),
       confidence: provider.confidence ?? null,
       mirrored: false,
       lineageCount: provider.evidenceRefs?.length ?? 0,
-      mode: provider.authorityStatus === 'fallback' ? 'fallback' : 'mirrored',
-      signalAuthority: provider.authorityStatus === 'fallback' ? 'fallback' : 'average',
+      mode: authorityFallback ? 'fallback' : 'mirrored',
+      signalAuthority: authorityFallback ? 'fallback' : 'average',
       authorityRole:
         provider.authorityStatus === 'authoritative'
           ? 'authoritative'
-          : provider.authorityStatus === 'fallback'
+          : authorityFallback
             ? 'fallback'
             : 'advisory',
       authorityMode: provider.authorityMode ?? 'basin',
       scenario: provider.scenario ?? 'current',
-      degradedReason: provider.authorityStatus === 'fallback' ? 'Water authority degraded to fallback posture.' : null,
+      degradedReason,
       mirrorVersion: provider.datasetVersion ?? null,
+      ttlSec: STATIC_WATER_BUNDLE_TTL_SEC,
+      provenanceStatus,
     } satisfies ControlSurfaceProviderNode
+  })
+
+  const carbonOrder = ['WATTTIME_MOER', 'GRIDSTATUS', 'EIA_930', 'EMBER_STRUCTURAL_BASELINE']
+  carbonProviders.sort((a, b) => {
+    const aIndex = carbonOrder.indexOf(a.id)
+    const bIndex = carbonOrder.indexOf(b.id)
+    if (aIndex === -1 && bIndex === -1) return a.label.localeCompare(b.label)
+    if (aIndex === -1) return 1
+    if (bIndex === -1) return -1
+    return aIndex - bIndex
+  })
+
+  waterProviders.sort((a, b) => {
+    const aKey = a.id.replace(/^water:/, '').toLowerCase()
+    const bKey = b.id.replace(/^water:/, '').toLowerCase()
+    const aIndex = knownWaterProviderOrder.indexOf(aKey)
+    const bIndex = knownWaterProviderOrder.indexOf(bKey)
+    if (aIndex === -1 && bIndex === -1) return a.label.localeCompare(b.label)
+    if (aIndex === -1) return 1
+    if (bIndex === -1) return -1
+    return aIndex - bIndex
   })
 
   return [...carbonProviders, ...waterProviders]
@@ -321,8 +560,19 @@ function buildWorldFlows(selectedReplay: LiveSystemReplayResponse | null): World
 }
 
 function extractThresholds(
+  trace: DecisionTraceRawRecord | null,
   replay: LiveSystemReplayResponse | null
 ): Record<string, number | null> | null {
+  const traceThresholds = trace?.payload.governance.thresholds
+  if (traceThresholds && typeof traceThresholds === 'object' && !Array.isArray(traceThresholds)) {
+    const traceEntries = Object.entries(traceThresholds)
+      .filter(([, value]) => typeof value === 'number')
+      .map(([key, value]) => [key, value as number | null] as const)
+    if (traceEntries.length) {
+      return Object.fromEntries(traceEntries)
+    }
+  }
+
   const source = replay?.persisted?.policyTrace ?? replay?.replay.policyTrace
   const candidate = source?.thresholds
   if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return null
@@ -337,13 +587,13 @@ function extractThresholds(
 function extractWeights(
   trace: DecisionTraceRawRecord | null
 ): { carbon: number | null; water: number | null; latency: number | null; cost: number | null } | null {
-  const request = trace?.payload.inputSignals.request
-  if (!request) return null
+  const weights = trace?.payload.governance.weights
+  if (!weights) return null
 
-  const carbon = typeof request.carbonWeight === 'number' ? request.carbonWeight : null
-  const water = typeof request.waterWeight === 'number' ? request.waterWeight : null
-  const latency = typeof request.latencyWeight === 'number' ? request.latencyWeight : null
-  const cost = typeof request.costWeight === 'number' ? request.costWeight : null
+  const carbon = typeof weights.carbon === 'number' ? weights.carbon : null
+  const water = typeof weights.water === 'number' ? weights.water : null
+  const latency = typeof weights.latency === 'number' ? weights.latency : null
+  const cost = typeof weights.cost === 'number' ? weights.cost : null
 
   return carbon != null || water != null || latency != null || cost != null
     ? { carbon, water, latency, cost }
@@ -383,7 +633,7 @@ export async function getCommandCenterSnapshot(): Promise<CommandCenterSnapshot>
         ])
       : [null, null]
 
-  const providers = buildProviders(providerTrust)
+  const providers = buildProviders(providerTrust, provenance)
   const worldNodes = buildWorldNodes(recentDecisions, selectedTrace, selectedReplay)
   const worldFlows = buildWorldFlows(selectedReplay)
   const selectedScore =
@@ -420,8 +670,8 @@ export async function getCommandCenterSnapshot(): Promise<CommandCenterSnapshot>
       active: selectedTrace ? selectedTrace.payload.governance.source !== 'NONE' : null,
       strict: selectedTrace?.payload.governance.strict ?? null,
       enforcementMode: selectedTrace?.payload.decisionPath.operatingMode ?? null,
-      selectedScore,
-      thresholds: extractThresholds(selectedReplay),
+      selectedScore: selectedTrace?.payload.governance.score ?? selectedScore,
+      thresholds: extractThresholds(selectedTrace, selectedReplay),
       weights: extractWeights(selectedTrace),
       impact: {
         carbonReductionPct:

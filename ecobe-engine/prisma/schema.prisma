@@ -365,6 +365,8 @@ model Organization {
   status    OrganizationStatus @default(ACTIVE)
   monthlyCommandLimit Int      @default(1000)
   enforceCreditCoverage Boolean @default(false)
+  featureFlags Json    @default("{}")
+  proofRetentionDays Int @default(30)
   metadata  Json     @default("{}")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -756,6 +758,7 @@ model IntegrationMetric {
 model IntegrationEvent {
   id         String   @id @default(cuid())
   source     String
+  eventType  String?
   success    Boolean
   durationMs Float?
   statusCode Int?
@@ -765,6 +768,74 @@ model IntegrationEvent {
 
   @@index([source, createdAt])
   @@index([source, success, createdAt])
+}
+
+enum IntegrationWebhookSinkStatus {
+  ACTIVE
+  PAUSED
+  DISABLED
+}
+
+model IntegrationWebhookSink {
+  id               String                       @id @default(cuid())
+  name             String
+  targetUrl        String
+  authToken        String?
+  signingSecret    String?
+  status           IntegrationWebhookSinkStatus @default(ACTIVE)
+  metadata         Json                         @default("{}")
+  lastSuccessAt    DateTime?
+  lastFailureAt    DateTime?
+  lastResponseCode Int?
+  lastError        String?
+  createdAt        DateTime                     @default(now())
+  updatedAt        DateTime                     @updatedAt
+
+  outbox DecisionEventOutbox[]
+
+  @@index([status, createdAt])
+}
+
+enum DecisionEventOutboxStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+  DEAD_LETTER
+}
+
+model DecisionEventOutbox {
+  id               String                    @id @default(cuid())
+  eventType        String
+  eventKey         String                    @unique
+  sinkId           String?
+  sink             IntegrationWebhookSink?   @relation(fields: [sinkId], references: [id], onDelete: SetNull)
+  payload          Json
+  status           DecisionEventOutboxStatus @default(PENDING)
+  attemptCount     Int                       @default(0)
+  nextAttemptAt    DateTime
+  lastResponseCode Int?
+  lastError        String?
+  processedAt      DateTime?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  @@index([status, nextAttemptAt, createdAt])
+  @@index([sinkId, createdAt])
+}
+
+model DecisionTraceEnvelope {
+  id                String   @id @default(cuid())
+  sequenceNumber    Int      @default(autoincrement()) @unique
+  decisionFrameId   String   @unique
+  traceHash         String
+  previousTraceHash String?
+  inputSignalHash   String
+  payload           Json
+  createdAt         DateTime @default(now())
+
+  @@index([decisionFrameId, createdAt])
+  @@index([traceHash])
 }
 
 // ============================================================================
@@ -994,6 +1065,86 @@ model DekesHandoffEvent {
 // CARBON LEDGER — AUDIT-GRADE ACCOUNTING
 // ============================================================================
 
+// ============================================================================
+// DESIGN PARTNER PROGRAM CRM
+// ============================================================================
+
+enum DesignPartnerType {
+  DESIGN @map("design")
+}
+
+enum DesignPartnerStatus {
+  APPLIED    @map("applied")
+  QUALIFIED  @map("qualified")
+  ACCEPTED   @map("accepted")
+  ONBOARDING @map("onboarding")
+  ACTIVE     @map("active")
+  GRADUATING @map("graduating")
+  CONVERTED  @map("converted")
+  DECLINED   @map("declined")
+  CHURNED    @map("churned")
+}
+
+enum DesignPartnerOnboardingStage {
+  FIT_CONFIRMED     @map("fit_confirmed")
+  AGREEMENT_SENT    @map("agreement_sent")
+  AGREEMENT_SIGNED  @map("agreement_signed")
+  KICKOFF_SCHEDULED @map("kickoff_scheduled")
+  TECHNICAL_SETUP   @map("technical_setup")
+  FIRST_VALUE       @map("first_value")
+  ACTIVE_PILOT      @map("active_pilot")
+  GRADUATION_REVIEW @map("graduation_review")
+  CONVERTED_PAID    @map("converted_paid")
+}
+
+model DesignPartner {
+  id     String @id @default(cuid())
+  crmKey String @unique @map("crm_key")
+
+  companyName   String  @map("company_name")
+  companyDomain String? @map("company_domain")
+  teamName      String? @map("team_name")
+  teamType      String? @map("team_type")
+
+  applicantName  String @map("applicant_name")
+  applicantEmail String @map("applicant_email")
+  roleTitle      String @map("role_title")
+
+  mainWorkloadsPlatforms String @map("main_workloads_platforms")
+  goalsSummary           String @map("goals_summary")
+  scopedWorkflow         String @map("scoped_workflow")
+  internalChampion       String @map("internal_champion")
+  commercialApprover     String? @map("commercial_approver")
+
+  commitmentConfirmed       Boolean @default(false) @map("commitment_confirmed")
+  anonymizedProofPermission Boolean @default(false) @map("anonymized_proof_permission")
+
+  partnerType DesignPartnerType @default(DESIGN) @map("partner_type")
+  cohort      String            @default("v1")
+  status      DesignPartnerStatus @default(APPLIED)
+  onboardingStage DesignPartnerOnboardingStage? @map("onboarding_stage")
+  firstValueAt      DateTime?                    @map("first_value_at")
+  convertedToPaidAt DateTime?                    @map("converted_to_paid_at")
+  totalPartnerSourcedArr Int @default(0)         @map("total_partner_sourced_arr")
+
+  notes    String?
+  metadata Json   @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([partnerType, cohort])
+  @@index([status, createdAt])
+  @@index([onboardingStage, updatedAt])
+  @@index([companyDomain])
+  @@index([applicantEmail])
+  @@map("design_partners")
+}
+
+// ============================================================================
+// CARBON LEDGER â€” AUDIT-GRADE ACCOUNTING
+// ============================================================================
+
 model CarbonLedgerEntry {
   id                    String   @id @default(cuid())
   orgId                 String
@@ -1124,6 +1275,72 @@ model ProviderSnapshot {
   @@unique([provider, zone, signalType, observedAt])
 }
 
+model WaterProviderSnapshot {
+  id             String   @id @default(cuid())
+  provider       String
+  authorityRole  String
+  region         String
+  scenario       String   @default("current")
+  authorityMode  String
+  confidence     Float?
+  evidenceRefs   Json     @default("[]")
+  observedAt     DateTime
+  metadata       Json     @default("{}")
+  createdAt      DateTime @default(now())
+
+  @@index([provider, observedAt])
+  @@index([region, scenario, observedAt])
+}
+
+model FacilityWaterTelemetry {
+  id                 String   @id @default(cuid())
+  facilityId         String
+  region             String
+  scenario           String   @default("current")
+  waterIntensityLPerKwh Float?
+  waterStressIndex   Float?
+  scarcityImpact     Float?
+  confidence         Float?
+  telemetryRef       String
+  evidenceRefs       Json     @default("[]")
+  createdAt          DateTime @default(now())
+
+  @@index([facilityId, createdAt])
+  @@index([region, scenario, createdAt])
+}
+
+model WaterScenarioRun {
+  id             String   @id @default(cuid())
+  decisionFrameId String
+  scenario       String
+  requestPayload Json
+  resultPayload  Json
+  createdAt      DateTime @default(now())
+
+  @@index([decisionFrameId, createdAt])
+  @@index([scenario, createdAt])
+}
+
+model WaterPolicyEvidence {
+  id                  String   @id @default(cuid())
+  decisionFrameId     String
+  proofHash           String
+  authorityMode       String
+  scenario            String   @default("current")
+  facilityId          String?
+  supplierRefs        Json     @default("[]")
+  evidenceRefs        Json     @default("[]")
+  providerSnapshotRefs Json    @default("[]")
+  externalPolicyRefs  Json     @default("[]")
+  bundleHash          String?
+  manifestHash        String?
+  metadata            Json     @default("{}")
+  createdAt           DateTime @default(now())
+
+  @@index([decisionFrameId, createdAt])
+  @@index([proofHash])
+}
+
 // ============================================================================
 // CAPACITY BUCKETS — FLEET-AWARE RESOURCE MANAGEMENT
 // ============================================================================
@@ -1174,6 +1391,27 @@ model CIDecision {
   
   // Recommendation
   recommendation        String   // Routing recommendation text
+
+  // Deterministic policy outcome
+  decisionAction        String?  // run_now | reroute | delay | throttle | deny
+  decisionMode          String?  // runtime_authorization | scenario_planning
+  reasonCode            String?
+  signalConfidence      Float?
+  fallbackUsed          Boolean  @default(false)
+
+  // Water-proof metrics
+  waterImpactLiters     Float?
+  waterBaselineLiters   Float?
+  waterScarcityImpact   Float?
+  waterStressIndex      Float?
+  waterConfidence       Float?
+  waterAuthorityMode    String?
+  waterScenario         String?
+  facilityId            String?
+  proofHash             String?
+  waterEvidenceRefs     Json     @default("[]")
+  policyTrace           Json     @default("{}")
+  datasetVersions       Json     @default("{}")
   
   // Metadata
   metadata              Json     @default("{}")

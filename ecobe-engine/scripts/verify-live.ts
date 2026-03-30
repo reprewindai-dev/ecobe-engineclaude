@@ -78,7 +78,10 @@ async function main() {
 
   assertCondition(window.window, 'Optimal window response missing window payload')
   assertCondition(window.window.startTime, 'Optimal window missing startTime')
-  assertCondition(window.window.avgIntensity !== undefined, 'Optimal window missing avgIntensity')
+  assertCondition(
+    window.window.avgCarbonIntensity !== undefined || window.window.avgIntensity !== undefined,
+    'Optimal window missing average intensity field'
+  )
 
   console.log('Live verification succeeded: metrics, forecasts, and optimal window endpoints returned live data.')
 }

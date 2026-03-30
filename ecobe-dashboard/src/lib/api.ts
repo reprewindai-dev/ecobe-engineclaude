@@ -12,18 +12,24 @@ import type {
   RegionForecast,
   OptimalWindow,
   DecisionReplayResult,
+  DisclosureBatchResponse,
+  DisclosureExportResponse,
   MethodologyProviders,
+  MethodologyCard,
   PatternsResponse,
   OpportunityResult,
   BestWindowRequest,
   BestWindowResult,
-  DekesIntegrationSummary,
+  DekesIntegrationSummaryResponse,
+  DekesIntegrationEventsResponse,
+  DekesIntegrationMetricsResponse,
   DekesHandoff,
-  DekesOrgRisk,
   GridHeroMetrics,
   GridSignalSummary,
   GridOpportunities,
   GridImportLeakage,
+  DesignPartnerApplicationPayload,
+  DesignPartnerApplicationResponse,
 } from '@/types'
 
 const API_BASE = process.env.NEXT_PUBLIC_ECOBE_API_URL || '/api/ecobe'
@@ -31,7 +37,7 @@ const API_BASE = process.env.NEXT_PUBLIC_ECOBE_API_URL || '/api/ecobe'
 const api = axios.create({
   baseURL: API_BASE,
   headers: { 'Content-Type': 'application/json' },
-  timeout: 30_000, // 30 s — prevents hung requests from blocking the UI
+  timeout: 30_000, // 30 s â€” prevents hung requests from blocking the UI
 })
 
 function isAxiosError(
@@ -44,6 +50,67 @@ function isAxiosError(
   }
 } {
   return typeof error === 'object' && error !== null && 'isAxiosError' in error
+}
+
+type CompactDashboardSavings = {
+  window?: '24h' | '7d' | '30d'
+  totalDecisions?: number
+  totalCO2SavedG?: number
+  totalCO2BaselineG?: number
+  totalCO2ActualG?: number
+  savingsPct?: number
+  savedEquivalents?: { kmDriven?: number; treeDays?: number; savedKg?: number }
+  byRegion?: Array<{ region: string; decisions: number; co2SavedG: number; co2BaselineG: number; savingsPct: number }>
+  trend?: Array<{ date: string; co2SavedG: number; co2BaselineG: number; decisions: number }>
+  co2AvoidedKg?: number
+  totalBaselineG?: number
+  totalChosenG?: number
+  totalAvoidedG?: number
+  reductionPct?: number
+  dailyTrend?: Array<{ date: string; baselineG: number; chosenG: number; avoidedG: number; decisions: number }>
+}
+
+function normalizeDashboardSavings(
+  payload: DashboardSavings | CompactDashboardSavings
+): DashboardSavings {
+  if ('savingsPct' in payload && typeof payload.savingsPct === 'number') {
+    return payload as DashboardSavings
+  }
+
+  const compact = payload as CompactDashboardSavings
+  const window = compact.window ?? '30d'
+  const windowHours = window === '24h' ? 24 : window === '7d' ? 168 : 720
+  const totalCO2SavedG = compact.totalCO2SavedG ?? compact.totalAvoidedG ?? 0
+  const totalCO2BaselineG = compact.totalCO2BaselineG ?? compact.totalBaselineG ?? 0
+  const totalCO2ActualG = compact.totalCO2ActualG ?? compact.totalChosenG ?? 0
+  const savingsPct =
+    compact.savingsPct ??
+    compact.reductionPct ??
+    (totalCO2BaselineG > 0 ? (totalCO2SavedG / totalCO2BaselineG) * 100 : 0)
+
+  return {
+    window,
+    windowHours,
+    totalDecisions: compact.totalDecisions ?? 0,
+    totalCO2SavedG,
+    totalCO2BaselineG,
+    totalCO2ActualG,
+    savingsPct,
+    savedEquivalents: {
+      kmDriven: compact.savedEquivalents?.kmDriven ?? Math.round((compact.co2AvoidedKg ?? totalCO2SavedG / 1000) * 4.1),
+      treeDays: compact.savedEquivalents?.treeDays ?? Math.round((compact.co2AvoidedKg ?? totalCO2SavedG / 1000) * 18),
+      savedKg: compact.savedEquivalents?.savedKg ?? totalCO2SavedG / 1000,
+    },
+    byRegion: compact.byRegion ?? [],
+    trend:
+      compact.trend ??
+      (compact.dailyTrend ?? []).map((entry) => ({
+        date: entry.date,
+        co2SavedG: entry.avoidedG,
+        co2BaselineG: entry.baselineG,
+        decisions: entry.decisions,
+      })),
+  }
 }
 
 // Normalize API errors into human-readable messages.
@@ -70,28 +137,28 @@ api.interceptors.response.use(
 
       if (err.code === 'ECONNABORTED') {
         return Promise.reject(
-          new Error('Request timed out — CO₂Router Engine did not respond in time')
+          new Error('Request timed out â€” COâ‚‚Router Engine did not respond in time')
         )
       }
 
       if (!err.response) {
         return Promise.reject(
-          new Error('Cannot reach CO₂Router Engine — check NEXT_PUBLIC_ECOBE_API_URL')
+          new Error('Cannot reach COâ‚‚Router Engine â€” check NEXT_PUBLIC_ECOBE_API_URL')
         )
       }
 
       const status = err.response.status
       if (status === 404) return Promise.reject(new Error('Resource not found'))
       if (status === 401 || status === 403)
-        return Promise.reject(new Error('Unauthorized — check API credentials'))
+        return Promise.reject(new Error('Unauthorized â€” check API credentials'))
       if (status >= 500)
-        return Promise.reject(new Error(`CO₂Router Engine error (${status}) — check server logs`))
+        return Promise.reject(new Error(`COâ‚‚Router Engine error (${status}) â€” check server logs`))
     }
     return Promise.reject(err)
   }
 )
 
-// ─── Request Types ────────────────────────────────────────────────────────────
+// â”€â”€â”€ Request Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export interface EnergyEquationRequest {
   requestVolume: number
@@ -107,9 +174,12 @@ export interface GreenRoutingRequest {
   preferredRegions: string[]
   maxCarbonGPerKwh?: number
   latencyMsByRegion?: Record<string, number>
+  costIndexByRegion?: Record<string, number>
   carbonWeight?: number
   latencyWeight?: number
   costWeight?: number
+  mode?: 'optimize' | 'assurance'
+  policyMode?: 'default' | 'sec_disclosure_strict' | 'eu_24x7_ready'
   targetTime?: string
   durationMinutes?: number
 }
@@ -126,16 +196,16 @@ export interface DekesScheduleRequest {
   lookAheadHours?: number
 }
 
-// ─── API Client ───────────────────────────────────────────────────────────────
+// â”€â”€â”€ API Client â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export const ecobeApi = {
-  // ── Energy ──────────────────────────────────────────────────────────────────
+  // â”€â”€ Energy â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async calculateEnergyEquation(request: EnergyEquationRequest): Promise<EnergyEquationResult> {
     const { data } = await api.post<EnergyEquationResult>('/energy/equation', request)
     return data
   },
 
-  // ── Routing ──────────────────────────────────────────────────────────────────
+  // â”€â”€ Routing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Returns GreenRoutingResult (200) or PolicyDelayResponse (202)
   async routeGreen(
     request: GreenRoutingRequest
@@ -160,10 +230,11 @@ export const ecobeApi = {
     return response.data
   },
 
-  // ── Dashboard ────────────────────────────────────────────────────────────────
+  // â”€â”€ Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getDashboardMetrics(window: '24h' | '7d' = '24h'): Promise<DashboardMetrics> {
     try {
       const { data } = await api.get<DashboardMetrics>('/dashboard/metrics', { params: { window } })
+      data.electricityMaps = data.electricityMaps ?? data.providerSignals ?? null
       return data
     } catch (error) {
       console.error('Failed to fetch dashboard metrics:', error)
@@ -173,8 +244,8 @@ export const ecobeApi = {
 
   async getDashboardSavings(window: '24h' | '7d' | '30d' = '24h'): Promise<DashboardSavings> {
     try {
-      const { data } = await api.get<DashboardSavings>('/dashboard/savings', { params: { window } })
-      return data
+      const { data } = await api.get('/dashboard/savings', { params: { window } })
+      return normalizeDashboardSavings(data)
     } catch (error) {
       console.error('Failed to fetch dashboard savings:', error)
       throw error
@@ -189,6 +260,23 @@ export const ecobeApi = {
       console.error('Failed to fetch decisions:', error)
       throw error
     }
+  },
+
+  async getCIRoutingHealth(): Promise<any> {
+    const { data } = await api.get('/ci/health')
+    return data
+  },
+
+  async getCIAvailableRegions(): Promise<any> {
+    const { data } = await api.get('/ci/regions')
+    return data
+  },
+
+  async getCIDecisions(limit = 20): Promise<{ decisions: any[] }> {
+    const { data } = await api.get<{ decisions: any[] }>('/ci/decisions', {
+      params: { limit },
+    })
+    return data
   },
 
   async getRegionMapping(): Promise<{ mappings: RegionMapping[] }> {
@@ -216,7 +304,7 @@ export const ecobeApi = {
     }
   },
 
-  // ── Forecasting ──────────────────────────────────────────────────────────────
+  // â”€â”€ Forecasting â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getRegionForecast(region: string, hoursAhead = 72): Promise<RegionForecast> {
     try {
       const { data } = await api.get<RegionForecast>(`/forecasting/${region}/forecasts`, {
@@ -245,10 +333,10 @@ export const ecobeApi = {
     }
   },
 
-  // ── Provider Health ───────────────────────────────────────────────────────────
+  // â”€â”€ Provider Health â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getProviderHealth(): Promise<MethodologyProviders> {
     try {
-      const { data } = await api.get<MethodologyProviders>('/methodology/providers')
+      const { data } = await api.get<MethodologyProviders>('/dashboard/methodology/providers')
       return data
     } catch (error) {
       console.error('Failed to fetch provider health:', error)
@@ -256,7 +344,47 @@ export const ecobeApi = {
     }
   },
 
-  // ── DEKES ─────────────────────────────────────────────────────────────────────
+  async getMethodology(): Promise<MethodologyCard> {
+    try {
+      const { data } = await api.get('/methodology')
+      return data
+    } catch (error) {
+      console.error('Failed to fetch methodology:', error)
+      throw error
+    }
+  },
+
+  async getDisclosureExport(params?: {
+    from?: string
+    to?: string
+    mode?: 'assurance' | 'optimize' | 'all'
+    policyMode?: 'default' | 'sec_disclosure_strict' | 'eu_24x7_ready'
+  }): Promise<DisclosureExportResponse> {
+    try {
+      const { data } = await api.get('/disclosure/export', {
+        params: {
+          format: 'json',
+          ...params,
+        },
+      })
+      return data
+    } catch (error) {
+      console.error('Failed to fetch disclosure export:', error)
+      throw error
+    }
+  },
+
+  async getDisclosureBatches(limit = 20): Promise<DisclosureBatchResponse> {
+    try {
+      const { data } = await api.get('/disclosure/batches', { params: { limit } })
+      return data
+    } catch (error) {
+      console.error('Failed to fetch disclosure batches:', error)
+      throw error
+    }
+  },
+
+  // â”€â”€ DEKES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async optimizeDekesQuery(request: DekesOptimizeRequest) {
     const { data } = await api.post('/dekes/optimize', request)
     return data
@@ -276,7 +404,7 @@ export const ecobeApi = {
     return data
   },
 
-  // ── Intelligence ──────────────────────────────────────────────────────────────
+  // â”€â”€ Intelligence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getIntelligencePatterns(regions: string[]): Promise<PatternsResponse> {
     const { data } = await api.get<PatternsResponse>('/intelligence/patterns', {
       params: { region: regions.join(',') },
@@ -294,7 +422,7 @@ export const ecobeApi = {
     return data
   },
 
-  // ── Grid Intelligence ───────────────────────────────────────────────────────────
+  // â”€â”€ Grid Intelligence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async getGridHeroMetrics(): Promise<GridHeroMetrics> {
     try {
       const { data } = await api.get<GridHeroMetrics>('/intelligence/grid/hero-metrics')
@@ -365,50 +493,51 @@ export const ecobeApi = {
     }
   },
 
-  // ── DEKES Integration ─────────────────────────────────────────────────────────
-  // Read-only — handoffs are emitted by the ECOBE engine, never by the dashboard.
-  // All routes resolve through the existing /api/ecobe proxy → ECOBE engine.
-  async getDekesIntegrationSummary(): Promise<DekesIntegrationSummary> {
-    const { data } = await api.get<DekesIntegrationSummary>('/integrations/dekes/summary')
+  // â”€â”€ DEKES Integration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Read-only dashboard activation surfaces are built from a dashboard-side
+  // read model derived from live ECOBE decisions and engine status.
+  async getDekesIntegrationSummary(): Promise<DekesIntegrationSummaryResponse> {
+    const { data } = await api.get<DekesIntegrationSummaryResponse>('/dekes/runtime', {
+      params: { view: 'summary' },
+    })
     return data
   },
 
   async getDekesIntegrationEvents(
     limit = 50
-  ): Promise<{ handoffs: DekesHandoff[] }> {
-    const { data } = await api.get<{ handoffs: DekesHandoff[] }>('/integrations/dekes/events', {
-      params: { limit },
+  ): Promise<DekesIntegrationEventsResponse> {
+    const { data } = await api.get<DekesIntegrationEventsResponse>('/dekes/runtime', {
+      params: { view: 'events', limit },
     })
     return data
   },
 
   async getDekesHandoffById(handoffId: string): Promise<DekesHandoff> {
-    const { data } = await api.get<DekesHandoff>(`/integrations/dekes/events/${encodeURIComponent(handoffId)}`)
+    const { data } = await api.get<DekesHandoff>('/dekes/runtime', {
+      params: { view: 'handoff', handoffId },
+    })
     return data
   },
 
-  async getDekesIntegrationMetrics(): Promise<{ orgRisks: DekesOrgRisk[] }> {
-    const { data } = await api.get<{ orgRisks: DekesOrgRisk[] }>('/integrations/dekes/metrics')
+  async getDekesIntegrationMetrics(): Promise<DekesIntegrationMetricsResponse> {
+    const { data } = await api.get<DekesIntegrationMetricsResponse>('/dekes/runtime', {
+      params: { view: 'metrics' },
+    })
     return data
   },
 
-  // ── CI Routing ──────────────────────────────────────────────────────────────
-  async getCIRoutingHealth() {
-    const { data } = await api.get('/health')
+
+  // â”€â”€ Health â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  async applyForDesignPartnerProgram(
+    payload: DesignPartnerApplicationPayload
+  ): Promise<DesignPartnerApplicationResponse> {
+    const { data } = await api.post<DesignPartnerApplicationResponse>(
+      '/design-partners/applications',
+      payload
+    )
     return data
   },
 
-  async getCIAvailableRegions() {
-    const { data } = await api.get('/intelligence/grid/summary')
-    return data?.regions ?? []
-  },
-
-  async getCIDecisions(limit = 20) {
-    const { data } = await api.get<{ decisions: DashboardDecision[] }>(`/decisions?limit=${limit}`)
-    return data?.decisions ?? []
-  },
-
-  // ── Health ────────────────────────────────────────────────────────────────────
   async health() {
     const { data } = await api.get('/health')
     return data

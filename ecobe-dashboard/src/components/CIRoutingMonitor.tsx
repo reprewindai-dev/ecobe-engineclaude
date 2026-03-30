@@ -25,6 +25,8 @@ export function CIRoutingMonitor() {
   })
 
   const isLoading = healthLoading || regionsLoading || decisionsLoading
+  const regionList = regions?.regions ?? []
+  const decisionList = decisions?.decisions ?? []
 
   return (
     <div className="bg-slate-900/50 rounded-xl border border-slate-800 p-6 space-y-6">
@@ -71,24 +73,24 @@ export function CIRoutingMonitor() {
               }`}>
                 {health?.status || 'Unknown'}
               </span>
-              <p className="text-xs text-slate-500">{regions?.totalRegions || 0} regions</p>
+              <p className="text-xs text-slate-500">{regions?.totalRegions ?? regionList.length} regions</p>
             </div>
           </div>
 
           {/* Available Regions */}
-          {regions?.regions && (
+          {regionList.length > 0 && (
             <div>
               <h4 className="text-sm font-medium text-white mb-3">Available Runner Regions</h4>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                {regions.regions.slice(0, 9).map((region: any) => (
+                {regionList.slice(0, 9).map((region: any) => (
                   <div key={region.region} className="p-2 bg-slate-800/40 rounded text-xs">
                     <p className="text-slate-300 font-medium">{region.region}</p>
-                    <p className="text-slate-500">{region.runners.length} runners</p>
+                    <p className="text-slate-500">{region.runners?.length ?? 0} runners</p>
                   </div>
                 ))}
-                {regions.regions.length > 9 && (
+                {regionList.length > 9 && (
                   <div className="p-2 bg-slate-800/40 rounded text-xs text-slate-500">
-                    +{regions.regions.length - 9} more
+                    +{regionList.length - 9} more
                   </div>
                 )}
               </div>
@@ -96,11 +98,11 @@ export function CIRoutingMonitor() {
           )}
 
           {/* Recent Decisions */}
-          {decisions && decisions.length > 0 && (
+          {decisionList.length > 0 && (
             <div>
               <h4 className="text-sm font-medium text-white mb-3">Recent Routing Decisions</h4>
               <div className="space-y-2">
-                {decisions.slice(0, 5).map((decision: any) => (
+                {decisionList.slice(0, 5).map((decision: any) => (
                   <div key={decision.decisionFrameId} className="p-3 bg-slate-800/40 rounded-lg">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">

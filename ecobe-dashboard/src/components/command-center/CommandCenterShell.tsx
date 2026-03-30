@@ -47,6 +47,14 @@ function formatAgo(timestamp: string) {
   }
 }
 
+function formatSecondsCompact(seconds: number | null | undefined) {
+  if (seconds == null || !Number.isFinite(seconds)) return 'Unavailable'
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`
+  if (seconds < 86400) return `${Math.round(seconds / 3600)}h`
+  return `${(seconds / 86400).toFixed(seconds >= 86400 * 10 ? 0 : 1)}d`
+}
+
 function resolveActionMeta(action: string) {
   return ACTION_META[(action in ACTION_META ? action : 'run_now') as keyof typeof ACTION_META]
 }
@@ -79,7 +87,9 @@ function deriveGovernance(
 ): SaiqGovernanceSnapshot {
   if (!selectedTrace) return snapshot.governance
 
+  const traceThresholds = selectedTrace.payload.governance.thresholds
   const thresholdsSource =
+    (traceThresholds && typeof traceThresholds === 'object' ? traceThresholds : undefined) ??
     (selectedReplay?.persisted?.policyTrace?.thresholds as Record<string, unknown> | undefined) ??
     (selectedReplay?.replay.policyTrace?.thresholds as Record<string, unknown> | undefined)
 
@@ -92,24 +102,27 @@ function deriveGovernance(
         )
       : null
 
-  const request = selectedTrace.payload.inputSignals.request
+  const traceWeights = selectedTrace.payload.governance.weights
   const weights =
-    typeof request.carbonWeight === 'number' ||
-    typeof request.waterWeight === 'number' ||
-    typeof request.latencyWeight === 'number' ||
-    typeof request.costWeight === 'number'
+    traceWeights &&
+    (typeof traceWeights.carbon === 'number' ||
+      typeof traceWeights.water === 'number' ||
+      typeof traceWeights.latency === 'number' ||
+      typeof traceWeights.cost === 'number')
       ? {
-          carbon: typeof request.carbonWeight === 'number' ? request.carbonWeight : null,
-          water: typeof request.waterWeight === 'number' ? request.waterWeight : null,
-          latency: typeof request.latencyWeight === 'number' ? request.latencyWeight : null,
-          cost: typeof request.costWeight === 'number' ? request.costWeight : null,
+          carbon: typeof traceWeights.carbon === 'number' ? traceWeights.carbon : null,
+          water: typeof traceWeights.water === 'number' ? traceWeights.water : null,
+          latency: typeof traceWeights.latency === 'number' ? traceWeights.latency : null,
+          cost: typeof traceWeights.cost === 'number' ? traceWeights.cost : null,
         }
       : null
 
   const selectedScore =
+    selectedTrace.payload.governance.score ??
     selectedTrace.payload.normalizedSignals.candidates.find(
       (candidate) => candidate.region === selectedTrace.payload.decisionPath.selectedRegion
-    )?.score ?? null
+    )?.score ??
+    null
 
   return {
     frameworkLabel: 'SAIQ',
@@ -499,7 +512,7 @@ function DecisionEngineCore({
     <div className="relative z-10 rounded-[32px] border border-white/12 bg-[linear-gradient(180deg,rgba(5,15,33,0.88),rgba(2,6,23,0.95))] p-5 shadow-[0_24px_100px_rgba(0,0,0,0.45)] backdrop-blur">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <div className="text-[11px] uppercase tracking-[0.22em] text-cyan-300">Decision engine core</div>
+          <div className="text-[11px] uppercase tracking-[0.22em] text-cyan-300">Decision core</div>
           <h2 className="mt-2 text-2xl font-black tracking-[-0.04em] text-white">
             {selectedDecision ? resolveActionMeta(selectedDecision.action).label : 'Awaiting frame'}
           </h2>
@@ -552,11 +565,11 @@ function DecisionEngineCore({
         </div>
 
         <div className="rounded-[26px] border border-white/10 bg-white/[0.03] p-5">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Reason path</div>
+          <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Authority path</div>
           <div className="mt-2 text-lg font-semibold text-white">{selectedDecision?.reasonCode ?? 'No active decision'}</div>
           <div className="mt-4 space-y-2 text-sm text-slate-300">
             <div>Action: <span className={meta.text}>{meta.label}</span></div>
-            <div>Signal mode: {selectedDecision?.signalMode ?? 'Unavailable'} / accounting {selectedDecision?.accountingMethod ?? 'Unavailable'}</div>
+            <div>Signal posture: {selectedDecision?.signalMode ?? 'Unavailable'} / accounting {selectedDecision?.accountingMethod ?? 'Unavailable'}</div>
             <div>Water can block: {selectedDecision?.systemState === 'blocked' ? 'yes' : 'not on current frame'}</div>
             <div>Constraints applied: {governance.impact.constraintsApplied}</div>
           </div>
@@ -574,7 +587,7 @@ function SaiqGovernanceEngine({ governance }: { governance: SaiqGovernanceSnapsh
       <div className="flex items-center gap-3">
         <ShieldCheck className="h-5 w-5 text-cyan-300" />
         <div>
-          <div className="text-[11px] uppercase tracking-[0.2em] text-slate-400">SAIQ governance engine</div>
+          <div className="text-[11px] uppercase tracking-[0.2em] text-slate-400">SAIQ governance layer</div>
           <div className="mt-1 text-lg font-semibold text-white">Weighted execution authority.</div>
         </div>
       </div>
@@ -593,7 +606,7 @@ function SaiqGovernanceEngine({ governance }: { governance: SaiqGovernanceSnapsh
         </div>
 
         <div className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Weights</div>
+          <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">SAIQ Weights</div>
           {governance.weights ? (
             <div className="mt-3 grid gap-2 text-sm text-slate-200">
               <div>Carbon {governance.weights.carbon?.toFixed(2) ?? 'Unavailable'}</div>
@@ -602,7 +615,10 @@ function SaiqGovernanceEngine({ governance }: { governance: SaiqGovernanceSnapsh
               <div>Cost {governance.weights.cost?.toFixed(2) ?? 'Unavailable'}</div>
             </div>
           ) : (
-            <div className="mt-3 text-sm text-slate-400">Unavailable</div>
+            <div className="mt-3 space-y-1 text-sm text-slate-400">
+              <div>Unavailable</div>
+              <div>Not exposed by current live decision payload</div>
+            </div>
           )}
         </div>
 
@@ -678,12 +694,22 @@ function SystemHealthPanel({ providers, snapshot }: { providers: ControlSurfaceP
               <div className="flex items-center justify-between gap-3">
                 <div className="text-sm font-medium text-white">{provider.label}</div>
                 <span className={clsx('rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.16em]', getStatusTone(provider.status === 'healthy' ? 'active' : provider.status === 'offline' ? 'blocked' : 'marginal'))}>
-                  {provider.status}
+                  {provider.statusLabel ?? provider.status}
                 </span>
               </div>
               <div className="mt-1 text-xs text-slate-400">
-                staleness {provider.freshnessSec != null ? `${provider.freshnessSec}s` : 'Unavailable'} / latency unavailable
+                {provider.providerType === 'water'
+                  ? `bundle age ${formatSecondsCompact(provider.freshnessSec)} / ttl ${formatSecondsCompact(provider.ttlSec)}`
+                  : `staleness ${formatSecondsCompact(provider.freshnessSec)} / latency ${provider.latencyMs != null ? `${provider.latencyMs}ms` : 'unavailable'}`}
               </div>
+              {provider.providerType === 'water' ? (
+                <div className="mt-1 text-xs text-slate-500">
+                  provenance {provider.provenanceStatus ?? 'unavailable'}
+                </div>
+              ) : null}
+              {provider.degradedReason ? (
+                <div className="mt-1 text-xs text-amber-200/90">{provider.degradedReason}</div>
+              ) : null}
             </div>
           ))}
         </div>
@@ -788,7 +814,7 @@ function RecentDecisionQueue({
         <Globe2 className="h-5 w-5 text-lime-300" />
         <div>
           <div className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Recent decision queue</div>
-          <div className="mt-1 text-lg font-semibold text-white">Streaming authorization outcomes.</div>
+          <div className="mt-1 text-lg font-semibold text-white">Binding execution outcomes.</div>
         </div>
       </div>
 
@@ -1038,7 +1064,7 @@ export function CommandCenterShell() {
       <InspectDrawer open={drawer?.type === 'proof'} title="Proof inspection" onClose={() => setDrawer(null)}>
         <div className="space-y-5">
           <div className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Proof hash</div>
+            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Proof reference</div>
             <div className="mt-3 font-mono text-sm text-white">{activeProofHash ?? 'Unavailable'}</div>
           </div>
           <div className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">

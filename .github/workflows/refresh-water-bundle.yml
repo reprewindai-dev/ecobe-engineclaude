@@ -1,0 +1,49 @@
+name: Refresh Water Bundle
+
+on:
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: refresh-water-bundle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  refresh-water-bundle:
+    name: Refresh Water Bundle
+    runs-on: [self-hosted, linux, x64, do, ecobe, general]
+    defaults:
+      run:
+        working-directory: ecobe-engine
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ecobe-engine/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Refresh normalized water bundle
+        run: npm run water:refresh
+
+      - name: Verify provenance bundle
+        run: npm run water:verify-provenance
+
+      - name: Upload refreshed water artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: water-bundle-artifacts
+          path: |
+            ecobe-engine/data/normalized/water/water.bundle.json
+            ecobe-engine/data/normalized/water/manifest.json
+            ecobe-engine/data/normalized/water/.lkg/water.bundle.json
+            ecobe-engine/data/normalized/water/.lkg/manifest.json

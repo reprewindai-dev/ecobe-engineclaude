@@ -31,6 +31,13 @@ import dksRoutes from './routes/dks'
 import testPostRoutes from './routes/test-post'
 import routeDebugRoutes from './routes/route-debug'
 import ciRoutes from './routes/ci'
+import waterRoutes from './routes/water'
+import eventsRoutes from './routes/events'
+import adaptersRoutes from './routes/adapters'
+import designPartnerRoutes from './routes/design-partners'
+import internalPolicyRoutes from './routes/internal-policy'
+import { recordTelemetryMetric, telemetryMetricNames } from './lib/observability/telemetry'
+import { validateWaterArtifacts } from './lib/water/bundle'
 
 function rawBodySaver(_req: express.Request, _res: express.Response, buf: Buffer) {
   if (buf?.length) {
@@ -51,7 +58,8 @@ function attachHealthRoutes(app: express.Express) {
         redisOk = false
       }
 
-      const ok = redisOk
+      const waterArtifacts = validateWaterArtifacts()
+      const ok = redisOk && waterArtifacts.healthy
 
       res.status(ok ? 200 : 503).json({
         status: ok ? 'ok' : 'degraded',
@@ -71,7 +79,9 @@ function attachHealthRoutes(app: express.Express) {
         checks: {
           database: true,
           redis: redisOk,
+          waterArtifacts: waterArtifacts.checks,
         },
+        waterArtifactErrors: waterArtifacts.errors,
       })
     } catch (error) {
       res.status(503).json({
@@ -307,6 +317,11 @@ function attachApiRoutes(app: express.Express) {
   app.use('/api/v1/carbon-ledger', carbonLedgerRoutes)
   // CI/CD green routing
   app.use('/api/v1/ci', ciRoutes)
+  app.use('/api/v1/internal', internalPolicyRoutes)
+  app.use('/api/v1/events', eventsRoutes)
+  app.use('/api/v1/adapters', adaptersRoutes)
+  app.use('/api/v1', designPartnerRoutes)
+  app.use('/api/v1/water', waterRoutes)
   // Additional routes from remote merge
   app.use('/api/v1/route-simple', routeSimpleRoutes)
   app.use('/api/v1/route-test', routeTestRoutes)
@@ -339,6 +354,17 @@ export function createApp() {
   app.use(cors())
   app.use(express.json({ limit: '1mb', verify: rawBodySaver }))
   app.use(express.urlencoded({ extended: true, limit: '1mb', verify: rawBodySaver }))
+  app.use((req, res, next) => {
+    const started = Date.now()
+    res.on('finish', () => {
+      recordTelemetryMetric(telemetryMetricNames.httpServerDurationMs, 'histogram', Date.now() - started, {
+        method: req.method,
+        route: req.path,
+        status_code: res.statusCode,
+      })
+    })
+    next()
+  })
 
   attachHealthRoutes(app)
   attachUiRoute(app)

@@ -1,7 +1,10 @@
-import { providerRouter } from './carbon/provider-router'
+import { prisma } from './db'
+import { redis } from './redis'
+import { fingard } from '../services/fingard-control'
 import { GridSignalCache } from './grid-signals/grid-signal-cache'
 import { GridSignalAudit } from './grid-signals/grid-signal-audit'
 import { wattTime } from './watttime'
+import { electricityMaps } from './electricity-maps'
 import { randomUUID } from 'crypto'
 import { classifyJob, recordLedgerEntry, storeProviderSnapshot } from './routing'
 import { generateLease, retryAsync } from './governance'
@@ -61,6 +64,9 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     latencyWeight = 0.2,
     costWeight = 0.3,
   } = request
+  if (!preferredRegions.length) {
+    throw new Error('preferredRegions must not be empty')
+  }
 
   // Normalize weights
   const totalWeight = carbonWeight + latencyWeight + costWeight
@@ -68,27 +74,54 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
   const normalizedLatency = latencyWeight / totalWeight
   const normalizedCost = costWeight / totalWeight
 
-  // Get routing signals for all regions from ProviderRouter
+  // Get routing signals for all regions from Fingard control layer
   const regionSignals = new Map<string, any>()
   const regionData = await Promise.all(
     preferredRegions.map(async (region) => {
       try {
-        // Get routing signal from provider router (uses WattTime + Electricity Maps)
-        const signal = await providerRouter.getRoutingSignal(region, new Date())
+        // Get routing signal from Fingard (uses locked provider hierarchy)
+        const fingardDecision = await fingard.getNormalizedSignal(region, new Date())
+        const signal = fingardDecision.signal
+        const normalizedIntensity = Number.isFinite(signal.carbonIntensity)
+          ? signal.carbonIntensity
+          : 400
         regionSignals.set(region, signal)
 
         return {
           region,
-          carbonIntensity: signal.carbonIntensity,
+          carbonIntensity: normalizedIntensity,
           latency: latencyMsByRegion[region] ?? 100,
           signal,
         }
       } catch (error) {
         console.error(`Failed to get routing signal for ${region}:`, error)
-        // Static fallback — degraded state, confidence 0.05
+        // Fallback to electricity maps
+        const cached = await redis.get(`carbon:${region}`)
+        let carbonIntensity: number
+
+        if (cached) {
+          carbonIntensity = parseInt(cached)
+        } else {
+          const data = await electricityMaps.getCarbonIntensity(region)
+          carbonIntensity = data?.carbonIntensity ?? 400
+
+          // Cache for 15 minutes
+          await redis.setex(`carbon:${region}`, 900, carbonIntensity.toString())
+
+          // Store in DB
+          await prisma.carbonIntensity.create({
+            data: {
+              region,
+              carbonIntensity,
+              timestamp: new Date(),
+              source: 'ELECTRICITY_MAPS',
+            },
+          }).catch(() => {}) // Ignore duplicates
+        }
+
         return {
           region,
-          carbonIntensity: 400,
+          carbonIntensity,
           latency: latencyMsByRegion[region] ?? 100,
           signal: null,
         }
@@ -169,6 +202,40 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
 
   const best = scored[0]
   const bestSignal = regionSignals.get(best.region)
+  const bestProvenance = (bestSignal?.provenance ?? {}) as Record<string, unknown>
+  const contributingSources = Array.isArray(bestProvenance.contributingSources)
+    ? (bestProvenance.contributingSources as string[])
+    : typeof bestProvenance.provider === 'string'
+      ? [bestProvenance.provider]
+      : typeof bestSignal?.source === 'string'
+        ? [bestSignal.source]
+        : []
+  const sourceUsed =
+    (typeof bestProvenance.sourceUsed === 'string' && bestProvenance.sourceUsed) ||
+    (typeof bestProvenance.provider === 'string' && bestProvenance.provider.toUpperCase()) ||
+    (typeof bestSignal?.source === 'string' && bestSignal.source.toUpperCase()) ||
+    null
+  const fallbackUsed =
+    typeof bestProvenance.fallbackUsed === 'boolean'
+      ? bestProvenance.fallbackUsed
+      : bestSignal?.source === 'fallback'
+  const disagreementFlag =
+    typeof bestProvenance.disagreementFlag === 'boolean'
+      ? bestProvenance.disagreementFlag
+      : Boolean(bestProvenance.disagreementDetected)
+  const disagreementPct =
+    typeof bestProvenance.disagreementPct === 'number' &&
+    Number.isFinite(bestProvenance.disagreementPct)
+      ? (bestProvenance.disagreementPct as number)
+      : disagreementFlag
+        ? 0
+        : null
+  const referenceTime =
+    (typeof bestProvenance.referenceTime === 'string' && bestProvenance.referenceTime) ||
+    new Date().toISOString()
+  const fetchedAt =
+    (typeof bestProvenance.fetchedAt === 'string' && bestProvenance.fetchedAt) ||
+    new Date().toISOString()
 
   // Get grid snapshot for best region
   const gridSnapshot = await getLatestGridSnapshot(best.region)
@@ -179,13 +246,21 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
   // Calculate worst intensity for delta
   const worstIntensity = Math.max(...scored.map(r => r.carbonIntensity))
 
-  // Determine quality tier — use providerRouter.validateSignalQuality when available,
-  // otherwise fall back to confidence-based derivation
+  // Determine quality tier based on Fingard signal confidence
   let qualityTier: 'high' | 'medium' | 'low' = 'low'
   if (bestSignal) {
     try {
-      const validation = await providerRouter.validateSignalQuality(bestSignal)
-      qualityTier = validation.qualityTier
+      // Use Fingard confidence and trust level for quality assessment
+      const confidence = bestSignal.confidence || 0.5
+      const trustLevel = bestSignal.provenance?.trustLevel || 'medium'
+      
+      if (trustLevel === 'high' && confidence >= 0.8) {
+        qualityTier = 'high'
+      } else if (trustLevel !== 'low' && confidence >= 0.6) {
+        qualityTier = 'medium'
+      } else {
+        qualityTier = 'low'
+      }
     } catch {
       // Fallback: derive from confidence directly
       qualityTier = bestSignal.confidence >= 0.8 ? 'high' : bestSignal.confidence >= 0.5 ? 'medium' : 'low'
@@ -194,8 +269,8 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
 
   // Derive forecast stability with provider disagreement context
   const forecastStability = bestSignal ? deriveStability(bestSignal.confidence, {
-    flag: bestSignal.provenance.disagreementFlag,
-    pct: bestSignal.provenance.disagreementPct
+    flag: disagreementFlag,
+    pct: disagreementPct
   }) : null
 
   const decisionFrameId = randomUUID()
@@ -207,11 +282,11 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
   // ── Governance: Quality gate ───────────────────────────────────────────
   // If quality is critically low AND fallback was used, flag in explanation
   const governanceWarnings: string[] = []
-  if (qualityTier === 'low' && bestSignal?.provenance.fallbackUsed) {
+  if (qualityTier === 'low' && fallbackUsed) {
     governanceWarnings.push('LOW_QUALITY_FALLBACK: Decision based on static fallback data, not live provider signals.')
   }
-  if (bestSignal?.provenance.disagreementFlag && (bestSignal.provenance.disagreementPct ?? 0) > 25) {
-    governanceWarnings.push(`HIGH_DISAGREEMENT: Provider signals diverge by ${bestSignal.provenance.disagreementPct?.toFixed(1)}%. Decision confidence reduced.`)
+  if (disagreementFlag && (disagreementPct ?? 0) > 25) {
+    governanceWarnings.push(`HIGH_DISAGREEMENT: Provider signals diverge by ${disagreementPct?.toFixed(1)}%. Decision confidence reduced.`)
   }
   if (forecastStability === 'unstable') {
     governanceWarnings.push('UNSTABLE_FORECAST: Grid conditions are volatile. Recommend shorter execution windows.')
@@ -219,8 +294,6 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
 
   // Record audit trail (with retry — governance-critical data)
   if (bestSignal) {
-    retryAsync(() => providerRouter.recordSignalProvenance(bestSignal, decisionFrameId), 'signal-provenance')
-
     // Record grid signal audit (with retry)
     retryAsync(() => GridSignalAudit.recordRoutingDecision(
       decisionFrameId,
@@ -236,13 +309,16 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
         syntheticFlag: bestSignal.source === 'fallback'
       },
       {
-        sourceUsed: bestSignal.provenance.sourceUsed,
-        validationSource: bestSignal.provenance.contributingSources.length > 1 ? 'ember' : undefined,
-        referenceTime: bestSignal.provenance.referenceTime,
-        fetchedAt: bestSignal.provenance.fetchedAt,
-        fallbackUsed: bestSignal.provenance.fallbackUsed,
-        disagreementFlag: bestSignal.provenance.disagreementFlag,
-        disagreementPct: bestSignal.provenance.disagreementPct
+        sourceUsed: sourceUsed ?? 'unknown',
+        validationSource:
+          contributingSources.length > 1
+            ? 'ember'
+            : undefined,
+        referenceTime,
+        fetchedAt,
+        fallbackUsed: Boolean(fallbackUsed),
+        disagreementFlag,
+        disagreementPct: disagreementPct ?? 0
       }
     ), 'grid-signal-audit')
   }
@@ -322,12 +398,12 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
   // Store provider snapshot for audit trail (with retry)
   if (bestSignal) {
     retryAsync(() => storeProviderSnapshot({
-      provider: bestSignal.provenance.sourceUsed ?? 'unknown',
+      provider: sourceUsed ?? 'unknown',
       zone: best.region,
       signalType: 'intensity',
       signalValue: best.carbonIntensity,
-      observedAt: new Date(bestSignal.provenance.fetchedAt),
-      freshnessSec: Math.floor((Date.now() - new Date(bestSignal.provenance.fetchedAt).getTime()) / 1000),
+      observedAt: new Date(fetchedAt),
+      freshnessSec: Math.floor((Date.now() - new Date(fetchedAt).getTime()) / 1000),
       confidence: bestSignal.confidence,
     }), 'provider-snapshot')
   }
@@ -341,19 +417,22 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
     carbon_delta_g_per_kwh: scored.length > 1 ? worstIntensity - best.carbonIntensity : null,
     forecast_stability: forecastStability,
     provider_disagreement: bestSignal ? {
-      flag: bestSignal.provenance.disagreementFlag,
-      pct: bestSignal.provenance.disagreementPct
+      flag: disagreementFlag,
+      pct: disagreementPct
     } : { flag: false, pct: null },
     balancingAuthority: gridSnapshot?.balancingAuthority ?? null,
     demandRampPct: gridSnapshot?.demandChangePct ?? null,
     carbonSpikeProbability: gridSnapshot?.carbonSpikeProbability ?? null,
     curtailmentProbability: gridSnapshot?.curtailmentProbability ?? null,
     importCarbonLeakageScore: gridSnapshot?.importCarbonLeakageScore ?? null,
-    source_used: bestSignal?.provenance.sourceUsed ?? null,
-    validation_source: (bestSignal?.provenance.contributingSources.length ?? 0) > 1 ? 'ember' : null,
-    fallback_used: bestSignal?.provenance.fallbackUsed ?? null,
-    estimatedFlag: bestSignal?.isForecast ?? null,
-    syntheticFlag: bestSignal?.source === 'fallback' || null,
+    source_used: sourceUsed,
+    validation_source:
+      contributingSources.length > 1
+        ? 'ember'
+        : null,
+    fallback_used: bestSignal ? Boolean(fallbackUsed) : null,
+    estimatedFlag: bestSignal ? Boolean(bestSignal.isForecast || bestSignal.estimatedFlag) : null,
+    syntheticFlag: bestSignal ? Boolean(bestSignal.source === 'fallback' || bestSignal.syntheticFlag) : null,
     predicted_clean_window: cleanWindows?.[0] ?? null,
     decisionFrameId: decisionFrameId,
     // Governance: Lease fields
