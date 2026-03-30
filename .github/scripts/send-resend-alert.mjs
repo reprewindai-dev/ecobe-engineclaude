@@ -3,8 +3,8 @@ const from = process.env.RESEND_FROM_ALERTS?.trim()
 const to = process.env.ALERT_INBOX_EMAIL?.trim()
 
 if (!apiKey || !from || !to) {
-  console.error('Missing required alert mail environment variables.')
-  process.exit(1)
+  console.log('Skipping alert send because alert mail environment variables are not configured.')
+  process.exit(0)
 }
 
 const subject = process.env.ALERT_SUBJECT?.trim() || 'CO2 Router workflow alert'

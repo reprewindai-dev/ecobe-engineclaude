@@ -33,7 +33,9 @@ concurrency:
 
 env:
   DEFAULT_ECOBE_ENGINE_URL: https://ecobe-engineclaude-production.up.railway.app
+  DEFAULT_DASHBOARD_URL: https://co2-router-dashboard-production.up.railway.app
   ECOBE_ENGINE_URL: ${{ secrets.ECOBE_ENGINE_URL }}
+  DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
   ECOBE_ENGINE_API_KEY: ${{ secrets.ECOBE_ENGINE_API_KEY }}
   ECOBE_INTERNAL_API_KEY: ${{ secrets.ECOBE_INTERNAL_API_KEY }}
   DECISION_API_SIGNATURE_SECRET: ${{ secrets.DECISION_API_SIGNATURE_SECRET }}
@@ -77,6 +79,9 @@ jobs:
         run: npx tsx scripts/load-test-ci.ts --release-gates
         env:
           LOAD_TEST_BASE_URL: ${{ env.ECOBE_ENGINE_URL || env.DEFAULT_ECOBE_ENGINE_URL }}
+          DASHBOARD_URL: ${{ env.DASHBOARD_URL || env.DEFAULT_DASHBOARD_URL }}
+          DEFAULT_DASHBOARD_URL: ${{ env.DEFAULT_DASHBOARD_URL }}
+          LOAD_TEST_USE_DASHBOARD_PROXY: 'true'
           ECOBE_ENGINE_API_KEY: ${{ secrets.ECOBE_ENGINE_API_KEY }}
           ECOBE_INTERNAL_API_KEY: ${{ secrets.ECOBE_INTERNAL_API_KEY }}
           DECISION_API_SIGNATURE_SECRET: ${{ secrets.DECISION_API_SIGNATURE_SECRET }}

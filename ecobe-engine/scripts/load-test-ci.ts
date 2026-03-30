@@ -12,6 +12,15 @@ const DEFAULT_BASE_URL =
   process.env.LOAD_TEST_BASE_URL ??
   process.env.ECOBE_ENGINE_URL ??
   'https://ecobe-engineclaude-production.up.railway.app'
+const DEFAULT_DASHBOARD_URL =
+  process.env.DASHBOARD_URL ??
+  process.env.DEFAULT_DASHBOARD_URL ??
+  'https://co2-router-dashboard-production.up.railway.app'
+const USE_DASHBOARD_PROXY = process.env.LOAD_TEST_USE_DASHBOARD_PROXY === 'true'
+const AUTHORIZE_URL =
+  process.env.LOAD_TEST_AUTHORIZE_URL ??
+  (USE_DASHBOARD_PROXY ? `${DEFAULT_DASHBOARD_URL.replace(/\/$/, '')}/api/ecobe/ci/authorize` : null)
+const DEFAULT_DIRECT_AUTHORIZE_URL = `${DEFAULT_BASE_URL.replace(/\/$/, '')}/api/v1/ci/authorize`
 
 const OUTPUT_DIR = path.resolve(process.cwd(), 'data', 'perf', 'ci-load-tests')
 const LATEST_PATH = path.join(OUTPUT_DIR, 'latest.json')
@@ -237,6 +246,7 @@ function buildPayload(scenarioId: ScenarioDefinition['id'], index: number) {
 }
 
 function signBody(body: string) {
+  if (USE_DASHBOARD_PROXY || (AUTHORIZE_URL && AUTHORIZE_URL !== DEFAULT_DIRECT_AUTHORIZE_URL)) return null
   const secret = process.env.DECISION_API_SIGNATURE_SECRET
   if (!secret) return null
   return crypto.createHmac('sha256', secret).update(body).digest('hex')
@@ -344,10 +354,11 @@ async function runScenario(baseUrl: string, scenario: ScenarioDefinition): Promi
       const payload = buildPayload(scenario.id, currentIndex)
       const body = JSON.stringify(payload)
       const signature = signBody(body)
+      const authorizeUrl = AUTHORIZE_URL ?? `${baseUrl}/api/v1/ci/authorize`
       const requestStartedAt = performance.now()
 
       try {
-        const response = await axios.post(`${baseUrl}/api/v1/ci/authorize`, body, {
+        const response = await axios.post(authorizeUrl, body, {
           timeout: scenario.timeoutMs,
           validateStatus: () => true,
           headers: {

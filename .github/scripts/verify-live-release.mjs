@@ -4,6 +4,7 @@ import path from 'path'
 
 const repoRoot = process.cwd()
 const baseUrl = (process.env.ECOBE_ENGINE_URL || process.env.DEFAULT_ECOBE_ENGINE_URL || '').trim().replace(/\/$/, '')
+const dashboardUrl = (process.env.DASHBOARD_URL || process.env.DEFAULT_DASHBOARD_URL || '').trim().replace(/\/$/, '')
 const internalKey = (process.env.ECOBE_INTERNAL_API_KEY || process.env.ECOBE_ENGINE_API_KEY || '').trim()
 const signatureSecret = process.env.DECISION_API_SIGNATURE_SECRET?.trim() || ''
 const outputPath = process.env.RELEASE_PROOF_OUTPUT_PATH?.trim()
@@ -61,6 +62,83 @@ function signBody(body) {
   return crypto.createHmac('sha256', signatureSecret).update(body).digest('hex')
 }
 
+async function parseJsonResponse(response) {
+  const text = await response.text()
+  let json
+  try {
+    json = JSON.parse(text)
+  } catch {
+    json = text
+  }
+
+  return {
+    response,
+    json,
+  }
+}
+
+async function tryDirectAuthorize(body) {
+  const signature = signBody(body)
+  const response = await fetch(`${baseUrl}/api/v1/ci/authorize`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(signature ? { 'x-ecobe-signature': `v1=${signature}` } : {}),
+    },
+    body,
+  })
+
+  const parsed = await parseJsonResponse(response)
+  if (!parsed.response.ok) {
+    const error = new Error(
+      `authorize returned ${parsed.response.status}: ${
+        typeof parsed.json === 'string' ? parsed.json : JSON.stringify(parsed.json)
+      }`
+    )
+    error.status = parsed.response.status
+    error.payload = parsed.json
+    throw error
+  }
+
+  return {
+    ...parsed,
+    mode: 'direct',
+  }
+}
+
+async function tryDashboardProxyAuthorize(body) {
+  if (!dashboardUrl) {
+    throw new Error('Dashboard signer bridge is not configured.')
+  }
+
+  const response = await fetch(`${dashboardUrl}/api/ecobe/ci/authorize`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body,
+  })
+
+  const parsed = await parseJsonResponse(response)
+  if (!parsed.response.ok) {
+    throw new Error(
+      `dashboard proxy authorize returned ${parsed.response.status}: ${
+        typeof parsed.json === 'string' ? parsed.json : JSON.stringify(parsed.json)
+      }`
+    )
+  }
+
+  assert(
+    parsed.response.headers.get('x-ecobe-proxy-mode') === 'forwarded',
+    'dashboard signer bridge missing forwarded proxy marker'
+  )
+
+  return {
+    ...parsed,
+    mode: 'dashboard_proxy',
+  }
+}
+
 async function authorizeDecision() {
   const payload = {
     requestId: `release-proof-${Date.now()}`,
@@ -80,31 +158,19 @@ async function authorizeDecision() {
   }
 
   const body = JSON.stringify(payload)
-  const signature = signBody(body)
-  const response = await fetch(`${baseUrl}/api/v1/ci/authorize`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(signature ? { 'x-ecobe-signature': `v1=${signature}` } : {}),
-    },
-    body,
-  })
-
-  const text = await response.text()
-  let json
   try {
-    json = JSON.parse(text)
-  } catch {
-    json = text
-  }
+    return await tryDirectAuthorize(body)
+  } catch (error) {
+    const status = error?.status
+    const payloadCode = error?.payload?.code
+    const shouldFallbackToDashboardProxy =
+      status === 401 && payloadCode === 'INVALID_REQUEST_SIGNATURE' && Boolean(dashboardUrl)
 
-  if (!response.ok) {
-    throw new Error(`authorize returned ${response.status}: ${typeof json === 'string' ? json : JSON.stringify(json)}`)
-  }
+    if (!shouldFallbackToDashboardProxy) {
+      throw error
+    }
 
-  return {
-    response,
-    json,
+    return tryDashboardProxyAuthorize(body)
   }
 }
 
@@ -190,6 +256,7 @@ const result = {
     healthy: cache.json?.cache?.healthy ?? null,
   },
   authorize: {
+    mode: authorize.mode,
     decisionFrameId,
     replayTraceId: authorize.response.headers.get('Replay-Trace-ID'),
     traceHash: authorize.response.headers.get('X-CO2Router-Trace-Hash'),

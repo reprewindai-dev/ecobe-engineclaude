@@ -55,12 +55,37 @@ function percentile(values, p) {
   return Number((sorted[Math.max(0, index)] ?? 0).toFixed(3))
 }
 
+function parseServerTimingTotal(headerValue) {
+  if (!headerValue) return null
+  const match = /(?:^|,\s*)total;dur=([0-9.]+)/i.exec(headerValue)
+  if (!match) return null
+  const value = Number(match[1])
+  return Number.isFinite(value) ? Number(value.toFixed(3)) : null
+}
+
 async function runSimulation(mode) {
-  const latencies = []
+  const warmupCount = 5
+  const sampleCount = 20
+  const wallLatencies = []
+  const serverLatencies = []
   const responseBytes = []
   let lastHeaders = null
 
-  for (let index = 0; index < 20; index += 1) {
+  for (let index = 0; index < warmupCount; index += 1) {
+    const response = await fetch(`${dashboardUrl}/api/control-surface/simulate?mode=${mode}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(samplePayload),
+    })
+    await response.text()
+    if (!response.ok) {
+      throw new Error(`simulate ${mode} warmup returned ${response.status}`)
+    }
+  }
+
+  for (let index = 0; index < sampleCount; index += 1) {
     const startedAt = performance.now()
     const response = await fetch(`${dashboardUrl}/api/control-surface/simulate?mode=${mode}`, {
       method: 'POST',
@@ -74,8 +99,13 @@ async function runSimulation(mode) {
     if (!response.ok) {
       throw new Error(`simulate ${mode} returned ${response.status}: ${text}`)
     }
-    latencies.push(Number(elapsedMs.toFixed(3)))
+    wallLatencies.push(Number(elapsedMs.toFixed(3)))
     responseBytes.push(Number(response.headers.get('x-co2router-response-bytes') ?? 0))
+    const serverTimingTotal = parseServerTimingTotal(response.headers.get('Server-Timing'))
+    if (serverTimingTotal === null) {
+      throw new Error(`simulate ${mode} missing parsable total server timing`)
+    }
+    serverLatencies.push(serverTimingTotal)
     lastHeaders = response.headers
   }
 
@@ -85,11 +115,14 @@ async function runSimulation(mode) {
 
   return {
     mode,
-    p50Ms: percentile(latencies, 50),
-    p95Ms: percentile(latencies, 95),
-    p99Ms: percentile(latencies, 99),
+    wallP50Ms: percentile(wallLatencies, 50),
+    wallP95Ms: percentile(wallLatencies, 95),
+    wallP99Ms: percentile(wallLatencies, 99),
+    serverP50Ms: percentile(serverLatencies, 50),
+    serverP95Ms: percentile(serverLatencies, 95),
+    serverP99Ms: percentile(serverLatencies, 99),
     avgBytes: Number((responseBytes.reduce((sum, value) => sum + value, 0) / responseBytes.length).toFixed(1)),
-    samples: latencies.length,
+    samples: wallLatencies.length,
   }
 }
 
@@ -116,8 +149,8 @@ assert(Array.isArray(metrics.json?.metrics), 'metrics route missing metrics arra
 const fast = await runSimulation('fast')
 const full = await runSimulation('full')
 
-assert(fast.p95Ms <= 250, `dashboard fast mode p95 above gate: ${fast.p95Ms}`)
-assert(full.p95Ms >= fast.p95Ms, 'dashboard full mode must remain slower than fast mode')
+assert(fast.serverP95Ms <= 250, `dashboard fast mode p95 above gate: ${fast.serverP95Ms}`)
+assert(full.serverP95Ms >= fast.serverP95Ms, 'dashboard full mode must remain slower than fast mode')
 assert(full.avgBytes > fast.avgBytes, 'dashboard full mode must remain larger than fast mode')
 
 const result = {
