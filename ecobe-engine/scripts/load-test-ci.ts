@@ -21,6 +21,7 @@ const AUTHORIZE_URL =
   process.env.LOAD_TEST_AUTHORIZE_URL ??
   (USE_DASHBOARD_PROXY ? `${DEFAULT_DASHBOARD_URL.replace(/\/$/, '')}/api/ecobe/ci/authorize` : null)
 const DEFAULT_DIRECT_AUTHORIZE_URL = `${DEFAULT_BASE_URL.replace(/\/$/, '')}/api/v1/ci/authorize`
+const DASHBOARD_PROXY_BASE_URL = DEFAULT_DASHBOARD_URL.replace(/\/$/, '')
 
 const OUTPUT_DIR = path.resolve(process.cwd(), 'data', 'perf', 'ci-load-tests')
 const LATEST_PATH = path.join(OUTPUT_DIR, 'latest.json')
@@ -298,17 +299,31 @@ async function verifyReplaySamples(
   const headers = buildInternalHeaders()
   const replaySamples: ScenarioResult['replaySamples'] = []
 
+  async function fetchProofArtifact(decisionFrameId: string, kind: 'trace' | 'replay') {
+    const directUrl = `${baseUrl}/api/v1/ci/decisions/${decisionFrameId}/${kind}`
+    try {
+      return await axios.get(directUrl, {
+        timeout: 20_000,
+        headers,
+      })
+    } catch (error: any) {
+      const status = error?.response?.status
+      if (status !== 401 || !USE_DASHBOARD_PROXY) {
+        throw error
+      }
+
+      const proxyUrl = `${DASHBOARD_PROXY_BASE_URL}/api/ecobe/ci/decisions/${decisionFrameId}/${kind}`
+      return axios.get(proxyUrl, {
+        timeout: 20_000,
+      })
+    }
+  }
+
   for (const frame of frames.slice(0, MAX_REPLAY_SAMPLES)) {
     try {
       const [traceResponse, replayResponse] = await Promise.all([
-        axios.get(`${baseUrl}/api/v1/ci/decisions/${frame.decisionFrameId}/trace`, {
-          timeout: 20_000,
-          headers,
-        }),
-        axios.get(`${baseUrl}/api/v1/ci/decisions/${frame.decisionFrameId}/replay`, {
-          timeout: 20_000,
-          headers,
-        }),
+        fetchProofArtifact(frame.decisionFrameId, 'trace'),
+        fetchProofArtifact(frame.decisionFrameId, 'replay'),
       ])
 
       replaySamples.push({

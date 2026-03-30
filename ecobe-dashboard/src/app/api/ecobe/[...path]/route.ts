@@ -10,13 +10,18 @@ function getEngineBaseUrl() {
   return process.env.ECOBE_API_URL || DEFAULT_ENGINE_URL
 }
 
+function isCuratedProofInspectionPath(joined: string) {
+  return /^ci\/decisions\/[^/]+\/(trace|replay)$/.test(joined)
+}
+
 function shouldUseInternalKey(path: string[]) {
   const joined = path.join('/')
   return (
     joined === 'methodology' ||
     joined.startsWith('methodology/') ||
     joined.startsWith('disclosure/') ||
-    joined.startsWith('system/')
+    joined.startsWith('system/') ||
+    isCuratedProofInspectionPath(joined)
   )
 }
 

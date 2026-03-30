@@ -66,6 +66,38 @@ async function fetchJson(pathname, headers = {}) {
   }
 }
 
+async function fetchDashboardProxyJson(pathname) {
+  if (!dashboardUrl) {
+    throw new Error('Dashboard signer bridge is not configured.')
+  }
+
+  const proxiedPath = pathname.replace(/^\/api\/v1\//, '')
+  const response = await fetch(`${dashboardUrl}/api/ecobe/${proxiedPath}`, {
+    headers: {
+      Accept: 'application/json',
+    },
+  })
+
+  const parsed = await parseJsonResponse(response)
+  if (!parsed.response.ok) {
+    const error = new Error(
+      `dashboard proxy ${pathname} returned ${parsed.response.status}: ${
+        typeof parsed.json === 'string' ? parsed.json : JSON.stringify(parsed.json)
+      }`
+    )
+    error.status = parsed.response.status
+    error.payload = parsed.json
+    throw error
+  }
+
+  assert(
+    parsed.response.headers.get('x-ecobe-proxy-mode') === 'internal',
+    `dashboard proxy ${pathname} missing internal proxy marker`
+  )
+
+  return parsed
+}
+
 async function waitForWarmCoverage() {
   const attempts = 7
   const delayMs = 5_000
@@ -94,6 +126,9 @@ async function waitForDecisionArtifact(pathname, headers = {}, retryStatuses = [
     try {
       return await fetchJson(pathname, headers)
     } catch (error) {
+      if (error?.status === 401 && dashboardUrl) {
+        return fetchDashboardProxyJson(pathname)
+      }
       lastError = error
       if (!retryStatuses.includes(error?.status) || attempt === attempts) {
         throw error
