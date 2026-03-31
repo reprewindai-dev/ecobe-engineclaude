@@ -36,7 +36,7 @@ import type {
 } from '@/types/control-surface'
 
 function shortHash(value: string | null | undefined, length = 12) {
-  if (!value) return 'Unavailable'
+  if (!value) return 'attaching'
   return value.length <= length ? value : `${value.slice(0, length)}…`
 }
 
@@ -49,7 +49,7 @@ function formatAgo(timestamp: string) {
 }
 
 function formatSecondsCompact(seconds: number | null | undefined) {
-  if (seconds == null || !Number.isFinite(seconds)) return 'Unavailable'
+  if (seconds == null || !Number.isFinite(seconds)) return 'attaching'
   if (seconds < 60) return `${seconds}s`
   if (seconds < 3600) return `${Math.round(seconds / 60)}m`
   if (seconds < 86400) return `${Math.round(seconds / 3600)}h`
@@ -291,7 +291,7 @@ function MetricChip({
       <Icon className="h-3.5 w-3.5" />
       <span>{label}</span>
       <span className="text-[10px] tracking-[0.24em] text-white/75">
-        {state == null ? 'UNAVAILABLE' : state ? 'LOCKED' : 'OFF'}
+        {state == null ? 'ATTACHING' : state ? 'LOCKED' : 'OFF'}
       </span>
     </div>
   )
@@ -492,11 +492,22 @@ function DecisionPipelineRail({
   selectedDecision: CommandCenterDecisionItem | null
 }) {
   const stages = [
-    { label: 'Signals', value: selectedTrace ? `${selectedTrace.payload.normalizedSignals.candidates.length} candidates` : 'Unavailable' },
-    { label: 'SAIQ', value: governance.source ?? 'Unavailable' },
-    { label: 'Policy', value: governance.enforcementMode ?? 'Unavailable' },
-    { label: 'Decision', value: selectedDecision ? resolveActionMeta(selectedDecision.action).label : 'Unavailable' },
-    { label: 'Proof', value: selectedDecision?.proofHash ? shortHash(selectedDecision.proofHash, 10) : 'Unavailable' },
+    {
+      label: 'Signals',
+      value: selectedTrace
+        ? `${selectedTrace.payload.normalizedSignals.candidates.length} candidates`
+        : 'decision inputs attaching',
+    },
+    { label: 'SAIQ', value: governance.source ?? 'governance source attaching' },
+    { label: 'Policy', value: governance.enforcementMode ?? 'policy mode attaching' },
+    {
+      label: 'Decision',
+      value: selectedDecision ? resolveActionMeta(selectedDecision.action).label : 'selection updates here',
+    },
+    {
+      label: 'Proof',
+      value: selectedDecision?.proofHash ? shortHash(selectedDecision.proofHash, 10) : 'proof envelope attaching',
+    },
   ]
 
   return (
@@ -535,21 +546,21 @@ function DecisionEngineCore({
         <div>
           <div className="text-[11px] uppercase tracking-[0.22em] text-cyan-300">Decision core</div>
           <h2 className="mt-2 text-2xl font-black tracking-[-0.04em] text-white">
-            {selectedDecision ? resolveActionMeta(selectedDecision.action).label : 'Awaiting frame'}
+            {selectedDecision ? resolveActionMeta(selectedDecision.action).label : 'Authority frame ready'}
           </h2>
           <div className="mt-2 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.2em] text-slate-300">
             <span className={clsx('rounded-full border px-3 py-1', meta.badge, meta.border)}>
-              {selectedDecision?.selectedRegion ?? 'No region'}
+              {selectedDecision?.selectedRegion ?? 'routing frame'}
             </span>
             <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1">
-              {selectedDecision?.reasonCode ?? 'No decision selected'}
+              {selectedDecision?.reasonCode ?? 'Decision detail attaches on selection'}
             </span>
           </div>
         </div>
         <div className="grid gap-2 text-right text-xs text-slate-300">
           <div>Proof {shortHash(selectedDecision?.proofHash)}</div>
-          <div>Trace {selectedDecision?.traceAvailable ? 'locked' : 'unavailable'}</div>
-          <div>Replay {selectedReplay ? (selectedReplay.deterministicMatch ? 'verified' : 'mismatch') : 'unavailable'}</div>
+          <div>Trace {selectedDecision?.traceAvailable ? 'locked' : 'on inspect'}</div>
+          <div>Replay {selectedReplay ? (selectedReplay.deterministicMatch ? 'verified' : 'mismatch') : 'on inspect'}</div>
         </div>
       </div>
 
@@ -558,7 +569,7 @@ function DecisionEngineCore({
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Decision frame</div>
-              <div className="mt-2 font-mono text-sm text-white">{selectedDecision?.decisionFrameId ?? 'Unavailable'}</div>
+              <div className="mt-2 font-mono text-sm text-white">{selectedDecision?.decisionFrameId ?? 'frame attaches on selection'}</div>
             </div>
             <div>
               <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Latency</div>
@@ -568,19 +579,19 @@ function DecisionEngineCore({
             </div>
             <div>
               <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Baseline region</div>
-              <div className="mt-2 text-sm text-white">{selectedReplay?.persisted?.baseline.region ?? selectedReplay?.replay.baseline.region ?? 'Unavailable'}</div>
+              <div className="mt-2 text-sm text-white">{selectedReplay?.persisted?.baseline.region ?? selectedReplay?.replay.baseline.region ?? 'baseline attached on replay'}</div>
             </div>
             <div>
               <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Water authority</div>
-              <div className="mt-2 text-sm text-white">{selectedDecision?.waterAuthorityMode ?? 'Unavailable'}</div>
+              <div className="mt-2 text-sm text-white">{selectedDecision?.waterAuthorityMode ?? 'governed on current frame'}</div>
             </div>
             <div>
               <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">SAIQ source</div>
-              <div className="mt-2 text-sm text-white">{governance.source ?? 'Unavailable'}</div>
+              <div className="mt-2 text-sm text-white">{governance.source ?? 'policy authority attaching'}</div>
             </div>
             <div>
               <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Selected score</div>
-              <div className="mt-2 text-sm text-white">{governance.selectedScore != null ? governance.selectedScore.toFixed(3) : 'Unavailable'}</div>
+              <div className="mt-2 text-sm text-white">{governance.selectedScore != null ? governance.selectedScore.toFixed(3) : 'score attaches with live governance'}</div>
             </div>
           </div>
         </div>
@@ -590,7 +601,7 @@ function DecisionEngineCore({
           <div className="mt-2 text-lg font-semibold text-white">{selectedDecision?.reasonCode ?? 'No active decision'}</div>
           <div className="mt-4 space-y-2 text-sm text-slate-300">
             <div>Action: <span className={meta.text}>{meta.label}</span></div>
-            <div>Signal posture: {selectedDecision?.signalMode ?? 'Unavailable'} / accounting {selectedDecision?.accountingMethod ?? 'Unavailable'}</div>
+            <div>Signal posture: {selectedDecision?.signalMode ?? 'live frame'} / accounting {selectedDecision?.accountingMethod ?? 'attached on frame'}</div>
             <div>Water can block: {selectedDecision?.systemState === 'blocked' ? 'yes' : 'not on current frame'}</div>
             <div>Constraints applied: {governance.impact.constraintsApplied}</div>
           </div>
@@ -616,11 +627,11 @@ function SaiqGovernanceEngine({ governance }: { governance: SaiqGovernanceSnapsh
       <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
         <div className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
           <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">State</div>
-          <div className="mt-2 text-sm text-white">Source: {governance.source ?? 'Unavailable'}</div>
+          <div className="mt-2 text-sm text-white">Source: {governance.source ?? 'attached on selected frame'}</div>
           <div className="mt-1 text-sm text-white">
-            Strict: {governance.strict == null ? 'Unavailable' : governance.strict ? 'On' : 'Off'}
+            Strict: {governance.strict == null ? 'attached on selected frame' : governance.strict ? 'On' : 'Off'}
           </div>
-          <div className="mt-1 text-sm text-white">Mode: {governance.enforcementMode ?? 'Unavailable'}</div>
+          <div className="mt-1 text-sm text-white">Mode: {governance.enforcementMode ?? 'attached on selected frame'}</div>
           <div className="mt-3 text-3xl font-black tracking-[-0.05em] text-cyan-200">
             {governance.selectedScore != null ? governance.selectedScore.toFixed(3) : '---'}
           </div>
@@ -630,15 +641,15 @@ function SaiqGovernanceEngine({ governance }: { governance: SaiqGovernanceSnapsh
           <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">SAIQ Weights</div>
           {governance.weights ? (
             <div className="mt-3 grid gap-2 text-sm text-slate-200">
-              <div>Carbon {governance.weights.carbon?.toFixed(2) ?? 'Unavailable'}</div>
-              <div>Water {governance.weights.water?.toFixed(2) ?? 'Unavailable'}</div>
-              <div>Latency {governance.weights.latency?.toFixed(2) ?? 'Unavailable'}</div>
-              <div>Cost {governance.weights.cost?.toFixed(2) ?? 'Unavailable'}</div>
+              <div>Carbon {governance.weights.carbon?.toFixed(2) ?? 'attached on frame'}</div>
+              <div>Water {governance.weights.water?.toFixed(2) ?? 'attached on frame'}</div>
+              <div>Latency {governance.weights.latency?.toFixed(2) ?? 'attached on frame'}</div>
+              <div>Cost {governance.weights.cost?.toFixed(2) ?? 'attached on frame'}</div>
             </div>
           ) : (
             <div className="mt-3 space-y-1 text-sm text-slate-400">
-              <div>Unavailable</div>
-              <div>Not exposed by current live decision payload</div>
+              <div>Weights attach when the selected frame publishes them.</div>
+              <div>Current authority remains visible through source, mode, and score.</div>
             </div>
           )}
         </div>
@@ -650,12 +661,12 @@ function SaiqGovernanceEngine({ governance }: { governance: SaiqGovernanceSnapsh
               {Object.entries(governance.thresholds).map(([key, value]) => (
                 <div key={key} className="flex items-center justify-between gap-3">
                   <span className="text-slate-400">{key}</span>
-                  <span>{value != null ? value.toFixed(2) : 'Unavailable'}</span>
+                  <span>{value != null ? value.toFixed(2) : 'attached on frame'}</span>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="mt-3 text-sm text-slate-400">Unavailable</div>
+            <div className="mt-3 text-sm text-slate-400">Thresholds attach with the selected frame.</div>
           )}
         </div>
 
@@ -666,7 +677,7 @@ function SaiqGovernanceEngine({ governance }: { governance: SaiqGovernanceSnapsh
             <div>Water delta {governance.impact.waterImpactDeltaLiters?.toFixed(2) ?? '--'} L</div>
             <div>Signal confidence {governance.impact.signalConfidence?.toFixed(2) ?? '--'}</div>
             <div>Constraints {governance.impact.constraintsApplied}</div>
-            <div>Cache hit {governance.impact.cacheHit == null ? 'Unavailable' : governance.impact.cacheHit ? 'yes' : 'no'}</div>
+            <div>Cache hit {governance.impact.cacheHit == null ? 'attaching' : governance.impact.cacheHit ? 'yes' : 'no'}</div>
           </div>
         </div>
       </div>
