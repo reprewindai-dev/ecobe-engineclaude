@@ -38,5 +38,7 @@ Generated from live canonical production on `2026-03-31`.
 ## Source files
 
 - public summary JSON: [summary.json](/Users/antho/.windsurf/ecobe-engineclaude-evidence/docs/public/evidence/summary.json)
+- design-partner evidence summary: [design-partner-evidence-summary.md](/Users/antho/.windsurf/ecobe-engineclaude-evidence/docs/public/evidence/design-partner-evidence-summary.md)
+- trust brief: [trust-brief.md](/Users/antho/.windsurf/ecobe-engineclaude-evidence/docs/public/evidence/trust-brief.md)
 
 Raw proof artifacts remain private and are not part of the public package.
