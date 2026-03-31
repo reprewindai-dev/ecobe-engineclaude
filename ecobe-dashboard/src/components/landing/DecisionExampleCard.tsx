@@ -27,10 +27,10 @@ export function DecisionExampleCard({
     replay: string
     provenance: string
   }
-}) {
+  }) {
   const action = decision
     ? formatAction(isRouteResponse(decision) ? decision.decision : decision.action)
-    : formatAction('run_now')
+    : null
   const routeDecision = decision && isRouteResponse(decision) ? decision : null
   const summaryDecision = routeDecision || !decision ? null : (decision as ControlSurfaceDecisionSummary)
 
@@ -65,11 +65,15 @@ export function DecisionExampleCard({
             : 'The proof card stays visible even before the current live frame resolves. Execution authority, proof references, and governance context remain part of the public surface instead of hiding behind a loading shell.'}
         </p>
       </div>
-      <div className={`rounded-[28px] border bg-slate-950/70 p-5 ${action.border} ${action.glow}`}>
+      <div
+        className={`rounded-[28px] border bg-slate-950/70 p-5 ${action?.border ?? 'border-white/10'} ${action?.glow ?? ''}`}
+      >
         <div className="flex items-center justify-between">
           <span className="text-xs uppercase tracking-[0.25em] text-slate-500">decision card</span>
-          <span className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${action.badge}`}>
-            {action.label}
+          <span
+            className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] ${action?.badge ?? 'border border-white/8 bg-white/[0.03] text-slate-300'}`}
+          >
+            {action?.label ?? 'Shell Ready'}
           </span>
         </div>
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -85,7 +89,7 @@ export function DecisionExampleCard({
             <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">selected</div>
             <div className="mt-2 text-xl font-bold text-white">{selectedRegion}</div>
             <div className="mt-4 space-y-2 text-sm text-slate-300">
-              <div>{selectedCarbon != null ? `${selectedCarbon} gCO2/kWh` : 'selected region pending'}</div>
+              <div>{selectedCarbon != null ? `${selectedCarbon} gCO2/kWh` : 'selected carbon pending'}</div>
               <div>{selectedWater != null ? `${selectedWater.toFixed(2)} L estimated` : 'selected water pending'}</div>
             </div>
           </div>

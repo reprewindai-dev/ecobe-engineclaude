@@ -44,7 +44,11 @@ export default async function AssurancePage() {
         <article className="rounded-[28px] border border-white/10 bg-white/[0.03] p-6">
           <div className="text-[11px] uppercase tracking-[0.22em] text-cyan-300">Verification Posture</div>
           <div className="mt-3 text-4xl font-black tracking-[-0.05em] text-white">
-            {assuranceReady ? 'Yes' : 'No'}
+            {!snapshot.providers.available || !snapshot.traceLedger.available
+              ? 'Pending'
+              : assuranceReady
+                ? 'Yes'
+                : 'No'}
           </div>
           <p className="mt-3 text-sm leading-7 text-slate-300">
             Derived from live provenance verification plus trace-backed proof availability.

@@ -83,12 +83,18 @@ export default function LandingPage() {
                 <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
                   live decision
                 </div>
-                <div className="mt-2 text-lg font-semibold text-white">{decision.workloadLabel}</div>
+                <div className="mt-2 text-lg font-semibold text-white">
+                  {decision.workloadLabel ?? 'Live decision frame hydrating'}
+                </div>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-300">
                   <span className="rounded-full bg-white/[0.04] px-2 py-1">{decision.action}</span>
-                  <span className="rounded-full bg-white/[0.04] px-2 py-1">{decision.selectedRegion}</span>
                   <span className="rounded-full bg-white/[0.04] px-2 py-1">
-                    {decision.carbonReductionPct.toFixed(1)}% carbon delta
+                    {decision.selectedRegion ?? 'region pending'}
+                  </span>
+                  <span className="rounded-full bg-white/[0.04] px-2 py-1">
+                    {decision.carbonReductionPct != null
+                      ? `${decision.carbonReductionPct.toFixed(1)}% carbon delta`
+                      : 'carbon delta pending'}
                   </span>
                 </div>
               </div>

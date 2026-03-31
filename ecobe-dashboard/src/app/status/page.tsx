@@ -35,7 +35,11 @@ export default async function StatusPage() {
         <article className="rounded-[28px] border border-white/10 bg-white/[0.03] p-6">
           <div className="text-[11px] uppercase tracking-[0.22em] text-cyan-300">System</div>
           <div className="mt-3 text-4xl font-black tracking-[-0.05em] text-white">
-            {snapshot.latency.withinBudget.total ? 'Healthy' : 'Watch'}
+            {snapshot.latency.available
+              ? snapshot.latency.withinBudget.total
+                ? 'Healthy'
+                : 'Watch'
+              : 'Pending'}
           </div>
           <p className="mt-3 text-sm leading-7 text-slate-300">
             Fast operational read across engine latency and current control-plane posture.
@@ -106,7 +110,11 @@ export default async function StatusPage() {
               <div className="flex items-center justify-between gap-3">
                 <span>proof attached</span>
                 <span className="font-semibold text-white">
-                  {snapshot.traceLedger.proofAvailable ? 'yes' : 'no'}
+                  {!snapshot.traceLedger.available
+                    ? 'unavailable'
+                    : snapshot.traceLedger.proofAvailable
+                      ? 'yes'
+                      : 'no'}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-3">
