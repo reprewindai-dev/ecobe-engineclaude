@@ -110,6 +110,25 @@ function getChangedFiles() {
   return Array.from(new Set(candidates.map(normalizePath).filter(Boolean)))
 }
 
+function getTrackedGitlinks() {
+  try {
+    const output = execFileSync('git', ['ls-files', '--stage'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    })
+
+    return output
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => line.trim().split(/\s+/))
+      .filter((parts) => parts[0] === '160000')
+      .map((parts) => normalizePath(parts.slice(3).join(' ')))
+      .filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
 function isAllowedPath(filePath) {
   if (blockedPrefixes.some((prefix) => filePath.startsWith(prefix))) return false
   return allowlistPrefixes.some((prefix) => filePath.startsWith(prefix))
@@ -170,6 +189,7 @@ const changedFiles = getChangedFiles()
 const failures = []
 
 const canonicalRepoFiles = repoFiles.filter((file) => !blockedPrefixes.some((prefix) => file.startsWith(prefix)))
+const trackedGitlinks = getTrackedGitlinks()
 
 const nestedWorkflowFiles = canonicalRepoFiles.filter(hasNestedWorkflow)
 if (nestedWorkflowFiles.length > 0) {
@@ -184,6 +204,20 @@ if (looseArtifacts.length > 0) {
 const disallowedChanged = changedFiles.filter((file) => !isAllowedPath(file))
 if (disallowedChanged.length > 0) {
   failures.push(`non-allowlisted files are present in the freeze branch diff:\n${disallowedChanged.map((file) => ` - ${file}`).join('\n')}`)
+}
+
+const disallowedGitlinks = trackedGitlinks.filter(
+  (file) =>
+    file.startsWith('.claude/worktrees/') ||
+    blockedPrefixes.some((prefix) => file.startsWith(prefix)) ||
+    !isAllowedPath(file)
+)
+if (disallowedGitlinks.length > 0) {
+  failures.push(
+    `tracked gitlinks or nested worktree artifacts are present:\n${disallowedGitlinks
+      .map((file) => ` - ${file}`)
+      .join('\n')}`
+  )
 }
 
 failures.push(...assertDesignPartnerSchema())
