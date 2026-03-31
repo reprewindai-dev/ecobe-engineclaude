@@ -29,17 +29,17 @@ export class GridStatusClient {
     return !!this.apiKey
   }
 
-  private async logSuccess() {
+  private async logSuccess(latencyMs?: number) {
     try {
-      await recordIntegrationSuccess('GRIDSTATUS')
+      await recordIntegrationSuccess('GRIDSTATUS', { latencyMs })
     } catch (error) {
       console.warn('Failed to record GridStatus success metric:', error)
     }
   }
 
-  private async logFailure(message: string) {
+  private async logFailure(message: string, latencyMs?: number) {
     try {
-      await recordIntegrationFailure('GRIDSTATUS', message)
+      await recordIntegrationFailure('GRIDSTATUS', message, { latencyMs })
     } catch (error) {
       console.warn('Failed to record GridStatus failure metric:', error)
     }
@@ -59,6 +59,7 @@ export class GridStatusClient {
       return []
     }
 
+    const startedAt = Date.now()
     try {
       const params: Record<string, string> = {
         api_key: this.apiKey,
@@ -80,7 +81,7 @@ export class GridStatusClient {
       )
 
       const records = response.data.data || []
-      await this.logSuccess()
+      await this.logSuccess(Date.now() - startedAt)
 
       // Map each GridStatus record → 3 EIABalanceData records (D, NG, TI)
       const result: EIABalanceData[] = []
@@ -124,7 +125,7 @@ export class GridStatusClient {
       return result
     } catch (error: any) {
       console.error(`GridStatus: Failed to fetch regional data for ${balancingAuthority}:`, error.message)
-      await this.logFailure(error.message ?? 'Failed to fetch regional data')
+      await this.logFailure(error.message ?? 'Failed to fetch regional data', Date.now() - startedAt)
       return []
     }
   }
@@ -143,6 +144,7 @@ export class GridStatusClient {
       return []
     }
 
+    const startedAt = Date.now()
     try {
       const baseParams: Record<string, string> = {
         api_key: this.apiKey,
@@ -171,7 +173,7 @@ export class GridStatusClient {
 
       const fromRecords = fromResponse.data.data || []
       const toRecords = toResponse.data.data || []
-      await this.logSuccess()
+      await this.logSuccess(Date.now() - startedAt)
 
       // Combine and deduplicate by interface_id + timestamp
       const seen = new Set<string>()
@@ -197,7 +199,7 @@ export class GridStatusClient {
       }))
     } catch (error: any) {
       console.error(`GridStatus: Failed to fetch interchange data for ${balancingAuthority}:`, error.message)
-      await this.logFailure(error.message ?? 'Failed to fetch interchange data')
+      await this.logFailure(error.message ?? 'Failed to fetch interchange data', Date.now() - startedAt)
       return []
     }
   }
@@ -216,6 +218,7 @@ export class GridStatusClient {
       return []
     }
 
+    const startedAt = Date.now()
     try {
       const params: Record<string, string> = {
         api_key: this.apiKey,
@@ -235,11 +238,11 @@ export class GridStatusClient {
         )
       )
 
-      await this.logSuccess()
+      await this.logSuccess(Date.now() - startedAt)
       return response.data.data || []
     } catch (error: any) {
       console.error(`GridStatus: Failed to fetch fuel mix data for ${balancingAuthority}:`, error.message)
-      await this.logFailure(error.message ?? 'Failed to fetch fuel mix data')
+      await this.logFailure(error.message ?? 'Failed to fetch fuel mix data', Date.now() - startedAt)
       return []
     }
   }

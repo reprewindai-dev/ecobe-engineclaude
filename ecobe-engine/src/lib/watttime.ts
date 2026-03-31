@@ -69,6 +69,7 @@ export class WattTimeClient {
       return this.token
     }
 
+    const startedAt = Date.now()
     try {
       const response = await wattTimeResilience.execute('authenticate', () =>
         axios.get<WattTimeAuthResponse>(
@@ -87,26 +88,26 @@ export class WattTimeClient {
       // Token expires in 25 minutes (reduced from 30 to avoid edge cases)
       this.tokenExpiry = new Date(Date.now() + 25 * 60 * 1000)
 
-      await this.logSuccess()
+      await this.logSuccess(Date.now() - startedAt)
       return this.token ?? null
     } catch (error: any) {
       console.error('WattTime authentication failed:', error.message)
-      await this.logFailure(error.message ?? 'Authentication failed')
+      await this.logFailure(error.message ?? 'Authentication failed', Date.now() - startedAt)
       return null
     }
   }
 
-  private async logSuccess() {
+  private async logSuccess(latencyMs?: number) {
     try {
-      await recordIntegrationSuccess('WATTTIME')
+      await recordIntegrationSuccess('WATTTIME', { latencyMs })
     } catch (error) {
       console.warn('Failed to record WattTime success metric:', error)
     }
   }
 
-  private async logFailure(message: string) {
+  private async logFailure(message: string, latencyMs?: number) {
     try {
-      await recordIntegrationFailure('WATTTIME', message)
+      await recordIntegrationFailure('WATTTIME', message, { latencyMs })
     } catch (error) {
       console.warn('Failed to record WattTime failure metric:', error)
     }
@@ -118,6 +119,7 @@ export class WattTimeClient {
       return null
     }
 
+    const startedAt = Date.now()
     try {
       const response = await wattTimeResilience.execute('getCurrentMOER', () =>
         axios.get<{ data: Array<{ point_time: string; value: number }>; meta: { region: string; signal_type: string; units: string; data_point_period_seconds: number } }>(
@@ -150,11 +152,11 @@ export class WattTimeClient {
         frequency: `${response.data.meta.data_point_period_seconds}s`,
       }
 
-      await this.logSuccess()
+      await this.logSuccess(Date.now() - startedAt)
       return result
     } catch (error: any) {
       console.error(`Failed to fetch MOER for ${balancingAuthority}:`, error.message)
-      await this.logFailure(error.message ?? 'Failed to fetch MOER')
+      await this.logFailure(error.message ?? 'Failed to fetch MOER', Date.now() - startedAt)
       return null
     }
   }
@@ -169,6 +171,7 @@ export class WattTimeClient {
       return []
     }
 
+    const startedAt = Date.now()
     try {
       const params: any = {
         region: balancingAuthority,
@@ -203,11 +206,11 @@ export class WattTimeClient {
         version: modelVersion,
       }))
 
-      await this.logSuccess()
+      await this.logSuccess(Date.now() - startedAt)
       return forecasts
     } catch (error: any) {
       console.error(`Failed to fetch MOER forecast for ${balancingAuthority}:`, error.message)
-      await this.logFailure(error.message ?? 'Failed to fetch MOER forecast')
+      await this.logFailure(error.message ?? 'Failed to fetch MOER forecast', Date.now() - startedAt)
       return []
     }
   }

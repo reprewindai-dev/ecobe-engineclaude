@@ -1,4 +1,7 @@
+import crypto from 'crypto'
+
 const DEFAULT_ENGINE_URL = 'https://ecobe-engineclaude-production.up.railway.app'
+const DECISION_SIGNATURE_PATHS = new Set(['/ci/route', '/ci/authorize', '/ci/carbon-route'])
 
 export function getEngineBaseUrl() {
   return (
@@ -15,6 +18,20 @@ function getInternalApiKey() {
   return process.env.ECOBE_INTERNAL_API_KEY || process.env.CO2ROUTER_INTERNAL_API_KEY || null
 }
 
+function getDecisionApiSignatureSecret() {
+  return (
+    process.env.DECISION_API_SIGNATURE_SECRET ||
+    process.env.CO2ROUTER_DECISION_API_SIGNATURE_SECRET ||
+    null
+  )
+}
+
+function signDecisionBody(body: string) {
+  const secret = getDecisionApiSignatureSecret()
+  if (!secret) return null
+  return crypto.createHmac('sha256', secret).update(body).digest('hex')
+}
+
 export async function fetchEngineJson<T>(
   path: string,
   init: RequestInit = {},
@@ -22,6 +39,18 @@ export async function fetchEngineJson<T>(
 ) {
   const headers = new Headers(init.headers)
   headers.set('content-type', 'application/json')
+  const requestBody = typeof init.body === 'string' ? init.body : null
+  const shouldSignDecisionBody =
+    requestBody !== null &&
+    DECISION_SIGNATURE_PATHS.has(path) &&
+    !headers.has('x-ecobe-signature')
+
+  if (shouldSignDecisionBody) {
+    const signature = signDecisionBody(requestBody)
+    if (signature) {
+      headers.set('x-ecobe-signature', `v1=${signature}`)
+    }
+  }
 
   if (options.internal) {
     const token = getInternalApiKey()

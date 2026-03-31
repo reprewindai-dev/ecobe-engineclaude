@@ -120,6 +120,25 @@ export interface WaterArtifactMetadata {
   suppliers: string[]
 }
 
+export interface WaterArtifactHealthSnapshot {
+  healthy: boolean
+  bundleHealthy: boolean
+  manifestHealthy: boolean
+  schemaCompatible: boolean
+  datasetHashesPresent: boolean
+  checks: {
+    bundlePresent: boolean
+    manifestPresent: boolean
+    schemaCompatible: boolean
+    regionCount: number
+    sourceCount: number
+    datasetHashesPresent: boolean
+  }
+  errors: string[]
+  manifestDatasets: WaterManifestDataset[]
+  artifactMetadata: WaterArtifactMetadata
+}
+
 export interface WaterProviderStatus {
   provider: string
   authorityRole: 'baseline' | 'overlay' | 'facility'

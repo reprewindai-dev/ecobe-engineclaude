@@ -40,6 +40,9 @@ const envSchema = z.object({
   // Grid Signal Cache
   GRID_SIGNAL_CACHE_TTL: z.string().default('900'),
   GRID_FEATURE_CACHE_TTL: z.string().default('3600'),
+  GRID_SIGNAL_L1_CACHE_TTL_MS: z.string().default('5000'),
+  ROUTING_SIGNAL_WARM_LOOP_INTERVAL_MS: z.string().default('15000'),
+  ROUTING_SIGNAL_REQUIRED_REGIONS: z.string().optional(),
 
   // Ingestion
   EIA_INGESTION_SCHEDULE: z.string().default('0 */15 * * * *'),
@@ -151,6 +154,15 @@ export const env = {
   ...parsed.data,
   DEFAULT_MAX_CARBON_G_PER_KWH: parseInt(parsed.data.DEFAULT_MAX_CARBON_G_PER_KWH),
   PORT: parseInt(parsed.data.PORT),
+  GRID_SIGNAL_CACHE_TTL: parseInt(parsed.data.GRID_SIGNAL_CACHE_TTL),
+  GRID_FEATURE_CACHE_TTL: parseInt(parsed.data.GRID_FEATURE_CACHE_TTL),
+  GRID_SIGNAL_L1_CACHE_TTL_MS: parseInt(parsed.data.GRID_SIGNAL_L1_CACHE_TTL_MS),
+  ROUTING_SIGNAL_WARM_LOOP_INTERVAL_MS: parseInt(parsed.data.ROUTING_SIGNAL_WARM_LOOP_INTERVAL_MS),
+  ROUTING_SIGNAL_REQUIRED_REGIONS: parsed.data.ROUTING_SIGNAL_REQUIRED_REGIONS
+    ? parsed.data.ROUTING_SIGNAL_REQUIRED_REGIONS.split(',')
+        .map((region) => region.trim())
+        .filter(Boolean)
+    : [],
   UI_ENABLED:
     parsed.data.UI_ENABLED !== undefined
       ? parsed.data.UI_ENABLED === 'true'

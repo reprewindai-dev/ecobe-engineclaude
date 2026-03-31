@@ -1,0 +1,73 @@
+name: Verify Live Dashboard
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - codex/**
+    paths:
+      - '.github/**'
+      - 'ecobe-engine/**'
+      - 'ecobe-dashboard/**'
+      - 'docs/public/**'
+      - 'docs/private/design-partner-program/**'
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - '.github/**'
+      - 'ecobe-engine/**'
+      - 'ecobe-dashboard/**'
+      - 'docs/public/**'
+      - 'docs/private/design-partner-program/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-live-dashboard-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEFAULT_DASHBOARD_URL: https://co2-router-dashboard-production.up.railway.app
+  DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
+
+jobs:
+  verify-live-dashboard:
+    name: Verify Live Dashboard
+    runs-on: [self-hosted, linux, x64, do, ecobe, release]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify live dashboard routes and gates
+        run: node .github/scripts/verify-live-dashboard.mjs
+
+  failure-alert:
+    name: Dashboard Verification Failure Alert
+    runs-on: [self-hosted, linux, x64, do, ecobe, general]
+    needs: verify-live-dashboard
+    if: ${{ always() && needs.verify-live-dashboard.result == 'failure' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Send failure alert
+        run: node .github/scripts/send-resend-alert.mjs
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_ALERTS: ${{ secrets.RESEND_FROM_ALERTS }}
+          ALERT_INBOX_EMAIL: ${{ secrets.ALERT_INBOX_EMAIL }}
+          ALERT_SUBJECT: CO2 Router dashboard live verification failure
+          ALERT_SUMMARY: Dashboard live verification or fast-mode gate failed.

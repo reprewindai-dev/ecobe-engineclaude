@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express'
+import { getCacheHealthStatus } from '../lib/cache-warmer'
 import { redis } from '../lib/redis'
 import { prisma } from '../lib/db'
 import { GridSignalCache } from '../lib/grid-signals/grid-signal-cache'
@@ -14,6 +15,7 @@ let workerStatus: WorkerRegistry = {
   eiaIngestion: { running: false, lastRun: null as string | null, nextRun: null as string | null },
   intelligenceJobs: { running: false, lastRun: null as string | null, nextRun: null as string | null },
   learningLoop: { running: false, lastRun: null as string | null, nextRun: null as string | null },
+  routingSignalWarmLoop: { running: false, lastRun: null as string | null, nextRun: null as string | null },
   runtimeSupervisor: { running: false, lastRun: null as string | null, nextRun: null as string | null },
   decisionEventDispatcher: { running: false, lastRun: null as string | null, nextRun: null as string | null },
 }
@@ -68,8 +70,10 @@ router.get('/status', async (req: Request, res: Response) => {
 
     // Get cache statistics
     let cacheStats = null
+    let cacheHealth = null
     try {
       cacheStats = await GridSignalCache.getCacheStats()
+      cacheHealth = await getCacheHealthStatus()
     } catch (error) {
       console.warn('Failed to get cache stats:', error)
     }
@@ -128,6 +132,11 @@ router.get('/status', async (req: Request, res: Response) => {
       cache: cacheStats ? {
         totalKeys: cacheStats.totalKeys,
         keyTypes: cacheStats.keyTypes,
+        l1: cacheStats.l1,
+        requiredWarmCoveragePct: cacheHealth?.requiredWarmCoveragePct ?? null,
+        requiredLkgCoveragePct: cacheHealth?.requiredLkgCoveragePct ?? null,
+        requiredRegions: cacheHealth?.requiredRegions ?? [],
+        healthy: cacheHealth?.isHealthy ?? false,
         regionCount: Object.keys(cacheStats.regions).length,
         topRegions: Object.entries(cacheStats.regions)
           .sort(([, a], [, b]) => (b as number) - (a as number))
@@ -176,6 +185,7 @@ router.get('/workers', (req: Request, res: Response) => {
 router.get('/cache', async (req: Request, res: Response) => {
   try {
     const cacheStats = await GridSignalCache.getCacheStats()
+    const cacheHealth = await getCacheHealthStatus()
 
     res.json({
       timestamp: new Date().toISOString(),
@@ -183,7 +193,12 @@ router.get('/cache', async (req: Request, res: Response) => {
         totalKeys: cacheStats.totalKeys,
         keyTypes: cacheStats.keyTypes,
         regions: cacheStats.regions,
-        regionCount: Object.keys(cacheStats.regions).length
+        l1: cacheStats.l1,
+        regionCount: Object.keys(cacheStats.regions).length,
+        requiredWarmCoveragePct: cacheHealth.requiredWarmCoveragePct,
+        requiredLkgCoveragePct: cacheHealth.requiredLkgCoveragePct,
+        requiredRegions: cacheHealth.requiredRegions,
+        healthy: cacheHealth.isHealthy,
       }
     })
   } catch (error) {

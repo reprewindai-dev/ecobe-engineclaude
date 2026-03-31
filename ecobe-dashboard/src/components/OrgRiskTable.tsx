@@ -1,32 +1,10 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
+import { format } from 'date-fns'
+import { Loader2, TimerReset, Users } from 'lucide-react'
+
 import { ecobeApi } from '@/lib/api'
-import { Loader2, Users } from 'lucide-react'
-import type { DekesHandoffEventType, HandoffClassification } from '@/types'
-
-const BUDGET_STATUS_STYLES: Record<'ok' | 'warning' | 'exceeded', string> = {
-  ok:       'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30',
-  warning:  'bg-yellow-500/15 text-yellow-400 border border-yellow-500/30',
-  exceeded: 'bg-red-500/15 text-red-400 border border-red-500/30',
-}
-
-const CLASSIFICATION_STYLES: Record<HandoffClassification, string> = {
-  opportunity:   'text-emerald-400',
-  risk:          'text-red-400',
-  informational: 'text-sky-400',
-  no_action:     'text-slate-500',
-}
-
-const EVENT_LABELS: Partial<Record<DekesHandoffEventType, string>> = {
-  BUDGET_WARNING:           'Budget Warning',
-  BUDGET_EXCEEDED:          'Budget Exceeded',
-  POLICY_DELAY:             'Policy Delay',
-  POLICY_BLOCK:             'Policy Block',
-  HIGH_CARBON_PATTERN:      'High Carbon',
-  LOW_CONFIDENCE_REGION:    'Low Confidence',
-  CLEAN_WINDOW_OPPORTUNITY: 'Clean Window',
-}
 
 export function OrgRiskTable() {
   const { data, isLoading, isError } = useQuery({
@@ -36,134 +14,95 @@ export function OrgRiskTable() {
     retry: 1,
   })
 
-  // Sort by totalHandoffs desc, then by budget severity
-  const orgRisks = [...(data?.orgRisks ?? [])].sort((a, b) => {
-    const budgetOrder = { exceeded: 0, warning: 1, ok: 2 }
-    if (budgetOrder[a.budgetStatus] !== budgetOrder[b.budgetStatus])
-      return budgetOrder[a.budgetStatus] - budgetOrder[b.budgetStatus]
-    return b.totalHandoffs - a.totalHandoffs
-  })
+  const trend = data?.hourlyTrend ?? []
 
   return (
-    <div className="bg-slate-900/50 rounded-xl border border-slate-800 p-6 space-y-5">
+    <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-6 space-y-5">
       <div className="flex items-center gap-2">
-        <Users className="w-5 h-5 text-emerald-400" />
+        <Users className="h-5 w-5 text-emerald-400" />
         <div>
-          <h3 className="text-lg font-semibold text-white">Org Risk &amp; Opportunity</h3>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Organizations ranked by carbon-risk and DEKES activation signals
+          <h3 className="text-lg font-semibold text-white">DEKES Operating Rhythm</h3>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Hour-by-hour cadence derived from routed DEKES decisions.
           </p>
         </div>
       </div>
 
       {isLoading && (
         <div className="flex items-center justify-center py-8">
-          <Loader2 className="w-5 h-5 text-emerald-500 animate-spin" />
+          <Loader2 className="h-5 w-5 animate-spin text-emerald-400" />
         </div>
       )}
 
       {isError && !isLoading && (
-        <div className="py-8 text-center">
-          <p className="text-sm text-slate-500">
-            Connect CO₂Router Engine to view org risk data
-          </p>
-          <p className="text-xs text-slate-600 mt-1">
-            GET /api/v1/integrations/dekes/metrics
-          </p>
+        <div className="rounded-xl border border-red-500/20 bg-red-500/8 p-5 text-sm text-red-300">
+          Unable to load the DEKES operating rhythm feed.
         </div>
       )}
 
-      {!isLoading && !isError && orgRisks.length === 0 && (
-        <div className="py-8 text-center">
-          <p className="text-sm text-slate-500">No org risk data available yet</p>
-          <p className="text-xs text-slate-600 mt-1">
-            Data appears once DEKES handoff events are emitted per organization
-          </p>
-        </div>
-      )}
+      {!isLoading && !isError && data && (
+        <>
+          <div className="grid gap-4 md:grid-cols-3">
+            <Readout label="Engine status" value={data.status} accent={data.status === 'healthy' ? 'text-emerald-300' : 'text-yellow-300'} />
+            <Readout label="Uptime" value={`${data.metrics.uptime}%`} />
+            <Readout label="Last checked" value={format(new Date(data.lastChecked), 'MMM d, h:mm a')} />
+          </div>
 
-      {orgRisks.length > 0 && (
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-left text-[11px] text-slate-500 border-b border-slate-800">
-                <th className="pb-2.5 font-medium pr-4">Organization</th>
-                <th className="pb-2.5 font-medium pr-4">Budget Status</th>
-                <th className="pb-2.5 font-medium text-right pr-4">High-Carbon Events</th>
-                <th className="pb-2.5 font-medium text-right pr-4">Policy Delays</th>
-                <th className="pb-2.5 font-medium pr-4">Latest Handoff</th>
-                <th className="pb-2.5 font-medium pr-4">DEKES Classification</th>
-                <th className="pb-2.5 font-medium text-right">Total Handoffs</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/50">
-              {orgRisks.map((org) => (
-                <tr key={org.organizationId} className="hover:bg-slate-800/20 transition">
-                  <td className="py-2.5 pr-4 font-mono text-slate-300 max-w-[120px] truncate">
-                    {org.organizationId}
-                  </td>
-                  <td className="py-2.5 pr-4">
-                    <span
-                      className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${BUDGET_STATUS_STYLES[org.budgetStatus]}`}
-                    >
-                      {org.budgetStatus.toUpperCase()}
-                    </span>
-                  </td>
-                  <td className="py-2.5 pr-4 text-right font-mono">
-                    <span
-                      className={
-                        org.highCarbonPatternCount >= 5
-                          ? 'text-orange-400 font-semibold'
-                          : org.highCarbonPatternCount > 0
-                            ? 'text-yellow-400'
-                            : 'text-slate-500'
-                      }
-                    >
-                      {org.highCarbonPatternCount}
-                    </span>
-                  </td>
-                  <td className="py-2.5 pr-4 text-right font-mono">
-                    <span
-                      className={
-                        org.policyDelayCount > 3
-                          ? 'text-orange-400 font-semibold'
-                          : org.policyDelayCount > 0
-                            ? 'text-yellow-400'
-                            : 'text-slate-500'
-                      }
-                    >
-                      {org.policyDelayCount}
-                    </span>
-                  </td>
-                  <td className="py-2.5 pr-4">
-                    {org.latestHandoffType ? (
-                      <span className="text-slate-400">
-                        {EVENT_LABELS[org.latestHandoffType] ?? org.latestHandoffType}
-                      </span>
-                    ) : (
-                      <span className="text-slate-600">—</span>
-                    )}
-                  </td>
-                  <td className="py-2.5 pr-4">
-                    {org.latestClassification ? (
-                      <span
-                        className={`font-medium capitalize ${CLASSIFICATION_STYLES[org.latestClassification]}`}
-                      >
-                        {org.latestClassification.replace('_', ' ')}
-                      </span>
-                    ) : (
-                      <span className="text-slate-600">—</span>
-                    )}
-                  </td>
-                  <td className="py-2.5 text-right font-mono text-white">
-                    {org.totalHandoffs}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+          {trend.length === 0 ? (
+            <div className="rounded-xl border border-slate-800 bg-slate-950/65 p-6 text-sm text-slate-500">
+              No hourly rhythm data is available yet.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-800 text-left text-xs uppercase tracking-[0.18em] text-slate-500">
+                    <th className="pb-3 pr-4 font-medium">Hour</th>
+                    <th className="pb-3 pr-4 font-medium text-right">Requests</th>
+                    <th className="pb-3 pr-4 font-medium text-right">Avg CO2</th>
+                    <th className="pb-3 font-medium text-right">Motion</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/50">
+                  {trend
+                    .slice()
+                    .reverse()
+                    .map((point) => (
+                      <tr key={point.hour} className="hover:bg-slate-800/20">
+                        <td className="py-3 pr-4 text-slate-300">{format(new Date(`${point.hour}:00Z`), 'MMM d, h a')}</td>
+                        <td className="py-3 pr-4 text-right font-mono text-white">{point.requestCount}</td>
+                        <td className="py-3 pr-4 text-right font-mono text-cyan-200">{point.avgCO2.toFixed(2)} kg</td>
+                        <td className="py-3 text-right">
+                          <span className="inline-flex items-center gap-1 rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-100">
+                            <TimerReset className="h-3.5 w-3.5" />
+                            live
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
+    </div>
+  )
+}
+
+function Readout({
+  label,
+  value,
+  accent,
+}: {
+  label: string
+  value: string
+  accent?: string
+}) {
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-950/65 p-4">
+      <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p>
+      <p className={`mt-3 text-lg font-semibold ${accent ?? 'text-white'}`}>{value}</p>
     </div>
   )
 }

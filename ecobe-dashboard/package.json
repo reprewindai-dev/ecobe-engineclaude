@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "description": "Real-time carbon intensity monitoring dashboard for ECOBE Engine",
   "private": true,
+  "author": "Anthony Millwater",
+  "license": "UNLICENSED",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

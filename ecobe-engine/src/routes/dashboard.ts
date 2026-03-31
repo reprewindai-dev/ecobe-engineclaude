@@ -100,7 +100,6 @@ type IntegrationMetricRecord = {
   lastSuccessAt: Date | null
   lastFailureAt: Date | null
   lastLatencyMs: number | null
-  latencyP95Ms?: number | null
   lastError: string | null
   alertActive: boolean
 }
@@ -123,12 +122,105 @@ const LIVE_SIGNAL_SOURCES = [
   'EIA_930',
   'EMBER',
   'GB_CARBON',
+  'DK_CARBON',
+  'FI_CARBON',
 ] as const
 
 const isoLatest = (...values: Array<Date | null | undefined>) => {
   const valid = values.filter((value): value is Date => value instanceof Date)
   if (valid.length === 0) return null
   return new Date(Math.max(...valid.map((value) => value.getTime()))).toISOString()
+}
+
+type WaterProviderTrustRow = {
+  provider: string
+  authorityRole?: string
+  authorityStatus?: 'authoritative' | 'advisory' | 'fallback'
+  region?: string | null
+  scenario?: string | null
+  authorityMode?: string | null
+  confidence?: number | null
+  observedAt?: string | null
+  evidenceRefs?: string[]
+  metadata?: Record<string, unknown> | null
+  freshnessSec?: number | null
+  datasetVersion?: string | null
+}
+
+function normalizeWaterProviderKey(provider: string) {
+  return provider.trim().toLowerCase()
+}
+
+function summarizeWaterProviderTrust(
+  snapshots: Array<{
+    provider: string
+    authorityRole: string
+    region: string
+    scenario: string
+    authorityMode: string
+    confidence: number | null
+    evidenceRefs: Prisma.JsonValue
+    observedAt: Date
+    metadata: Prisma.JsonValue
+  }>
+): WaterProviderTrustRow[] {
+  const summaryRows = summarizeWaterProviders()
+  const summaryByProvider = new Map(summaryRows.map((row) => [normalizeWaterProviderKey(row.provider), row]))
+  const latestSnapshotByProvider = new Map<string, typeof snapshots[number]>()
+
+  for (const snapshot of snapshots) {
+    const key = normalizeWaterProviderKey(snapshot.provider)
+    if (!latestSnapshotByProvider.has(key)) {
+      latestSnapshotByProvider.set(key, snapshot)
+    }
+  }
+
+  const keys = new Set<string>([
+    ...summaryByProvider.keys(),
+    ...latestSnapshotByProvider.keys(),
+  ])
+
+  return Array.from(keys)
+    .map((key) => {
+      const summary = summaryByProvider.get(key)
+      const snapshot = latestSnapshotByProvider.get(key)
+      const metadata =
+        snapshot?.metadata && typeof snapshot.metadata === 'object' && !Array.isArray(snapshot.metadata)
+          ? { ...(snapshot.metadata as Record<string, unknown>) }
+          : {}
+
+      if (summary?.fileHash) {
+        metadata.fileHash = summary.fileHash
+      }
+      if (summary?.datasetVersion) {
+        metadata.datasetVersion = summary.datasetVersion
+      }
+      if (summary?.authorityStatus) {
+        metadata.authorityStatus = summary.authorityStatus
+      }
+
+      return {
+        provider: summary?.provider ?? snapshot?.provider ?? key,
+        authorityRole: summary?.authorityRole ?? snapshot?.authorityRole ?? 'overlay',
+        authorityStatus: summary?.authorityStatus ?? undefined,
+        region: snapshot?.region ?? null,
+        scenario: snapshot?.scenario ?? 'current',
+        authorityMode: snapshot?.authorityMode ?? 'basin',
+        confidence: snapshot?.confidence ?? null,
+        observedAt: summary?.lastObservedAt ?? snapshot?.observedAt.toISOString() ?? null,
+        evidenceRefs: Array.isArray(snapshot?.evidenceRefs)
+          ? (snapshot?.evidenceRefs as string[])
+          : [],
+        metadata,
+        freshnessSec:
+          summary?.freshnessSec ??
+          Math.max(0, Math.round((Date.now() - (snapshot?.observedAt?.getTime() ?? Date.now())) / 1000)),
+        datasetVersion:
+          summary?.datasetVersion ??
+          (typeof metadata.datasetVersion === 'string' ? metadata.datasetVersion : null),
+      } satisfies WaterProviderTrustRow
+    })
+    .sort((a, b) => a.provider.localeCompare(b.provider))
 }
 
 const buildInsightMessages = (
@@ -167,164 +259,6 @@ type DecisionMetricsRow = {
   dataFreshnessSeconds: number | null
 }
 
-type CIDecisionRow = {
-  createdAt: Date
-  decisionFrameId: string
-  selectedRegion: string
-  selectedRunner: string
-  carbonIntensity: number
-  baseline: number
-  savings: number
-  decisionAction: string | null
-  decisionMode: string | null
-  reasonCode: string | null
-  signalConfidence: number | null
-  fallbackUsed: boolean
-  proofHash: string | null
-  waterImpactLiters: number | null
-  waterBaselineLiters: number | null
-  waterScarcityImpact: number | null
-  waterStressIndex: number | null
-  waterConfidence: number | null
-  waterAuthorityMode: string | null
-  waterScenario: string | null
-  waterEvidenceRefs: Prisma.JsonValue
-  policyTrace: Prisma.JsonValue
-  metadata: Prisma.JsonValue
-}
-
-type CIDecisionMetadata = {
-  request?: {
-    jobType?: string
-    metadata?: {
-      source?: string
-      workload?: string
-      auditRun?: string
-      [key: string]: unknown
-    }
-    preferredRegions?: string[]
-    [key: string]: unknown
-  }
-  response?: {
-    baseline?: {
-      region?: string
-      carbonIntensity?: number
-      waterImpactLiters?: number
-    }
-    selected?: {
-      region?: string
-      carbonIntensity?: number
-      waterImpactLiters?: number
-    }
-    latencyMs?: {
-      total?: number
-      compute?: number
-    }
-    mss?: {
-      carbonFreshnessSec?: number
-      carbonLineage?: string[]
-      providerSnapshotRefs?: string[]
-    }
-    water?: {
-      baselineLiters?: number
-      selectedLiters?: number
-      source?: string[]
-    }
-    assurance?: {
-      status?: string
-      assuranceReady?: boolean
-    }
-    [key: string]: unknown
-  }
-  [key: string]: unknown
-}
-
-const asObject = <T extends object>(value: Prisma.JsonValue | null | undefined): T | null => {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return value as T
-  }
-  return null
-}
-
-const asStringArray = (value: Prisma.JsonValue | null | undefined): string[] => {
-  if (!Array.isArray(value)) return []
-  return value.filter((item): item is string => typeof item === 'string')
-}
-
-const parseCiMetadata = (value: Prisma.JsonValue | null | undefined): CIDecisionMetadata => {
-  return asObject<CIDecisionMetadata>(value) ?? {}
-}
-
-const normalizeCIDecisionForDashboard = (decision: CIDecisionRow) => {
-  const metadata = parseCiMetadata(decision.metadata)
-  const response = metadata.response ?? {}
-  const baseline = response.baseline ?? {}
-  const selected = response.selected ?? {}
-  const latency = response.latencyMs ?? {}
-  const mss = response.mss ?? {}
-  const workloadName =
-    metadata.request?.metadata?.workload ??
-    metadata.request?.metadata?.source ??
-    metadata.request?.jobType ??
-    decision.selectedRunner
-
-  const baselineRegion = baseline.region ?? metadata.request?.preferredRegions?.[0] ?? decision.selectedRegion
-  const chosenRegion = selected.region ?? decision.selectedRegion
-  const baselineIntensity = baseline.carbonIntensity ?? decision.baseline
-  const chosenIntensity = selected.carbonIntensity ?? decision.carbonIntensity
-  const estimatedKwh = null
-  const co2BaselineG = estimatedKwh ? baselineIntensity * estimatedKwh : null
-  const co2ChosenG = estimatedKwh ? chosenIntensity * estimatedKwh : null
-
-  return {
-    id: decision.decisionFrameId,
-    createdAt: decision.createdAt,
-    workloadName,
-    opName: decision.decisionAction ?? decision.decisionMode ?? 'unknown',
-    baselineRegion,
-    chosenRegion,
-    zoneBaseline: baselineRegion,
-    zoneChosen: chosenRegion,
-    carbonIntensityBaselineGPerKwh: Math.round(baselineIntensity),
-    carbonIntensityChosenGPerKwh: Math.round(chosenIntensity),
-    estimatedKwh,
-    co2BaselineG,
-    co2ChosenG,
-    latencyEstimateMs: latency.compute ?? null,
-    latencyActualMs: latency.total ?? null,
-    fallbackUsed: decision.fallbackUsed,
-    dataFreshnessSeconds: mss.carbonFreshnessSec ?? null,
-    requestCount: 1,
-    reason: decision.reasonCode ?? decision.decisionAction ?? 'unknown',
-    decisionAction: decision.decisionAction,
-    decisionMode: decision.decisionMode,
-    signalConfidence: decision.signalConfidence,
-    proofHash: decision.proofHash,
-    waterImpactLiters: decision.waterImpactLiters,
-    waterBaselineLiters: decision.waterBaselineLiters,
-    waterScarcityImpact: decision.waterScarcityImpact,
-    waterStressIndex: decision.waterStressIndex,
-    waterConfidence: decision.waterConfidence,
-    waterAuthorityMode: decision.waterAuthorityMode,
-    waterScenario: decision.waterScenario,
-    waterEvidenceRefs: asStringArray(decision.waterEvidenceRefs),
-    assuranceStatus: response.assurance?.status ?? null,
-    assuranceReady: response.assurance?.assuranceReady ?? null,
-    providerSnapshotRefs: asStringArray(
-      (asObject<{ providerSnapshotRefs?: Prisma.JsonValue }>(response.mss as Prisma.JsonValue)?.providerSnapshotRefs as Prisma.JsonValue) ?? null
-    ),
-  }
-}
-
-type NormalizedDashboardDecision = ReturnType<typeof normalizeCIDecisionForDashboard>
-type CarbonLedgerMetricsRow = {
-  carbonSavedG: number | null
-  baselineCarbonG: number | null
-  chosenCarbonG: number | null
-  energyEstimateKwh: number | null
-  createdAt: Date
-}
-
 const listDecisionsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(100),
 })
@@ -333,37 +267,12 @@ router.get('/decisions', async (req, res) => {
   try {
     const { limit } = listDecisionsQuerySchema.parse(req.query)
 
-    const decisions = await prisma.cIDecision.findMany({
+    const decisions = await prisma.dashboardRoutingDecision.findMany({
       orderBy: { createdAt: 'desc' },
       take: limit,
-      select: {
-        createdAt: true,
-        decisionFrameId: true,
-        selectedRegion: true,
-        selectedRunner: true,
-        carbonIntensity: true,
-        baseline: true,
-        savings: true,
-        decisionAction: true,
-        decisionMode: true,
-        reasonCode: true,
-        signalConfidence: true,
-        fallbackUsed: true,
-        proofHash: true,
-        waterImpactLiters: true,
-        waterBaselineLiters: true,
-        waterScarcityImpact: true,
-        waterStressIndex: true,
-        waterConfidence: true,
-        waterAuthorityMode: true,
-        waterScenario: true,
-        waterEvidenceRefs: true,
-        policyTrace: true,
-        metadata: true,
-      },
     })
 
-    res.json({ decisions: decisions.map((decision: CIDecisionRow) => normalizeCIDecisionForDashboard(decision)) })
+    res.json({ decisions })
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid request', details: error.errors })
@@ -382,41 +291,15 @@ router.get('/decisions/export', async (req, res) => {
   try {
     const { format, limit } = exportDecisionsQuerySchema.parse(req.query)
 
-    const decisions = await prisma.cIDecision.findMany({
+    const decisions = await prisma.dashboardRoutingDecision.findMany({
       orderBy: { createdAt: 'desc' },
       take: limit,
-      select: {
-        createdAt: true,
-        decisionFrameId: true,
-        selectedRegion: true,
-        selectedRunner: true,
-        carbonIntensity: true,
-        baseline: true,
-        savings: true,
-        decisionAction: true,
-        decisionMode: true,
-        reasonCode: true,
-        signalConfidence: true,
-        fallbackUsed: true,
-        proofHash: true,
-        waterImpactLiters: true,
-        waterBaselineLiters: true,
-        waterScarcityImpact: true,
-        waterStressIndex: true,
-        waterConfidence: true,
-        waterAuthorityMode: true,
-        waterScenario: true,
-        waterEvidenceRefs: true,
-        policyTrace: true,
-        metadata: true,
-      },
     })
-    const normalized = decisions.map((decision: CIDecisionRow) => normalizeCIDecisionForDashboard(decision))
 
     if (format === 'json') {
       res.setHeader('Content-Type', 'application/json; charset=utf-8')
       res.setHeader('Content-Disposition', 'attachment; filename="ecobe-receipts.json"')
-      return res.send(JSON.stringify({ decisions: normalized }, null, 2))
+      return res.send(JSON.stringify({ decisions }, null, 2))
     }
 
     const columns = [
@@ -450,7 +333,7 @@ router.get('/decisions/export', async (req, res) => {
 
     const lines: string[] = []
     lines.push(columns.join(','))
-    for (const d of normalized) {
+    for (const d of decisions) {
       lines.push(columns.map((c) => escape((d as any)[c])).join(','))
     }
 
@@ -512,78 +395,61 @@ router.get('/metrics', async (req, res) => {
 
     const since = new Date(Date.now() - windowHours * 60 * 60 * 1000)
 
-    const decisionsPromise = prisma.cIDecision.findMany({
+    const decisionsPromise = prisma.dashboardRoutingDecision.findMany({
       where: { createdAt: { gte: since } },
       select: {
         createdAt: true,
-        decisionFrameId: true,
-        selectedRegion: true,
-        selectedRunner: true,
-        carbonIntensity: true,
-        baseline: true,
-        savings: true,
-        decisionAction: true,
-        decisionMode: true,
-        reasonCode: true,
-        signalConfidence: true,
+        chosenRegion: true,
+        requestCount: true,
+        co2BaselineG: true,
+        co2ChosenG: true,
         fallbackUsed: true,
-        proofHash: true,
-        waterImpactLiters: true,
-        waterBaselineLiters: true,
-        waterScarcityImpact: true,
-        waterStressIndex: true,
-        waterConfidence: true,
-        waterAuthorityMode: true,
-        waterScenario: true,
-        waterEvidenceRefs: true,
-        policyTrace: true,
-        metadata: true,
+        latencyEstimateMs: true,
+        latencyActualMs: true,
+        dataFreshnessSeconds: true,
       },
     })
 
-    const topChosenRegionPromise = prisma.cIDecision.groupBy({
-      by: ['selectedRegion'],
+    const topChosenRegionPromise = prisma.dashboardRoutingDecision.groupBy({
+      by: ['chosenRegion'],
       where: { createdAt: { gte: since } },
-      _count: { selectedRegion: true },
-      orderBy: { _count: { selectedRegion: 'desc' } },
+      _count: { chosenRegion: true },
+      orderBy: { _count: { chosenRegion: 'desc' } },
       take: 1,
-    })
-    const carbonLedgerPromise = prisma.carbonLedgerEntry.findMany({
-      where: { createdAt: { gte: since } },
-      select: {
-        carbonSavedG: true,
-      },
     })
 
     const integrationMetricsPromise = getIntegrationMetricsSummary()
     const refreshSummaryPromise = getForecastRefreshSummary(windowHours)
     const refreshStatePromise = getLastForecastRefreshState()
 
-    const [decisions, topChosenRegionAgg, carbonLedgerEntries, integrationMetrics, refreshSummary, refreshState] =
+    const [decisions, topChosenRegionAgg, integrationMetrics, refreshSummary, refreshState] =
       await Promise.all([
         decisionsPromise,
         topChosenRegionPromise,
-        carbonLedgerPromise,
         integrationMetricsPromise,
         refreshSummaryPromise,
         refreshStatePromise,
       ])
 
     const totalDecisions = decisions.length
-    const normalizedDecisions: NormalizedDashboardDecision[] = decisions.map((decision: CIDecisionRow) =>
-      normalizeCIDecisionForDashboard(decision)
-    )
-    const totalRequests = totalDecisions
-    const co2SavedG = carbonLedgerEntries.reduce(
-      (sum: number, entry: { carbonSavedG: number | null }) => sum + (entry.carbonSavedG ?? 0),
+    const typedDecisions = decisions as DecisionMetricsRow[]
+    const totalRequests = typedDecisions.reduce(
+      (sum: number, d) => sum + (d.requestCount ?? 0),
       0
     )
 
+    const co2SavedG = typedDecisions.reduce((sum: number, d) => {
+      const base = d.co2BaselineG ?? 0
+      const chosen = d.co2ChosenG ?? 0
+      const delta = base - chosen
+      return sum + (delta > 0 ? delta : 0)
+    }, 0)
+
     const greenRouteRate =
       totalDecisions > 0
-        ? normalizedDecisions.reduce((sum: number, d: NormalizedDashboardDecision) => {
-            const base = d.carbonIntensityBaselineGPerKwh ?? 0
-            const chosen = d.carbonIntensityChosenGPerKwh ?? 0
+        ? typedDecisions.reduce((sum: number, d) => {
+            const base = d.co2BaselineG ?? 0
+            const chosen = d.co2ChosenG ?? 0
             return sum + (base > chosen ? 1 : 0)
           }, 0) / totalDecisions
         : 0
@@ -591,16 +457,16 @@ router.get('/metrics', async (req, res) => {
     const fallbackRate =
       totalDecisions > 0
         ?
-          normalizedDecisions.reduce(
-            (sum: number, d: NormalizedDashboardDecision) => sum + (d.fallbackUsed ? 1 : 0),
+          typedDecisions.reduce(
+            (sum: number, d) => sum + (d.fallbackUsed ? 1 : 0),
             0
           ) / totalDecisions
         : 0
 
-    const topChosenRegion = topChosenRegionAgg[0]?.selectedRegion ?? null
+    const topChosenRegion = topChosenRegionAgg[0]?.chosenRegion ?? null
 
-    const deltas = normalizedDecisions
-      .map((d: NormalizedDashboardDecision) => {
+    const deltas = typedDecisions
+      .map((d: DecisionMetricsRow) => {
         if (d.latencyActualMs === null || d.latencyActualMs === undefined) return null
         if (d.latencyEstimateMs === null || d.latencyEstimateMs === undefined) return null
         return d.latencyActualMs - d.latencyEstimateMs
@@ -610,7 +476,7 @@ router.get('/metrics', async (req, res) => {
 
     const p95LatencyDeltaMs = percentile(deltas, 0.95)
 
-    const dataFreshnessMaxSeconds = normalizedDecisions.reduce((max: number | null, d: NormalizedDashboardDecision) => {
+    const dataFreshnessMaxSeconds = typedDecisions.reduce((max: number | null, d: DecisionMetricsRow) => {
       const v = d.dataFreshnessSeconds
       if (v === null || v === undefined) return max
       if (max === null) return v
@@ -1067,33 +933,15 @@ router.get('/accuracy', async (req, res) => {
 
 router.get('/region-mapping', async (_req, res) => {
   try {
-    const decisions = await prisma.cIDecision.findMany({
+    const decisions = await prisma.dashboardRoutingDecision.findMany({
       orderBy: { createdAt: 'desc' },
       take: 2000,
       select: {
         createdAt: true,
-        decisionFrameId: true,
-        selectedRegion: true,
-        selectedRunner: true,
-        carbonIntensity: true,
-        baseline: true,
-        savings: true,
-        decisionAction: true,
-        decisionMode: true,
-        reasonCode: true,
-        signalConfidence: true,
-        fallbackUsed: true,
-        proofHash: true,
-        waterImpactLiters: true,
-        waterBaselineLiters: true,
-        waterScarcityImpact: true,
-        waterStressIndex: true,
-        waterConfidence: true,
-        waterAuthorityMode: true,
-        waterScenario: true,
-        waterEvidenceRefs: true,
-        policyTrace: true,
-        metadata: true,
+        baselineRegion: true,
+        chosenRegion: true,
+        zoneBaseline: true,
+        zoneChosen: true,
       },
     })
 
@@ -1123,8 +971,7 @@ router.get('/region-mapping', async (_req, res) => {
       }
     }
 
-    for (const rawDecision of decisions) {
-      const d = normalizeCIDecisionForDashboard(rawDecision as CIDecisionRow)
+    for (const d of decisions) {
       consider(d.baselineRegion, d.zoneBaseline, d.createdAt)
       consider(d.chosenRegion, d.zoneChosen, d.createdAt)
     }
@@ -1190,33 +1037,11 @@ router.post('/what-if/intensities', async (req, res) => {
 
 router.get('/regions', async (_req, res) => {
   try {
-    const configuredRegions = (await prisma.region.findMany({
+    const regions = (await prisma.region.findMany({
       where: { enabled: true },
       select: { code: true, name: true, country: true },
       orderBy: { code: 'asc' },
     })) as { code: string; name: string | null; country: string | null }[]
-
-    let regions = configuredRegions
-    if (regions.length === 0) {
-      const recentDecisions = await prisma.cIDecision.findMany({
-        orderBy: { createdAt: 'desc' },
-        take: 500,
-        select: {
-          selectedRegion: true,
-          metadata: true,
-        },
-      })
-      const fallbackRegionCodes = new Set<string>()
-      for (const decision of recentDecisions) {
-        fallbackRegionCodes.add(decision.selectedRegion)
-        const metadata = parseCiMetadata(decision.metadata)
-        const baselineRegion = metadata.response?.baseline?.region ?? metadata.request?.preferredRegions?.[0]
-        if (baselineRegion) fallbackRegionCodes.add(baselineRegion)
-      }
-      regions = Array.from(fallbackRegionCodes)
-        .sort((a, b) => a.localeCompare(b))
-        .map((code) => ({ code, name: null, country: null }))
-    }
 
     const enriched = await Promise.all(
       regions.map(async (regionRecord: { code: string; name: string | null; country: string | null }) => {
@@ -1251,37 +1076,28 @@ router.get('/savings', async (req, res) => {
     const days = range === '7d' ? 7 : range === '90d' ? 90 : 30
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
 
-    const [entries, recentDecisions] = await Promise.all([
-      prisma.carbonLedgerEntry.findMany({
-        where: { createdAt: { gte: since } },
-        select: {
-          carbonSavedG: true,
-          baselineCarbonG: true,
-          chosenCarbonG: true,
-          energyEstimateKwh: true,
-          createdAt: true,
-        },
-      }),
-      prisma.cIDecision.findMany({
-        where: { createdAt: { gte: since } },
-        select: { createdAt: true },
-      }),
-    ])
+    const decisions = await prisma.dashboardRoutingDecision.findMany({
+      where: { createdAt: { gte: since } },
+      select: {
+        co2BaselineG: true,
+        co2ChosenG: true,
+        estimatedKwh: true,
+        createdAt: true,
+      },
+    })
 
-    const typedEntries = entries as CarbonLedgerMetricsRow[]
-
-    const totalBaseline = typedEntries.reduce((sum: number, d: CarbonLedgerMetricsRow) => sum + (d.baselineCarbonG ?? 0), 0)
-    const totalChosen = typedEntries.reduce((sum: number, d: CarbonLedgerMetricsRow) => sum + (d.chosenCarbonG ?? 0), 0)
+    const totalBaseline = decisions.reduce((sum: number, d: any) => sum + (d.co2BaselineG ?? 0), 0)
+    const totalChosen = decisions.reduce((sum: number, d: any) => sum + (d.co2ChosenG ?? 0), 0)
     const totalAvoided = totalBaseline - totalChosen
-    const totalKwh = typedEntries.reduce((sum: number, d: CarbonLedgerMetricsRow) => sum + (d.energyEstimateKwh ?? 0), 0)
+    const totalKwh = decisions.reduce((sum: number, d: any) => sum + (d.estimatedKwh ?? 0), 0)
 
     // Group by day for trend
     const dailyMap = new Map<string, { baseline: number; chosen: number; count: number }>()
-    for (const d of typedEntries) {
+    for (const d of decisions) {
       const day = d.createdAt.toISOString().split('T')[0]
       const existing = dailyMap.get(day) || { baseline: 0, chosen: 0, count: 0 }
-      existing.baseline += d.baselineCarbonG ?? 0
-      existing.chosen += d.chosenCarbonG ?? 0
+      existing.baseline += d.co2BaselineG ?? 0
+      existing.chosen += d.co2ChosenG ?? 0
       existing.count++
       dailyMap.set(day, existing)
     }
@@ -1301,7 +1117,7 @@ router.get('/savings', async (req, res) => {
       co2AvoidedKg: Math.round(totalAvoided / 1000 * 100) / 100, // Convert g to kg
       avgMultiplier: totalChosen > 0 ? Math.round((totalBaseline / totalChosen) * 100) / 100 : 1.34,
       bestToday: 1.91, // Temporary static value
-      last100AvgDelta: recentDecisions.length > 0 ? Math.round(totalAvoided / Math.min(recentDecisions.length, 100) * 100) / 100 : 0,
+      last100AvgDelta: decisions.length > 0 ? Math.round(totalAvoided / Math.min(decisions.length, 100) * 100) / 100 : 0,
       timeRange: range,
       totalBaselineG: Math.round(totalBaseline),
       totalChosenG: Math.round(totalChosen),
@@ -1311,7 +1127,7 @@ router.get('/savings', async (req, res) => {
           ? Math.round((totalAvoided / totalBaseline) * 100 * 10) / 10
           : 0,
       totalKwh: Math.round(totalKwh * 1000) / 1000,
-      totalDecisions: recentDecisions.length,
+      totalDecisions: decisions.length,
       carbonReductionMultiplier:
         totalChosen > 0
           ? Math.round((totalBaseline / totalChosen) * 100) / 100
@@ -1334,33 +1150,35 @@ router.get('/methodology/providers', async (_req, res) => {
       metrics.map((metric: IntegrationMetricRecord) => [metric.source, metric])
     )
 
-      const providers = [
-        ['WattTime', 'WATTTIME'],
-        ['GridStatus EIA-930', 'GRIDSTATUS'],
-        ['Ember', 'EMBER'],
-        ['GB Carbon Intensity', 'GB_CARBON'],
-      ].map(([name, source]) => {
-        const metric = bySource.get(source)
-        const successRate = metric ? computeIntegrationSuccessRate(metric) : null
+    const providers = [
+      ['WattTime', 'WATTTIME'],
+      ['GridStatus EIA-930', 'GRIDSTATUS'],
+      ['Ember', 'EMBER'],
+      ['GB Carbon Intensity', 'GB_CARBON'],
+      ['DK Carbon', 'DK_CARBON'],
+      ['FI Carbon', 'FI_CARBON'],
+    ].map(([name, source]) => {
+      const metric = bySource.get(source)
+      const successRate = metric ? computeIntegrationSuccessRate(metric) : null
+      const stalenessSec = metric?.lastSuccessAt
+        ? Math.max(0, Math.floor((Date.now() - metric.lastSuccessAt.getTime()) / 1000))
+        : null
 
-        return {
+      return {
         name,
-          status:
-            metric == null
-              ? 'offline'
-              : metric.alertActive || (successRate ?? 0) < 0.8
-                ? 'degraded'
-                : 'healthy',
-          latencyMs:
-            metric?.lastLatencyMs != null
-              ? Math.round(metric.lastLatencyMs)
-              : metric?.latencyP95Ms != null
-                ? Math.round(metric.latencyP95Ms)
-                : null,
-          lastSuccessAt: metric?.lastSuccessAt?.toISOString() ?? null,
-          disagreementPct: null,
-        }
-      })
+        status:
+          metric == null
+            ? 'offline'
+            : metric.alertActive || (successRate ?? 0) < 0.8
+              ? 'degraded'
+              : 'healthy',
+        latencyMs: metric?.lastLatencyMs != null ? Math.round(metric.lastLatencyMs) : null,
+        lastLatencyMs: metric?.lastLatencyMs != null ? Math.round(metric.lastLatencyMs) : null,
+        lastSuccessAt: metric?.lastSuccessAt?.toISOString() ?? null,
+        stalenessSec,
+        disagreementPct: null,
+      }
+    })
 
     return res.json({ providers })
   } catch (error) {
@@ -1406,27 +1224,45 @@ router.get('/methodology/providers', async (_req, res) => {
         confidence: 0.75,
         doctrinePosition: 'TELEMETRY - derived features for spike/curtailment detection',
       },
-        {
-          name: 'GB Carbon Intensity',
-          role: 'eu_primary_signal',
-          signalType: 'National Grid carbon intensity (real-time + forecast)',
-          refreshRate: 'every 30 minutes',
-          coverage: 'Great Britain',
-          confidence: 0.85,
-          doctrinePosition: 'PRIMARY - authoritative for GB regions',
-        },
-      ],
-      doctrine: {
-        principle: 'Lowest defensible signal, not lowest raw signal',
-        averaging: 'No provider averaging - confidence-weighted blending only',
-        fallback: 'Static 450 gCO2/kWh when all providers unavailable',
-        auditability: 'Every decision records full provenance chain',
-        regionStrategy: {
-          'US': 'WattTime → EIA → Ember → Static',
-          'EU': 'GB → Ember → Static',
-          'GLOBAL': 'Ember → Static'
-        }
+      {
+        name: 'GB Carbon Intensity',
+        role: 'eu_primary_signal',
+        signalType: 'National Grid carbon intensity (real-time + forecast)',
+        refreshRate: 'every 30 minutes',
+        coverage: 'Great Britain',
+        confidence: 0.85,
+        doctrinePosition: 'PRIMARY - authoritative for GB regions',
       },
+      {
+        name: 'DK Carbon',
+        role: 'eu_primary_signal',
+        signalType: 'Energi Data Service CO2 intensity (real-time + forecast)',
+        refreshRate: 'every hour',
+        coverage: 'Denmark',
+        confidence: 0.8,
+        doctrinePosition: 'PRIMARY - authoritative for DK regions',
+      },
+      {
+        name: 'FI Carbon',
+        role: 'eu_primary_signal',
+        signalType: 'Fingrid real-time carbon intensity',
+        refreshRate: 'every 3 minutes',
+        coverage: 'Finland',
+        confidence: 0.85,
+        doctrinePosition: 'PRIMARY - authoritative for FI regions',
+      },
+    ],
+    doctrine: {
+      principle: 'Lowest defensible signal, not lowest raw signal',
+      averaging: 'No provider averaging - confidence-weighted blending only',
+      fallback: 'Static 450 gCO2/kWh when all providers unavailable',
+      auditability: 'Every decision records full provenance chain',
+      regionStrategy: {
+        'US': 'WattTime → EIA → Ember → Static',
+        'EU': 'GB/DK/FI → Ember → Static',
+        'GLOBAL': 'Ember → Static'
+      }
+    },
   })
 })
 
@@ -1749,20 +1585,7 @@ router.get('/provider-trust', async (_req, res) => {
     return res.json({
       freshness,
       providers: Object.fromEntries(providerMap),
-      waterProviders:
-        waterProviderSnapshots.length > 0
-          ? waterProviderSnapshots.map((snapshot: any) => ({
-              provider: snapshot.provider,
-              authorityRole: snapshot.authorityRole,
-              region: snapshot.region,
-              scenario: snapshot.scenario,
-              authorityMode: snapshot.authorityMode,
-              confidence: snapshot.confidence,
-              observedAt: snapshot.observedAt?.toISOString?.() ?? snapshot.observedAt ?? null,
-              evidenceRefs: snapshot.evidenceRefs ?? [],
-              metadata: snapshot.metadata ?? {},
-            }))
-          : summarizeWaterProviders(),
+      waterProviders: summarizeWaterProviderTrust(waterProviderSnapshots),
     })
   } catch (error: any) {
     console.error('Provider trust error:', error)

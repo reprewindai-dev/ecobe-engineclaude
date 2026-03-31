@@ -56,3 +56,4 @@ export const ACTION_META: Record<
 export function formatAction(action: ControlAction) {
   return ACTION_META[action]
 }
+

@@ -5,7 +5,7 @@ import { createApp } from './app'
 import { prisma } from './lib/db'
 import { assertSchemaReadiness } from './lib/db/schema-readiness'
 import { redis } from './lib/redis'
-import { warmCacheOnStartup } from './lib/cache-warmer'
+import { startRoutingSignalWarmLoop, stopRoutingSignalWarmLoop, warmCacheOnStartup } from './lib/cache-warmer'
 import { startEIAIngestionWorker } from './workers/eia-ingestion'
 import { startForecastVerificationWorker } from './workers/forecast-verification'
 import { startForecastWorker } from './workers/forecast-poller'
@@ -15,6 +15,7 @@ import { stopLearningLoopWorker } from './workers/learning-loop'
 import { startRuntimeSupervisor, stopRuntimeSupervisor } from './workers/runtime-supervisor'
 import { startDecisionEventDispatcherWorker, stopDecisionEventDispatcherWorker } from './workers/decision-event-dispatcher'
 import { recoverWaterArtifactsFromLastKnownGood, validateWaterArtifacts } from './lib/water/bundle'
+import { ensureDecisionEventVerifierSink } from './lib/ci/event-verifier-sink'
 
 const app = createApp()
 let server: Server | null = null
@@ -47,6 +48,7 @@ async function gracefulShutdown(signal: string) {
     stopRuntimeSupervisor()
     stopLearningLoopWorker()
     stopDecisionEventDispatcherWorker()
+    stopRoutingSignalWarmLoop()
 
     console.log('Closing Redis connection...')
     await redis.quit().catch(() => undefined)
@@ -92,6 +94,7 @@ function startBackgroundWorkers() {
   warmCacheOnStartup().catch((error) => {
     console.error('Cache warming failed:', error)
   })
+  startRoutingSignalWarmLoop()
 
   try {
     startLearningLoopWorker()
@@ -141,6 +144,13 @@ async function start() {
     } catch (error) {
       console.error('Redis error:', error)
       console.warn('Redis unavailable at startup; continuing without Redis')
+    }
+
+    const verifierSink = await ensureDecisionEventVerifierSink()
+    if (verifierSink.status === 'created' || verifierSink.status === 'updated') {
+      console.log(`Decision event verifier sink ${verifierSink.status}: ${verifierSink.sinkId}`)
+    } else {
+      console.warn(`Decision event verifier sink skipped: ${verifierSink.reason}`)
     }
 
     server = app.listen(env.PORT, () => {

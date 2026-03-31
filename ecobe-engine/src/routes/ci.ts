@@ -42,6 +42,17 @@ import {
   enqueueDecisionEvaluatedEvents,
 } from '../lib/ci/decision-events'
 import { applyOperatingModePolicy, resolveOperatingMode, type OperatingMode } from '../lib/ci/operating-mode'
+import {
+  buildCuratedTraceEnvelopeView,
+  buildTraceHashes,
+  deriveGovernanceSource,
+  finalizeTraceEnvelope,
+  type ResolvedCandidateOverride,
+  type TraceEnvelope,
+  type TraceEnvelopeSeed,
+  type TraceStageTimings,
+} from '../lib/ci/trace'
+import { pinReplayProofHash } from '../lib/ci/replay'
 import { prisma } from '../lib/db'
 import { buildGithubActionsEnforcementBundle } from '../lib/enforcement/github-actions-policy'
 import { buildKubernetesEnforcementPlan } from '../lib/enforcement/k8s-policy'
@@ -52,9 +63,12 @@ import { evaluateExternalPolicyHook } from '../lib/policy/external-hook'
 import { evaluateSekedPolicyAdapter } from '../lib/policy/seked-policy-adapter'
 import { persistExportBatch } from '../lib/proof/export-chain'
 import { env } from '../config/env'
+import { trackRecentRoutingRegions } from '../lib/cache-warmer'
+import { toRoutingCacheBucket } from '../lib/grid-signals/grid-signal-cache'
 import {
   buildWaterAuthority,
   getWaterArtifactMetadata,
+  getWaterArtifactHealthSnapshot,
   loadWaterArtifacts,
   resolveWaterSignal,
   summarizeWaterProviders,
@@ -68,6 +82,8 @@ import type {
   WaterDecisionMode,
   WaterPolicyProfile,
   WaterScenario,
+  WaterArtifactMetadata,
+  WaterManifestDataset,
   WaterSignal,
 } from '../lib/water/types'
 import type { ExternalPolicyHookResult } from '../lib/policy/external-hook'
@@ -143,32 +159,14 @@ export const requestSchema = z.object({
 type RoutingRequestInput = z.input<typeof requestSchema>
 type RoutingRequest = z.infer<typeof requestSchema>
 
-type CandidateEvaluation = {
-  region: string
-  runner: string
-  carbonIntensity: number
-  carbonConfidence: number
-  carbonSourceUsed: string
-  carbonFallbackUsed: boolean
-  signalMode: 'marginal' | 'average' | 'fallback'
-  accountingMethod: 'marginal' | 'flow-traced' | 'average'
-  carbonDisagreementFlag: boolean
-  carbonDisagreementPct: number
-  waterSignal: WaterSignal
-  waterImpactLiters: number
-  scarcityImpact: number
-  reliabilityMultiplier: number
-  score: number
-  defensiblePenalty: number
-  defensibleReasonCodes: string[]
-  guardrailCandidateBlocked: boolean
-  guardrailReasons: string[]
-  providerSnapshotRef: string
-  waterAuthority: WaterAuthority
-  cacheStatus: 'live' | 'warm' | 'fallback'
-  providerResolutionMs: number
-  carbonFreshnessSec: number | null
-  waterFreshnessSec: number | null
+type CandidateEvaluation = ResolvedCandidateOverride
+
+type DecisionStageTimings = TraceStageTimings
+
+export type DecisionExecutionContext = {
+  decisionFrameId?: string
+  nowIso?: string
+  resolvedCandidateOverrides?: CandidateEvaluation[]
 }
 
 const sloState = {
@@ -178,6 +176,21 @@ const sloState = {
     totalP95Ms: 100,
     computeP95Ms: 50,
   },
+}
+
+const SLO_PERSISTED_WINDOW_LIMIT = 250
+const SLO_ACTIVE_WINDOW_MINUTES = Math.max(
+  5,
+  Number(process.env.CI_SLO_ACTIVE_WINDOW_MINUTES ?? 30)
+)
+
+type PersistedLatencyWindow = {
+  totalMs: number[]
+  computeMs: number[]
+  sampleCount: number
+  windowStart: string | null
+  windowEnd: string | null
+  selection: 'latest_active_window' | 'recent_history'
 }
 
 function resolveRequestId(data: RoutingRequest) {
@@ -252,6 +265,23 @@ function verifySignedDecisionRequest(req: Request, res: Response) {
   return true
 }
 
+function extractInternalToken(req: Request) {
+  const authorization = req.header('authorization')
+  if (authorization?.startsWith('Bearer ')) {
+    return authorization.slice('Bearer '.length).trim()
+  }
+
+  return req.header('x-ecobe-internal-key')?.trim() ?? null
+}
+
+function isInternalFastSimulationRequest(req: Request, data: RoutingRequest) {
+  if (data.decisionMode !== 'scenario_planning') return false
+  if (req.header('x-co2router-response-tier') !== 'fast') return false
+  if (!env.ECOBE_INTERNAL_API_KEY) return false
+
+  return extractInternalToken(req) === env.ECOBE_INTERNAL_API_KEY
+}
+
 function assuranceToProofPosture(status: 'operational' | 'assurance_ready' | 'degraded') {
   if (status === 'assurance_ready') return 'assurance_ready' as const
   if (status === 'degraded') return 'degraded' as const
@@ -270,6 +300,28 @@ function recordLatency(totalMs: number, computeMs: number) {
   }
 }
 
+function logSlowDecision(input: {
+  computeMs: number
+  totalMs: number
+  decisionFrameId: string
+  selectedRegion: string
+  reasonCode: string
+  stageTimings: DecisionStageTimings
+  providerResolutionMs: number
+}) {
+  if (input.computeMs <= sloState.budget.computeP95Ms) return
+
+  console.warn('Slow decision path detected', {
+    decisionFrameId: input.decisionFrameId,
+    selectedRegion: input.selectedRegion,
+    reasonCode: input.reasonCode,
+    computeMs: input.computeMs,
+    totalMs: input.totalMs,
+    providerResolutionMs: input.providerResolutionMs,
+    stageTimings: input.stageTimings,
+  })
+}
+
 function percentile(values: number[], p: number): number {
   if (values.length === 0) return 0
   const sorted = [...values].sort((a, b) => a - b)
@@ -281,31 +333,70 @@ function isFiniteLatency(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
 }
 
-async function getPersistedLatencyWindow(limit = 250) {
+async function getPersistedLatencyWindow(limit = SLO_PERSISTED_WINDOW_LIMIT): Promise<PersistedLatencyWindow> {
   const recentDecisions = await prisma.cIDecision.findMany({
     orderBy: { createdAt: 'desc' },
     take: limit,
     select: {
+      createdAt: true,
       metadata: true,
     },
   })
 
-  const totalMs: number[] = []
-  const computeMs: number[] = []
+  const latencySamples: Array<{
+    createdAt: Date
+    totalMs: number | null
+    computeMs: number | null
+  }> = []
 
   for (const decision of recentDecisions) {
     const latency = (decision.metadata as any)?.response?.latencyMs
-    if (isFiniteLatency(latency?.total)) {
-      totalMs.push(latency.total)
-    }
-    if (isFiniteLatency(latency?.compute)) {
-      computeMs.push(latency.compute)
+    const totalMs = isFiniteLatency(latency?.total) ? latency.total : null
+    const computeMs = isFiniteLatency(latency?.compute) ? latency.compute : null
+    if (totalMs !== null || computeMs !== null) {
+      latencySamples.push({
+        createdAt: decision.createdAt,
+        totalMs,
+        computeMs,
+      })
     }
   }
 
+  if (latencySamples.length === 0) {
+    return {
+      totalMs: [],
+      computeMs: [],
+      sampleCount: 0,
+      windowStart: null,
+      windowEnd: null,
+      selection: 'recent_history',
+    }
+  }
+
+  const newestSampleAt = latencySamples[0].createdAt
+  const activeWindowStart = new Date(
+    newestSampleAt.getTime() - SLO_ACTIVE_WINDOW_MINUTES * 60 * 1000
+  )
+  const activeWindowSamples = latencySamples.filter(
+    (sample) => sample.createdAt >= activeWindowStart
+  )
+  const selectedSamples =
+    activeWindowSamples.length > 0 ? activeWindowSamples : latencySamples
+
   return {
-    totalMs: totalMs.reverse(),
-    computeMs: computeMs.reverse(),
+    totalMs: selectedSamples
+      .map((sample) => sample.totalMs)
+      .filter((value): value is number => value !== null)
+      .reverse(),
+    computeMs: selectedSamples
+      .map((sample) => sample.computeMs)
+      .filter((value): value is number => value !== null)
+      .reverse(),
+    sampleCount: selectedSamples.length,
+    windowStart: selectedSamples[selectedSamples.length - 1]?.createdAt.toISOString() ?? null,
+    windowEnd: selectedSamples[0]?.createdAt.toISOString() ?? null,
+    selection:
+      activeWindowSamples.length > 0 ? 'latest_active_window' : 'recent_history',
   }
 }
 
@@ -354,24 +445,50 @@ function getFallbackRegion(preferredRegions: string[]): string {
   return 'us-east-1'
 }
 
-function toCacheBucket(timestamp: Date): Date {
-  const bucket = new Date(timestamp)
-  bucket.setSeconds(0, 0)
-  return bucket
-}
+async function evaluateCandidates(
+  data: RoutingRequest,
+  energyKwh: number,
+  at: Date,
+  resolvedCandidateOverrides?: CandidateEvaluation[]
+) {
+  if (resolvedCandidateOverrides?.length) {
+    return [...resolvedCandidateOverrides].sort((a, b) => a.score - b.score)
+  }
 
-async function evaluateCandidates(data: RoutingRequest, energyKwh: number, at: Date) {
   const reliabilityByRegion = await loadRegionReliabilityMultipliers(data.preferredRegions)
-  const cacheBucket = toCacheBucket(at)
+  const cacheBucket = toRoutingCacheBucket(at)
+  trackRecentRoutingRegions(data.preferredRegions)
   const candidates = await Promise.all(
     data.preferredRegions.map(async (region) => {
       const providerResolutionStarted = Date.now()
-      const cachedSignal = await providerRouter.getCachedRoutingSignal(region, cacheBucket)
-      const signal = cachedSignal ?? (await providerRouter.getRoutingSignal(region, at))
+      const signalRecord = await providerRouter.getHotPathRoutingSignalRecord(region, at)
+      const signal = signalRecord.signal
+      const cacheStatus = signalRecord.cacheSource ?? 'degraded-safe'
       const providerResolutionMs = Date.now() - providerResolutionStarted
+      recordTelemetryMetric(telemetryMetricNames.providerResolutionLatencyMs, 'histogram', providerResolutionMs, {
+        region,
+        cache_status: cacheStatus,
+        source: signal.source,
+      })
+      recordTelemetryMetric(
+        cacheStatus === 'live'
+          ? telemetryMetricNames.routingCacheMissCount
+          : telemetryMetricNames.routingCacheHitCount,
+        'counter',
+        1,
+        {
+          region,
+          cache_status: cacheStatus,
+        }
+      )
+      if (cacheStatus === 'live') {
+        recordTelemetryMetric(telemetryMetricNames.routingHotPathProviderLeakCount, 'counter', 1, {
+          region,
+        })
+      }
 
-      if (!cachedSignal) {
-        providerRouter.cacheRoutingSignal(region, signal, cacheBucket).catch((error) => {
+      if (cacheStatus !== 'warm' && cacheStatus !== 'redis') {
+        providerRouter.cacheRoutingSignal(region, signalRecord, cacheBucket).catch((error) => {
           console.warn('Failed to cache routing signal', { region, error })
         })
       }
@@ -471,7 +588,7 @@ async function evaluateCandidates(data: RoutingRequest, energyKwh: number, at: D
         guardrailReasons: guardrailCheck.trace.reasonCodes,
         providerSnapshotRef,
         waterAuthority,
-        cacheStatus: signal.provenance.fallbackUsed ? 'fallback' : cachedSignal ? 'warm' : 'live',
+        cacheStatus,
         providerResolutionMs,
         carbonFreshnessSec: freshnessSec,
         waterFreshnessSec,
@@ -777,27 +894,51 @@ type PolicyDirectiveResponse = {
   maxWaterStress?: number
   maxCarbonIntensity?: number
   policyReference?: string
+  governance?: {
+    source?: string
+    score?: number
+    zone?: 'green' | 'amber' | 'red'
+    weights?: {
+      carbon?: number | null
+      water?: number | null
+      latency?: number | null
+      cost?: number | null
+    }
+    thresholds?: Record<string, number | null | undefined>
+  }
 }
 
 type AppliedPolicyResult = {
   reasonCodes: string[]
 }
 
-export async function createDecision(data: RoutingRequestInput) {
-  const timestampIso = data.timestamp ?? new Date().toISOString()
+export async function createDecision(
+  data: RoutingRequestInput,
+  executionContext: DecisionExecutionContext = {}
+) {
+  const timestampIso = data.timestamp ?? executionContext.nowIso ?? new Date().toISOString()
   const normalizedRequest = requestSchema.parse({
     ...data,
     policyVersion: data.policyVersion ?? WATER_POLICY_VERSION,
     decisionMode: data.decisionMode ?? 'runtime_authorization',
     timestamp: timestampIso,
   })
-  const { manifest } = loadWaterArtifacts()
-  const artifactHealth = validateWaterArtifacts()
+  const artifactSnapshotStarted = Date.now()
+  const artifactHealth = getWaterArtifactHealthSnapshot()
+  const manifestDatasets = artifactHealth.manifestDatasets
+  const artifactSnapshotMs = Date.now() - artifactSnapshotStarted
   const now = new Date(timestampIso)
   const requestId = resolveRequestId(normalizedRequest)
   const transport = resolveTransport(normalizedRequest)
   const energyKwh = estimateEnergyKwh(normalizedRequest.jobType, normalizedRequest.estimatedEnergyKwh)
-  const candidateEvaluations = await evaluateCandidates(normalizedRequest, energyKwh, now)
+  const candidateEvaluationStarted = Date.now()
+  const candidateEvaluations = await evaluateCandidates(
+    normalizedRequest,
+    energyKwh,
+    now,
+    executionContext.resolvedCandidateOverrides
+  )
+  const candidateEvaluationMs = Date.now() - candidateEvaluationStarted
   const precedenceProtected = isPrecedenceProtected(normalizedRequest)
   const delayWindow = resolveDelayWindow({
     generatedAt: now,
@@ -885,7 +1026,7 @@ export async function createDecision(data: RoutingRequestInput) {
     reasonCode = 'THROTTLE_CARBON_AND_CRITICALITY'
   }
 
-  const decisionFrameId = randomUUID()
+  const decisionFrameId = executionContext.decisionFrameId ?? randomUUID()
   const policyRequest = {
     decisionFrameId,
     policyProfile: normalizedRequest.waterPolicyProfile as WaterPolicyProfile,
@@ -896,6 +1037,12 @@ export async function createDecision(data: RoutingRequestInput) {
     facilityId: normalizedRequest.facilityId ?? null,
     scenario: (normalizedRequest.waterContext?.scenario ?? 'current') as WaterScenario,
     bottleneckScore: normalizedRequest.schedulerHints?.bottleneckScore ?? null,
+    weights: {
+      carbon: normalizedRequest.carbonWeight ?? null,
+      water: normalizedRequest.waterWeight ?? null,
+      latency: normalizedRequest.latencyWeight ?? null,
+      cost: normalizedRequest.costWeight ?? null,
+    },
     preferredRegions: normalizedRequest.preferredRegions,
     waterAuthority: {
       authorityMode: selected.waterAuthority.authorityMode,
@@ -926,8 +1073,10 @@ export async function createDecision(data: RoutingRequestInput) {
     timestamp: timestampIso,
   }
 
+  const policyHookStarted = Date.now()
   const sekedPolicy = await evaluateSekedPolicyAdapter(policyRequest)
   const externalPolicy = await evaluateExternalPolicyHook(policyRequest)
+  const policyHookMs = Date.now() - policyHookStarted
 
   const applyPolicyDirectives = (
     policy:
@@ -1033,19 +1182,20 @@ export async function createDecision(data: RoutingRequestInput) {
             : 'DENY_DELAY_NOT_PERMITTED'
   }
 
+  const doctrineAssemblyStarted = Date.now()
   const signalConfidence = computeSignalConfidence(
     selected.carbonConfidence,
     selected.waterSignal.confidence
   )
   const assurance = buildAssuranceStatus({
-    datasetHashesPresent: manifest.datasets.every(
+    datasetHashesPresent: manifestDatasets.every(
       (dataset) => Boolean(dataset.file_hash) && dataset.file_hash !== 'unverified'
     ),
     bundleHealthy: artifactHealth.checks.bundlePresent && artifactHealth.checks.schemaCompatible,
     manifestHealthy: artifactHealth.checks.manifestPresent,
     waterFallbackUsed: selected.waterSignal.fallbackUsed || selected.waterAuthority.authorityMode === 'fallback',
     carbonFallbackUsed: selected.carbonFallbackUsed,
-    manifestDatasets: manifest.datasets,
+    manifestDatasets,
   })
   const operatingMode = resolveOperatingMode({
     signalConfidence,
@@ -1203,6 +1353,7 @@ export async function createDecision(data: RoutingRequestInput) {
       selectedRegion: selected.region,
       policyProfile: normalizedRequest.waterPolicyProfile,
       criticality: normalizedRequest.criticality,
+      generatedAt: now,
       notBefore: delayWindow.notBefore,
       delayMinutes: delayWindow.delayMinutes ?? undefined,
     }) as unknown as Record<string, unknown>,
@@ -1237,6 +1388,198 @@ export async function createDecision(data: RoutingRequestInput) {
     mss,
     decisionExplanation,
   })
+  const doctrineAssemblyMs = Date.now() - doctrineAssemblyStarted
+  const traceAssemblyStarted = Date.now()
+  const sekedDirective = sekedPolicy.response as PolicyDirectiveResponse | null
+  const externalDirective = externalPolicy.response as PolicyDirectiveResponse | null
+  const governanceSource = deriveGovernanceSource({
+    sekedApplied: Boolean(sekedPolicy.enabled && sekedPolicy.evaluated),
+    externalApplied: Boolean(externalPolicy.enabled && externalPolicy.evaluated),
+    sekedSource: sekedDirective?.governance?.source ?? null,
+    externalSource: externalDirective?.governance?.source ?? null,
+  })
+  const governanceMetadata =
+    sekedDirective?.governance ?? externalDirective?.governance ?? null
+  const governanceThresholds: Record<string, number | null> | null = governanceMetadata?.thresholds
+    ? Object.fromEntries(
+        Object.entries(governanceMetadata.thresholds)
+          .filter(([, value]) => typeof value === 'number' || value == null)
+          .map(([key, value]) => [key, value ?? null] as const)
+      )
+    : null
+  const traceSeed: TraceEnvelopeSeed = {
+    identity: {
+      traceId: `trace:${decisionFrameId}`,
+      decisionFrameId,
+      requestId,
+      createdAt: timestampIso,
+    },
+    inputSignals: {
+      request: normalizedRequest as unknown as Record<string, unknown>,
+      resolvedCandidates: candidateEvaluations,
+    },
+    normalizedSignals: {
+      candidates: candidateEvaluations.map((candidate) => ({
+        region: candidate.region,
+        score: candidate.score,
+        carbonIntensity: candidate.carbonIntensity,
+        waterStressIndex: candidate.waterSignal.waterStressIndex,
+        waterImpactLiters: candidate.waterImpactLiters,
+        scarcityImpact: candidate.scarcityImpact,
+        reliabilityMultiplier: candidate.reliabilityMultiplier,
+        defensiblePenalty: candidate.defensiblePenalty,
+        defensibleReasonCodes: candidate.defensibleReasonCodes,
+        guardrailBlocked: candidate.guardrailCandidateBlocked,
+        guardrailReasons: candidate.guardrailReasons,
+        cacheStatus: candidate.cacheStatus,
+        authorityMode: candidate.waterAuthority.authorityMode,
+        signalMode: candidate.signalMode,
+        accountingMethod: candidate.accountingMethod,
+        carbonFreshnessSec: candidate.carbonFreshnessSec,
+        waterFreshnessSec: candidate.waterFreshnessSec,
+        fallbackApplied:
+          candidate.carbonFallbackUsed ||
+          candidate.waterSignal.fallbackUsed ||
+          candidate.waterAuthority.authorityMode === 'fallback',
+      })),
+    },
+    decisionPath: {
+      evaluatedRegions: candidateEvaluations.map((candidate) => candidate.region),
+      rejectedRegions: candidateEvaluations
+        .filter((candidate) => candidate.region !== selected.region)
+        .map((candidate) => ({
+          region: candidate.region,
+          reasonCodes: Array.from(
+            new Set([
+              ...(candidate.guardrailReasons ?? []),
+              ...(candidate.defensibleReasonCodes ?? []),
+            ])
+          ),
+        })),
+      selectedRegion: selected.region,
+      baselineRegion: baseline.region,
+      action: decision,
+      reasonCode,
+      operatingMode,
+      rerouteFrom: rerouteFrom?.region ?? null,
+      precedenceOverrideApplied,
+      delayWindow: {
+        allowed: delayWindow.allowed,
+        delayMinutes: delayWindow.delayMinutes,
+        notBefore: delayWindow.notBefore,
+        reason: delayWindow.reason,
+      },
+    },
+    governance: {
+      label: 'SAIQ',
+      source: governanceSource,
+      strict: Boolean(sekedPolicy.strict || externalPolicy.strict),
+      score: governanceMetadata?.score ?? null,
+      zone: governanceMetadata?.zone ?? null,
+      weights: governanceMetadata?.weights
+        ? {
+            carbon: governanceMetadata.weights.carbon ?? null,
+            water: governanceMetadata.weights.water ?? null,
+            latency: governanceMetadata.weights.latency ?? null,
+            cost: governanceMetadata.weights.cost ?? null,
+          }
+        : null,
+      thresholds: governanceThresholds,
+      constraintsApplied: Array.from(
+        new Set([
+          ...sekedApplied.reasonCodes,
+          ...externalApplied.reasonCodes,
+        ])
+      ),
+      policyReferences: [sekedPolicy.policyReference, externalPolicy.policyReference].filter(
+        (reference): reference is string => Boolean(reference)
+      ),
+      seked: {
+        enabled: sekedPolicy.enabled,
+        strict: sekedPolicy.strict,
+        evaluated: sekedPolicy.evaluated,
+        applied: sekedPolicy.applied,
+        hookStatus: sekedPolicy.hookStatus,
+        reasonCodes: sekedApplied.reasonCodes,
+        policyReference: sekedPolicy.policyReference ?? null,
+      },
+      external: {
+        enabled: externalPolicy.enabled,
+        strict: externalPolicy.strict,
+        evaluated: externalPolicy.evaluated,
+        applied: externalPolicy.applied,
+        hookStatus: externalPolicy.hookStatus,
+        reasonCodes: externalApplied.reasonCodes,
+        policyReference: externalPolicy.policyReference ?? null,
+      },
+    },
+    proof: {
+      proofHash,
+      datasetReferences: manifestDatasets,
+      bundleHash: artifactHealth.artifactMetadata.bundleHash,
+      manifestHash: artifactHealth.artifactMetadata.manifestHash,
+      artifactMetadata: artifactHealth.artifactMetadata,
+      providerSnapshotRefs,
+      evidenceRefs: waterAuthority.evidenceRefs,
+      supplierRefs: waterAuthority.supplierSet,
+      adapter: transport,
+    },
+  }
+  const traceAssemblyMs = Date.now() - traceAssemblyStarted
+
+  const stageTimings: DecisionStageTimings = {
+    artifactSnapshotMs,
+    candidateEvaluationMs,
+    policyHookMs,
+    doctrineAssemblyMs,
+    traceAssemblyMs,
+  }
+
+  recordTelemetryMetric(
+    telemetryMetricNames.authorizationArtifactSnapshotLatencyMs,
+    'histogram',
+    artifactSnapshotMs,
+    {
+      runtime: transport.runtime,
+      transport: transport.transport,
+    }
+  )
+  recordTelemetryMetric(
+    telemetryMetricNames.authorizationCandidateEvaluationLatencyMs,
+    'histogram',
+    candidateEvaluationMs,
+    {
+      runtime: transport.runtime,
+      transport: transport.transport,
+    }
+  )
+  recordTelemetryMetric(
+    telemetryMetricNames.authorizationPolicyHookLatencyMs,
+    'histogram',
+    policyHookMs,
+    {
+      runtime: transport.runtime,
+      transport: transport.transport,
+    }
+  )
+  recordTelemetryMetric(
+    telemetryMetricNames.authorizationDoctrineAssemblyLatencyMs,
+    'histogram',
+    doctrineAssemblyMs,
+    {
+      runtime: transport.runtime,
+      transport: transport.transport,
+    }
+  )
+  recordTelemetryMetric(
+    telemetryMetricNames.authorizationTraceAssemblyLatencyMs,
+    'histogram',
+    traceAssemblyMs,
+    {
+      runtime: transport.runtime,
+      transport: transport.transport,
+    }
+  )
 
   return {
     response,
@@ -1250,8 +1593,59 @@ export async function createDecision(data: RoutingRequestInput) {
       candidateEvaluations,
       requestId,
       transport,
+      stageTimings,
+      manifestDatasets,
+      waterArtifactMetadata: artifactHealth.artifactMetadata,
+      traceSeed,
     },
   }
+}
+
+function buildTraceProviderTimings(candidateEvaluations: CandidateEvaluation[]) {
+  return candidateEvaluations.map((candidate) => ({
+    region: candidate.region,
+    latencyMs: candidate.providerResolutionMs,
+    cacheStatus: candidate.cacheStatus,
+    carbonFreshnessSec: candidate.carbonFreshnessSec,
+    waterFreshnessSec: candidate.waterFreshnessSec,
+    stalenessSec:
+      candidate.carbonFreshnessSec ?? candidate.waterFreshnessSec ?? null,
+  }))
+}
+
+async function reserveNextTraceSequence(tx: any): Promise<number> {
+  const rows = (await tx.$queryRawUnsafe(
+    `SELECT nextval(pg_get_serial_sequence('"DecisionTraceEnvelope"', 'sequenceNumber'))::int AS value`
+  )) as Array<{ value: number | string }>
+
+  const value = Number(rows?.[0]?.value ?? 0)
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error('TRACE_SEQUENCE_RESERVATION_FAILED')
+  }
+  return value
+}
+
+function normalizeTraceRow(row: any) {
+  if (!row) return null
+
+  return {
+    sequenceNumber: Number(row.sequenceNumber),
+    decisionFrameId: row.decisionFrameId,
+    traceHash: row.traceHash,
+    previousTraceHash: row.previousTraceHash ?? null,
+    inputSignalHash: row.inputSignalHash,
+    payload: row.payload as TraceEnvelope,
+    createdAt:
+      row.createdAt instanceof Date ? row.createdAt.toISOString() : new Date(row.createdAt).toISOString(),
+  }
+}
+
+async function getDecisionTraceRecord(decisionFrameId: string) {
+  const trace = await prisma.decisionTraceEnvelope.findUnique({
+    where: { decisionFrameId },
+  })
+
+  return normalizeTraceRow(trace)
 }
 
 export async function finalizeCiDecisionResponse(
@@ -1330,10 +1724,26 @@ export async function persistCiDecisionResult(
   }
 ) {
   const validatedResponse = await finalizeCiDecisionResponse(result, latencyMs, options)
-
-  const { manifest } = loadWaterArtifacts()
-  const waterArtifacts = getWaterArtifactMetadata()
+  const manifestDatasets = result.persistable.manifestDatasets
+  const waterArtifacts = result.persistable.waterArtifactMetadata
   await prisma.$transaction(async (tx: any) => {
+    const previousTrace = await tx.decisionTraceEnvelope.findFirst({
+      orderBy: { sequenceNumber: 'desc' },
+      select: { traceHash: true },
+    })
+    const traceSequenceNumber = await reserveNextTraceSequence(tx)
+    const traceEnvelope = finalizeTraceEnvelope(result.persistable.traceSeed, {
+      sequenceNumber: traceSequenceNumber,
+      totalMs: latencyMs?.total ?? null,
+      computeMs: latencyMs?.compute ?? null,
+      stageTimings: result.persistable.stageTimings,
+      providerTimings: buildTraceProviderTimings(result.persistable.candidateEvaluations),
+      cacheHit: result.persistable.candidateEvaluations.some((candidate) =>
+        ['warm', 'redis', 'lkg', 'degraded-safe'].includes(candidate.cacheStatus)
+      ),
+    })
+    const traceHashes = buildTraceHashes(traceEnvelope, previousTrace?.traceHash ?? null)
+
     const persisted = await tx.cIDecision.create({
       data: {
         decisionFrameId: result.persistable.decisionFrameId,
@@ -1368,7 +1778,7 @@ export async function persistCiDecisionResult(
           response: validatedResponse,
           policyTrace: validatedResponse.policyTrace,
           signalConfidence: result.persistable.signalConfidence,
-          datasetProvenance: manifest.datasets,
+          datasetProvenance: manifestDatasets,
           waterArtifacts,
           decisionAction: validatedResponse.decision,
           selectedReliabilityMultiplier: result.persistable.selected.reliabilityMultiplier,
@@ -1376,8 +1786,25 @@ export async function persistCiDecisionResult(
           proofEnvelope: validatedResponse.proofEnvelope,
           telemetryBridge: validatedResponse.telemetryBridge,
           adapterContext: validatedResponse.adapterContext,
+          trace: {
+            available: true,
+            sequenceNumber: traceSequenceNumber,
+            traceHash: traceHashes.traceHash,
+            governanceSource: traceEnvelope.governance.source,
+          },
         },
         createdAt: new Date(),
+      },
+    })
+
+    await tx.decisionTraceEnvelope.create({
+      data: {
+        sequenceNumber: traceSequenceNumber,
+        decisionFrameId: validatedResponse.decisionFrameId,
+        traceHash: traceHashes.traceHash,
+        previousTraceHash: previousTrace?.traceHash ?? null,
+        inputSignalHash: traceHashes.inputSignalHash,
+        payload: traceEnvelope,
       },
     })
 
@@ -1392,7 +1819,7 @@ export async function persistCiDecisionResult(
       confidence: validatedResponse.signalConfidence,
       signalsUsed: validatedResponse.proofRecord.signals_used,
       datasetVersions: validatedResponse.proofRecord.dataset_versions,
-      sourceProvenance: manifest.datasets as unknown as Record<string, unknown>[],
+      sourceProvenance: manifestDatasets as unknown as Record<string, unknown>[],
       canonicalDecision: validatedResponse.decisionEnvelope,
       proof: validatedResponse.proofEnvelope,
       adapter: validatedResponse.adapterContext ?? validatedResponse.decisionEnvelope.transport,
@@ -1523,6 +1950,7 @@ async function routeDecisionHandler(req: Request, res: Response) {
           adapter_id: replayed.decisionEnvelope.transport.adapterId,
           transport: replayed.decisionEnvelope.transport.transport,
         })
+        await applyDecisionTraceHeaders(res, replayed.decisionFrameId)
         return res.json(replayed)
       }
     }
@@ -1530,43 +1958,73 @@ async function routeDecisionHandler(req: Request, res: Response) {
     const computeStarted = Date.now()
     const result = await createDecision(data)
     const computeMs = Date.now() - computeStarted
-    const totalMs = Date.now() - requestStarted
-    let validatedResponse = await finalizeCiDecisionResponse(result, {
-      total: totalMs,
-      compute: computeMs,
-    })
+    const isFastSimulationRequest = isInternalFastSimulationRequest(req, result.persistable.request)
+    let validatedResponse
 
-    try {
-      validatedResponse = await persistCiDecisionResult(
-        result,
-        {
-          total: totalMs,
+    if (isFastSimulationRequest) {
+      const totalMs = Date.now() - requestStarted
+      validatedResponse = await finalizeCiDecisionResponse(result, {
+        total: totalMs,
+        compute: computeMs,
+      })
+      res.setHeader('x-co2router-simulation-persisted', 'false')
+    } else {
+      try {
+        validatedResponse = await persistCiDecisionResult(
+          result,
+          {
+            total: Date.now() - requestStarted,
+            compute: computeMs,
+          },
+          {
+            idempotencyReplayed: false,
+          }
+        )
+        res.setHeader('x-co2router-simulation-persisted', 'true')
+      } catch (dbError) {
+        console.warn('Failed to persist CI decision:', dbError)
+        validatedResponse = await finalizeCiDecisionResponse(result, {
+          total: Date.now() - requestStarted,
           compute: computeMs,
-        },
-        {
-          idempotencyReplayed: false,
+        })
+        if (result.persistable.request.decisionMode === 'runtime_authorization') {
+          throw dbError
         }
-      )
-    } catch (dbError) {
-      console.warn('Failed to persist CI decision:', dbError)
-      validatedResponse.policyTrace.reasonCodes.push('DB_PERSIST_FAILED_LOCAL_RESPONSE_ONLY')
+        validatedResponse.policyTrace.reasonCodes.push('DB_PERSIST_FAILED_LOCAL_RESPONSE_ONLY')
+        res.setHeader('x-co2router-simulation-persisted', 'false')
+      }
     }
+
+    const recordedTotalMs = validatedResponse.latencyMs?.total ?? (Date.now() - requestStarted)
+
+    logSlowDecision({
+      computeMs,
+      totalMs: recordedTotalMs,
+      decisionFrameId: result.response.decisionFrameId,
+      selectedRegion: result.response.selectedRegion,
+      reasonCode: result.response.reasonCode,
+      stageTimings: result.persistable.stageTimings,
+      providerResolutionMs: result.persistable.selected.providerResolutionMs,
+    })
 
     if (idempotencyCacheKey) {
       await writeIdempotentResponse(idempotencyCacheKey, validatedResponse)
     }
 
-    recordLatency(totalMs, computeMs)
+    recordLatency(recordedTotalMs, computeMs)
     recordTelemetryMetric(telemetryMetricNames.authorizationDecisionCount, 'counter', 1, {
       action: validatedResponse.decision,
       signal_mode: validatedResponse.signalMode,
       accounting_method: validatedResponse.accountingMethod,
       critical_path: Boolean(req.body?.criticalPath),
     })
-    recordTelemetryMetric(telemetryMetricNames.authorizationDecisionLatencyMs, 'histogram', totalMs, {
+    recordTelemetryMetric(telemetryMetricNames.authorizationDecisionLatencyMs, 'histogram', recordedTotalMs, {
       action: validatedResponse.decision,
       cache_status: validatedResponse.latencyMs?.cacheStatus ?? 'live',
     })
+    if (!isFastSimulationRequest) {
+      await applyDecisionTraceHeaders(res, validatedResponse.decisionFrameId)
+    }
     return res.json(validatedResponse)
   } catch (error) {
     const fallbackRegion = getFallbackRegion(
@@ -1939,6 +2397,17 @@ async function routeDecisionHandler(req: Request, res: Response) {
   }
 }
 
+async function applyDecisionTraceHeaders(res: Response, decisionFrameId: string | null | undefined) {
+  if (!decisionFrameId) return
+
+  res.setHeader('Replay-Trace-ID', decisionFrameId)
+
+  const traceRecord = await getDecisionTraceRecord(decisionFrameId)
+  if (traceRecord?.traceHash) {
+    res.setHeader('X-CO2Router-Trace-Hash', traceRecord.traceHash)
+  }
+}
+
 router.post(['/route', '/carbon-route', '/authorize'], routeDecisionHandler)
 
 const k8sEnforcementSchema = z.object({
@@ -2124,14 +2593,15 @@ router.get('/slo', async (_req, res) => {
   let totalSamples = sloState.totalMs
   let computeSamples = sloState.computeMs
   let sampleSource: 'memory' | 'persisted' | 'none' = 'memory'
+  let persistedWindow: PersistedLatencyWindow | null = null
 
   if (totalSamples.length === 0 || computeSamples.length === 0) {
-    const persisted = await getPersistedLatencyWindow()
-    if (totalSamples.length === 0 && persisted.totalMs.length > 0) {
-      totalSamples = persisted.totalMs
+    persistedWindow = await getPersistedLatencyWindow()
+    if (totalSamples.length === 0 && persistedWindow.totalMs.length > 0) {
+      totalSamples = persistedWindow.totalMs
     }
-    if (computeSamples.length === 0 && persisted.computeMs.length > 0) {
-      computeSamples = persisted.computeMs
+    if (computeSamples.length === 0 && persistedWindow.computeMs.length > 0) {
+      computeSamples = persistedWindow.computeMs
     }
     sampleSource =
       totalSamples.length > 0 || computeSamples.length > 0
@@ -2147,9 +2617,25 @@ router.get('/slo', async (_req, res) => {
   const p99Compute = percentile(computeSamples, 99)
   const currentTotal = totalSamples[totalSamples.length - 1] ?? 0
   const currentCompute = computeSamples[computeSamples.length - 1] ?? 0
+  const samples =
+    sampleSource === 'persisted'
+      ? (persistedWindow?.sampleCount ?? Math.max(totalSamples.length, computeSamples.length))
+      : Math.max(totalSamples.length, computeSamples.length)
   res.json({
-    samples: totalSamples.length,
+    samples,
     sampleSource,
+    selection:
+      sampleSource === 'persisted'
+        ? persistedWindow?.selection ?? 'recent_history'
+        : sampleSource === 'memory'
+          ? 'memory_window'
+          : 'none',
+    window: {
+      startedAt: sampleSource === 'persisted' ? persistedWindow?.windowStart ?? null : null,
+      endedAt: sampleSource === 'persisted' ? persistedWindow?.windowEnd ?? null : null,
+      activeWindowMinutes:
+        sampleSource === 'persisted' ? SLO_ACTIVE_WINDOW_MINUTES : null,
+    },
     p50: {
       totalMs: Number(p50Total.toFixed(3)),
       computeMs: Number(p50Compute.toFixed(3)),
@@ -2259,6 +2745,34 @@ router.get('/decisions', async (req, res) => {
         createdAt: true,
       },
     })
+    const decisionFrameIds = Array.from(
+      new Set(
+        decisions
+          .map((decision: any) => decision.decisionFrameId)
+          .filter((decisionFrameId: string | null | undefined): decisionFrameId is string =>
+            Boolean(decisionFrameId)
+          )
+      )
+    )
+    const traceRows =
+      decisionFrameIds.length > 0
+        ? await prisma.decisionTraceEnvelope.findMany({
+            where: {
+              decisionFrameId: {
+                in: decisionFrameIds,
+              },
+            },
+            select: {
+              decisionFrameId: true,
+              traceHash: true,
+              payload: true,
+            },
+          })
+        : []
+    const traceByFrameId = new Map<string, any>(
+      traceRows.map((trace: any) => [trace.decisionFrameId, trace])
+    )
+
     res.json({
       decisions: decisions.map((decision: any) => ({
         ...decision,
@@ -2278,6 +2792,10 @@ router.get('/decisions', async (req, res) => {
         proofEnvelope: (decision.metadata as any)?.response?.proofEnvelope ?? null,
         telemetryBridge: (decision.metadata as any)?.response?.telemetryBridge ?? null,
         adapterContext: (decision.metadata as any)?.response?.adapterContext ?? null,
+        traceAvailable: traceByFrameId.has(decision.decisionFrameId),
+        governanceSource:
+          (traceByFrameId.get(decision.decisionFrameId)?.payload as any)?.governance?.source ?? 'NONE',
+        traceHash: traceByFrameId.get(decision.decisionFrameId)?.traceHash ?? null,
       })),
       total: decisions.length,
       limit,
@@ -2285,6 +2803,54 @@ router.get('/decisions', async (req, res) => {
   } catch (error) {
     res.status(500).json({
       error: 'Failed to fetch CI decisions',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    })
+  }
+})
+
+router.get('/decisions/:decisionFrameId/trace', internalServiceGuard, async (req, res) => {
+  try {
+    const traceRecord = await getDecisionTraceRecord(req.params.decisionFrameId)
+    if (!traceRecord) {
+      const decision = await prisma.cIDecision.findFirst({
+        where: { decisionFrameId: req.params.decisionFrameId },
+        select: { decisionFrameId: true },
+      })
+      return res.status(decision ? 404 : 404).json({
+        error: decision ? 'Trace not available for legacy decision' : 'Decision not found',
+        code: decision ? 'TRACE_NOT_AVAILABLE' : 'DECISION_NOT_FOUND',
+        legacy: Boolean(decision),
+      })
+    }
+
+    return res.json(buildCuratedTraceEnvelopeView(traceRecord))
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Failed to fetch decision trace',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    })
+  }
+})
+
+router.get('/decisions/:decisionFrameId/trace/raw', internalServiceGuard, async (req, res) => {
+  try {
+    const traceRecord = await getDecisionTraceRecord(req.params.decisionFrameId)
+    if (!traceRecord) {
+      const decision = await prisma.cIDecision.findFirst({
+        where: { decisionFrameId: req.params.decisionFrameId },
+        select: { decisionFrameId: true },
+      })
+      return res.status(404).json({
+        error: decision ? 'Trace not available for legacy decision' : 'Decision not found',
+        code: decision ? 'TRACE_NOT_AVAILABLE' : 'DECISION_NOT_FOUND',
+        legacy: Boolean(decision),
+      })
+    }
+
+    return res.json(traceRecord)
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Failed to fetch raw decision trace',
       message: error instanceof Error ? error.message : 'Unknown error',
     })
   }
@@ -2312,8 +2878,31 @@ router.get('/decisions/:decisionFrameId/replay', internalServiceGuard, async (re
       })
     }
 
-    const replayResult = await createDecision(requestSchema.parse(requestPayload))
-    const replayResponse = await finalizeCiDecisionResponse(replayResult)
+    const traceRecord = await getDecisionTraceRecord(decision.decisionFrameId)
+
+    const replayTimestamp =
+      traceRecord?.payload.identity.createdAt ??
+      (typeof requestPayload.timestamp === 'string'
+        ? requestPayload.timestamp
+        : typeof metadata.response?.proofRecord?.timestamp === 'string'
+          ? metadata.response.proofRecord.timestamp
+          : decision.createdAt.toISOString())
+
+    const replayResult = await createDecision(requestSchema.parse(requestPayload), {
+      decisionFrameId: decision.decisionFrameId,
+      nowIso: replayTimestamp,
+      resolvedCandidateOverrides: traceRecord?.payload.inputSignals.resolvedCandidates,
+    })
+    const replayResultForVerification = traceRecord
+      ? {
+          ...replayResult,
+          response: pinReplayProofHash(
+            replayResult.response,
+            traceRecord.payload.proof.proofHash
+          ) as typeof replayResult.response,
+        }
+      : replayResult
+    const replayResponse = await finalizeCiDecisionResponse(replayResultForVerification)
     const mismatches = [
       (metadata.response?.decision ?? null) === replayResponse.decision ? null : 'decision',
       (metadata.response?.selectedRegion ?? null) === replayResponse.selectedRegion ? null : 'selectedRegion',
@@ -2340,6 +2929,8 @@ router.get('/decisions/:decisionFrameId/replay', internalServiceGuard, async (re
       replay: replayResponse,
       consistent: mismatches.length === 0,
       deterministicMatch: mismatches.length === 0,
+      traceBacked: Boolean(traceRecord),
+      legacy: !traceRecord,
       mismatches,
       replayedAt: new Date().toISOString(),
     })
