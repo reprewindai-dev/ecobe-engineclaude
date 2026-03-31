@@ -82,6 +82,60 @@ export async function getLatestSnapshots(zone: string, providers?: string[]) {
   })
 }
 
+const PROVIDER_FRESHNESS_THRESHOLDS_SEC: Record<string, number> = {
+  WATTTIME_MOER: 600,
+  ELECTRICITY_MAPS: 600,
+  EMBER_STRUCTURAL_BASELINE: 86400,
+  EIA_930: 1800,
+  GRIDSTATUS: 1800,
+  GB_CARBON: 1800,
+  DK_CARBON: 1800,
+  FI_CARBON: 1800,
+}
+
+const INTEGRATION_SOURCE_TO_PROVIDER: Record<string, string> = {
+  WATTTIME: 'WATTTIME_MOER',
+  GRIDSTATUS: 'GRIDSTATUS',
+  EIA_930: 'EIA_930',
+  EMBER: 'EMBER_STRUCTURAL_BASELINE',
+  GB_CARBON: 'GB_CARBON',
+  DK_CARBON: 'DK_CARBON',
+  FI_CARBON: 'FI_CARBON',
+}
+
+function normalizeProviderToken(provider: string): string {
+  return provider.trim().toLowerCase().replace(/[\s-]+/g, '_')
+}
+
+export function canonicalizeProviderIdentity(provider: string): string {
+  const normalized = normalizeProviderToken(provider)
+
+  switch (normalized) {
+    case 'watttime':
+    case 'watttime_moer':
+      return 'WATTTIME_MOER'
+    case 'electricity_maps':
+      return 'ELECTRICITY_MAPS'
+    case 'ember':
+    case 'ember_structural':
+    case 'ember_structural_baseline':
+      return 'EMBER_STRUCTURAL_BASELINE'
+    case 'eia930':
+    case 'eia_930':
+      return 'EIA_930'
+    case 'gridstatus':
+      return 'GRIDSTATUS'
+    case 'gb_carbon':
+      return 'GB_CARBON'
+    case 'dk_carbon':
+      return 'DK_CARBON'
+    case 'fi_carbon':
+      return 'FI_CARBON'
+    default:
+      return provider.trim().toUpperCase().replace(/[\s-]+/g, '_')
+  }
+}
+
 /**
  * Get provider freshness across all zones.
  * Used for dashboard health panel.
@@ -92,46 +146,58 @@ export async function getProviderFreshness(): Promise<Array<{
   freshnessSec: number
   isStale: boolean
 }>> {
-  const providers = ['watttime', 'electricity_maps', 'ember', 'eia930']
-  const results: Array<{
-    provider: string
-    latestObservedAt: string
-    freshnessSec: number
-    isStale: boolean
-  }> = []
-
-  for (const provider of providers) {
-    const latest = await prisma.providerSnapshot.findFirst({
-      where: { provider },
+  const [latestSnapshots, integrationMetrics] = await Promise.all([
+    prisma.providerSnapshot.findMany({
       orderBy: { observedAt: 'desc' },
-    })
+      take: 250,
+      select: {
+        provider: true,
+        observedAt: true,
+      },
+    }),
+    prisma.integrationMetric.findMany({
+      where: {
+        source: {
+          in: Object.keys(INTEGRATION_SOURCE_TO_PROVIDER),
+        },
+      },
+      select: {
+        source: true,
+        lastSuccessAt: true,
+      },
+    }),
+  ])
 
-    if (latest) {
-      const freshnessSec = Math.floor((Date.now() - latest.observedAt.getTime()) / 1000)
-      const staleThresholds: Record<string, number> = {
-        watttime: 600,          // 10 min
-        electricity_maps: 600,  // 10 min
-        ember: 86400,           // 24 hours (structural data)
-        eia930: 1800,           // 30 min
-      }
-
-      results.push({
-        provider,
-        latestObservedAt: latest.observedAt.toISOString(),
-        freshnessSec,
-        isStale: freshnessSec > (staleThresholds[provider] ?? 3600),
-      })
-    } else {
-      results.push({
-        provider,
-        latestObservedAt: '',
-        freshnessSec: -1,
-        isStale: true,
-      })
+  const latestByProvider = new Map<string, Date>()
+  for (const snapshot of latestSnapshots) {
+    const provider = canonicalizeProviderIdentity(snapshot.provider)
+    if (!latestByProvider.has(provider)) {
+      latestByProvider.set(provider, snapshot.observedAt)
     }
   }
 
-  return results
+  for (const metric of integrationMetrics) {
+    if (!metric.lastSuccessAt) continue
+    const provider = INTEGRATION_SOURCE_TO_PROVIDER[metric.source]
+    if (!provider) continue
+
+    const currentObservedAt = latestByProvider.get(provider)
+    if (!currentObservedAt || metric.lastSuccessAt.getTime() > currentObservedAt.getTime()) {
+      latestByProvider.set(provider, metric.lastSuccessAt)
+    }
+  }
+
+  return Array.from(latestByProvider.entries())
+    .map(([provider, observedAt]) => {
+      const freshnessSec = Math.floor((Date.now() - observedAt.getTime()) / 1000)
+      return {
+        provider,
+        latestObservedAt: observedAt.toISOString(),
+        freshnessSec,
+        isStale: freshnessSec > (PROVIDER_FRESHNESS_THRESHOLDS_SEC[provider] ?? 3600),
+      }
+    })
+    .sort((a, b) => a.provider.localeCompare(b.provider))
 }
 
 /**

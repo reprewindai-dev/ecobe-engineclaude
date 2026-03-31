@@ -1,5 +1,7 @@
 import { env } from '../config/env'
+import { getCacheHealthStatus } from '../lib/cache-warmer'
 import { prisma } from '../lib/db'
+import { recordTelemetryMetric, telemetryMetricNames } from '../lib/observability/telemetry'
 import { redis } from '../lib/redis'
 import { recoverWaterArtifactsFromLastKnownGood, validateWaterArtifacts } from '../lib/water/bundle'
 import { getWorkerStatus, setWorkerStatus } from '../routes/system'
@@ -43,6 +45,17 @@ async function runSupervisorCycle() {
       await redis.ping()
     } catch (error) {
       console.error('Runtime supervisor: redis ping failed', error)
+    }
+
+    const cacheHealth = await getCacheHealthStatus()
+    recordTelemetryMetric(
+      telemetryMetricNames.routingCacheCoveragePct,
+      'gauge',
+      cacheHealth.requiredWarmCoveragePct,
+      { scope: 'required_warm_regions' }
+    )
+    if (!cacheHealth.isHealthy) {
+      console.warn('Runtime supervisor detected degraded routing cache health', cacheHealth)
     }
 
     const artifactHealth = validateWaterArtifacts()

@@ -50,7 +50,7 @@ export const CiResponseV2Schema = z.object({
     waterAuthorityHealth: z.enum(['HEALTHY', 'DEGRADED', 'FAILED']),
     carbonFreshnessSec: z.number().nullable(),
     waterFreshnessSec: z.number().nullable(),
-    cacheStatus: z.enum(['live', 'warm', 'fallback']),
+    cacheStatus: z.enum(['live', 'warm', 'redis', 'lkg', 'degraded-safe']),
     disagreement: z.object({
       flag: z.boolean(),
       pct: z.number(),
@@ -349,7 +349,7 @@ export const CiResponseV2Schema = z.object({
       total: z.number(),
       compute: z.number(),
       providerResolution: z.number().optional(),
-      cacheStatus: z.enum(['live', 'warm', 'redis', 'fallback']).optional(),
+      cacheStatus: z.enum(['live', 'warm', 'redis', 'lkg', 'degraded-safe', 'fallback']).optional(),
       influencedDecision: z.boolean().optional(),
       providers: z
         .object({

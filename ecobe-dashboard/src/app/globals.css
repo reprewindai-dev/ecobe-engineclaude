@@ -13,6 +13,7 @@
 body {
   color: var(--foreground);
   background: var(--background);
+  scroll-behavior: smooth;
 }
 
 /* ── Animated gradient mesh background ── */
@@ -21,6 +22,12 @@ body {
     linear-gradient(rgba(16, 185, 129, 0.03) 1px, transparent 1px),
     linear-gradient(90deg, rgba(16, 185, 129, 0.03) 1px, transparent 1px);
   background-size: 48px 48px;
+}
+
+.control-panel {
+  background:
+    radial-gradient(circle at top, rgba(34, 211, 238, 0.12), transparent 35%),
+    linear-gradient(180deg, rgba(2, 8, 23, 0.94), rgba(2, 8, 18, 0.98));
 }
 
 /* ── Glassmorphism card ── */
@@ -228,6 +235,12 @@ body {
 .hover-lift:hover {
   transform: translateY(-2px);
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3), 0 0 20px rgba(16, 185, 129, 0.05);
+}
+
+.text-kicker {
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  font-size: 11px;
 }
 
 @layer utilities {

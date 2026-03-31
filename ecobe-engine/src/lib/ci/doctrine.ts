@@ -52,7 +52,7 @@ export interface MSSState {
   waterAuthorityHealth: MSSHealthState
   carbonFreshnessSec: number | null
   waterFreshnessSec: number | null
-  cacheStatus: 'live' | 'warm' | 'fallback'
+  cacheStatus: 'live' | 'warm' | 'redis' | 'lkg' | 'degraded-safe'
   disagreement: {
     flag: boolean
     pct: number
@@ -138,7 +138,7 @@ export function buildMssState(input: {
   assurance: AssuranceStatus
   carbonFreshnessSec: number | null
   waterFreshnessSec: number | null
-  cacheStatus: 'live' | 'warm' | 'fallback'
+  cacheStatus: 'live' | 'warm' | 'redis' | 'lkg' | 'degraded-safe'
 }): MSSState {
   const snapshotId = sha256Canonical({
     providerSnapshotRef: input.candidate.providerSnapshotRef,
@@ -172,7 +172,9 @@ export function buildMssState(input: {
       pct: Number(input.candidate.carbonDisagreementPct.toFixed(3)),
     },
     lastKnownGoodApplied:
-      input.cacheStatus === 'warm' || input.candidate.carbonFallbackUsed || input.candidate.waterSignal.fallbackUsed,
+      ['warm', 'redis', 'lkg', 'degraded-safe'].includes(input.cacheStatus) ||
+      input.candidate.carbonFallbackUsed ||
+      input.candidate.waterSignal.fallbackUsed,
     carbonLineage: Array.from(new Set([input.candidate.carbonSourceUsed, input.candidate.providerSnapshotRef])),
     waterLineage: Array.from(new Set(input.candidate.waterAuthority.evidenceRefs)),
   }

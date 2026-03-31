@@ -9,6 +9,8 @@ import type {
   DecisionTraceRawRecord,
   LiveSystemSnapshot,
   ReplayBundle,
+  SimulationMode,
+  SimulationRouteResponse,
 } from '@/types/control-surface'
 
 const REFRESH_INTERVAL_MS = 30_000
@@ -84,10 +86,10 @@ export function useLiveSystemSnapshot() {
   })
 }
 
-export function useSimulation() {
+export function useSimulation(mode: SimulationMode = 'fast') {
   return useMutation({
     mutationFn: (payload: Record<string, unknown>) =>
-      getJson<CiRouteResponse>('/api/control-surface/simulate', {
+      getJson<SimulationRouteResponse>(`/api/control-surface/simulate?mode=${mode}`, {
         method: 'POST',
         body: JSON.stringify(payload),
       }),

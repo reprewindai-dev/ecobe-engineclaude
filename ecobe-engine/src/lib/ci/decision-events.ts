@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { env } from '../../config/env'
 import { prisma } from '../db'
 import { sha256Canonical } from '../proof/export-chain'
+import { resolveDecisionEventSigningSecret } from './event-verifier-sink'
 import {
   CanonicalDecisionEnvelopeSchema,
   CanonicalProofEnvelopeSchema,
@@ -47,7 +48,7 @@ export const DecisionEvaluatedV1Schema = z.object({
 export type DecisionEvaluatedV1 = z.infer<typeof DecisionEvaluatedV1Schema>
 
 function signingKey() {
-  return env.DECISION_EVENT_SIGNATURE_SECRET || env.ECOBE_INTERNAL_API_KEY || 'ecobe-dev-signing-key'
+  return resolveDecisionEventSigningSecret() || 'ecobe-dev-signing-key'
 }
 
 function toCanonicalJson(payload: unknown) {

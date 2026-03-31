@@ -33,7 +33,7 @@ export interface ControlSurfaceDecisionSummary {
     total: number
     compute: number
     providerResolution?: number
-    cacheStatus?: 'live' | 'warm' | 'redis' | 'fallback'
+    cacheStatus?: 'live' | 'warm' | 'redis' | 'lkg' | 'degraded-safe' | 'fallback'
     providers?: {
       electricityMaps?: number | null
       wattTime?: number | null
@@ -69,7 +69,19 @@ export interface ControlSurfaceProviderNode {
   label: string
   providerType?: 'carbon' | 'water'
   status: 'healthy' | 'degraded' | 'offline'
+  statusReasonCode?:
+    | 'HEALTHY_LIVE'
+    | 'VERIFIED_STATIC'
+    | 'DEGRADED_RATE_LIMIT'
+    | 'DEGRADED_STALE'
+    | 'EXPIRED_BUNDLE'
+    | 'HASH_MISMATCH'
+    | 'PROVENANCE_FAILED'
+    | 'OFFLINE'
+    | null
+  statusLabel?: string | null
   freshnessSec: number | null
+  latencyMs?: number | null
   confidence: number | null
   mirrored: boolean
   lineageCount: number
@@ -80,6 +92,8 @@ export interface ControlSurfaceProviderNode {
   scenario?: 'current' | '2030' | '2050' | '2080'
   degradedReason?: string | null
   mirrorVersion?: string | null
+  ttlSec?: number | null
+  provenanceStatus?: 'verified' | 'unverified' | 'missing_source' | 'mismatch' | 'unavailable' | null
 }
 
 export interface ScenarioPreview {
@@ -307,7 +321,7 @@ export interface CiRouteResponse {
     total: number
     compute: number
     providerResolution?: number
-    cacheStatus?: 'live' | 'warm' | 'redis' | 'fallback'
+    cacheStatus?: 'live' | 'warm' | 'redis' | 'lkg' | 'degraded-safe' | 'fallback'
     influencedDecision?: boolean
     providers?: {
       electricityMaps?: number | null
@@ -321,6 +335,47 @@ export interface CiRouteResponse {
     withinEnvelope?: boolean
   }
 }
+
+export type SimulationMode = 'fast' | 'full'
+
+export interface SimulationFastResponse {
+  mode: 'fast'
+  decision: ControlAction
+  decisionMode: 'runtime_authorization' | 'scenario_planning'
+  reasonCode: string
+  decisionFrameId: string
+  selectedRunner: string
+  selectedRegion: string
+  recommendation: string
+  signalConfidence: number
+  fallbackUsed: boolean
+  signalMode: 'marginal' | 'average' | 'fallback'
+  accountingMethod: 'marginal' | 'flow-traced' | 'average'
+  notBefore: string | null
+  proofHash: string
+  waterAuthority: CiRouteResponse['waterAuthority']
+  baseline: CiRouteResponse['baseline']
+  selected: CiRouteResponse['selected']
+  savings: CiRouteResponse['savings']
+  policyTrace: Pick<
+    CiRouteResponse['policyTrace'],
+    | 'policyVersion'
+    | 'profile'
+    | 'reasonCodes'
+    | 'precedenceOverrideApplied'
+    | 'operatingMode'
+    | 'sekedPolicy'
+    | 'externalPolicy'
+  >
+  latencyMs?: CiRouteResponse['latencyMs']
+  proofRef: {
+    proofHash: string
+    decisionFrameId: string
+    traceAvailable: boolean
+  }
+}
+
+export type SimulationRouteResponse = SimulationFastResponse | CiRouteResponse
 
 export interface ReplayBundle {
   decisionFrameId: string
@@ -533,7 +588,7 @@ export interface DecisionTraceRawRecord {
           evidenceRefs: string[]
           facilityId?: string | null
         }
-        cacheStatus: 'live' | 'warm' | 'fallback'
+        cacheStatus: 'live' | 'warm' | 'redis' | 'lkg' | 'degraded-safe'
         providerResolutionMs: number
         carbonFreshnessSec: number | null
         waterFreshnessSec: number | null
@@ -552,7 +607,7 @@ export interface DecisionTraceRawRecord {
         defensibleReasonCodes: string[]
         guardrailBlocked: boolean
         guardrailReasons: string[]
-        cacheStatus: 'live' | 'warm' | 'fallback'
+        cacheStatus: 'live' | 'warm' | 'redis' | 'lkg' | 'degraded-safe'
         authorityMode: 'basin' | 'facility_overlay' | 'fallback'
         signalMode: 'marginal' | 'average' | 'fallback'
         accountingMethod: 'marginal' | 'flow-traced' | 'average'
@@ -585,6 +640,15 @@ export interface DecisionTraceRawRecord {
       label: 'SAIQ'
       source: string
       strict: boolean
+      score?: number | null
+      zone?: 'green' | 'amber' | 'red' | null
+      weights?: {
+        carbon: number | null
+        water: number | null
+        latency: number | null
+        cost: number | null
+      } | null
+      thresholds?: Record<string, number | null> | null
       constraintsApplied: string[]
       policyReferences: string[]
       seked: {
@@ -636,7 +700,7 @@ export interface DecisionTraceRawRecord {
       providerTimings: Array<{
         region: string
         latencyMs: number
-        cacheStatus: 'live' | 'warm' | 'fallback'
+        cacheStatus: 'live' | 'warm' | 'redis' | 'lkg' | 'degraded-safe'
         carbonFreshnessSec: number | null
         waterFreshnessSec: number | null
         stalenessSec: number | null

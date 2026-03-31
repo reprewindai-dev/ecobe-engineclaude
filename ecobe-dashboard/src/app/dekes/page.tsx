@@ -1,7 +1,5 @@
-'use client'
-
-import DashboardPage from '../page'
+import { redirect } from 'next/navigation'
 
 export default function DekesPage() {
-  return <DashboardPage />
+  redirect('/system/saiq-governance')
 }

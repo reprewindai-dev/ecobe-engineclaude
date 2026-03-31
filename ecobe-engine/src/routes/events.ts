@@ -5,11 +5,14 @@ import {
   buildCanonicalDecisionCloudEvent,
   verifySignatureHeader,
 } from '../lib/ci/canonical'
+import { DecisionEvaluatedV1Schema } from '../lib/ci/decision-events'
 import {
   buildIdempotencyCacheKey,
   readIdempotentResponse,
   writeIdempotentResponse,
 } from '../lib/ci/idempotency'
+import { prisma } from '../lib/db'
+import { internalServiceGuard } from '../middleware/internal-auth'
 import { createDecision, persistCiDecisionResult, requestSchema } from './ci'
 
 const router = Router()
@@ -23,6 +26,47 @@ const cloudEventSchema = z.object({
   time: z.string().optional(),
   datacontenttype: z.string().optional(),
   data: z.record(z.any()),
+})
+
+router.post('/verify', internalServiceGuard, async (req, res) => {
+  try {
+    if (!verifySignatureHeader((req as { rawBody?: string }).rawBody, req.header('x-ecobe-signature'))) {
+      return res.status(401).json({
+        error: 'Invalid event signature',
+        code: 'INVALID_EVENT_SIGNATURE',
+      })
+    }
+
+    const event = DecisionEvaluatedV1Schema.parse(req.body)
+    await prisma.integrationEvent.create({
+      data: {
+        source: 'DECISION_EVENT_VERIFIER',
+        eventType: 'DECISION_EVALUATED_VERIFIED',
+        success: true,
+        message: JSON.stringify({
+          decisionFrameId: event.decisionFrameId,
+          action: event.action,
+          reasonCode: event.reasonCode,
+          signatureHeader: req.header('x-ecobe-signature') ?? null,
+          eventKey: req.header('x-ecobe-event-key') ?? null,
+          idempotencyKey: req.header('x-ecobe-idempotency-key') ?? null,
+          receivedAt: new Date().toISOString(),
+        }),
+      },
+    })
+
+    return res.status(201).json({
+      verified: true,
+      decisionFrameId: event.decisionFrameId,
+      eventType: event.version,
+      receivedAt: new Date().toISOString(),
+    })
+  } catch (error) {
+    return res.status(400).json({
+      error: 'Invalid decision event payload',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    })
+  }
 })
 
 router.post('/ingest', async (req, res) => {

@@ -1,0 +1,141 @@
+name: Release Proof
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - codex/**
+    paths:
+      - '.github/**'
+      - 'ecobe-engine/**'
+      - 'ecobe-dashboard/**'
+      - 'docs/public/**'
+      - 'docs/private/design-partner-program/**'
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - '.github/**'
+      - 'ecobe-engine/**'
+      - 'ecobe-dashboard/**'
+      - 'docs/public/**'
+      - 'docs/private/design-partner-program/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-proof-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEFAULT_ECOBE_ENGINE_URL: https://ecobe-engineclaude-production.up.railway.app
+  DEFAULT_DASHBOARD_URL: https://co2-router-dashboard-production.up.railway.app
+  ECOBE_ENGINE_URL: ${{ secrets.ECOBE_ENGINE_URL }}
+  DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
+  ECOBE_ENGINE_API_KEY: ${{ secrets.ECOBE_ENGINE_API_KEY }}
+  ECOBE_INTERNAL_API_KEY: ${{ secrets.ECOBE_INTERNAL_API_KEY }}
+  DECISION_API_SIGNATURE_SECRET: ${{ secrets.DECISION_API_SIGNATURE_SECRET }}
+
+jobs:
+  engine-release-proof:
+    name: Engine Release Proof
+    runs-on: [self-hosted, linux, x64, do, ecobe, release]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify live engine release contract
+        env:
+          RELEASE_PROOF_OUTPUT_PATH: .github-artifacts/release-proof/result.json
+        run: node .github/scripts/verify-live-release.mjs
+
+      - name: Upload release-proof result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-proof-result
+          path: .github-artifacts/release-proof/result.json
+
+  engine-live-load:
+    name: Engine Live Load
+    runs-on: [self-hosted, linux, x64, do, ecobe, release]
+    needs: engine-release-proof
+    defaults:
+      run:
+        working-directory: ecobe-engine
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ecobe-engine/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run release load gates
+        run: npx tsx scripts/load-test-ci.ts --release-gates
+        env:
+          LOAD_TEST_BASE_URL: ${{ env.ECOBE_ENGINE_URL || env.DEFAULT_ECOBE_ENGINE_URL }}
+          DASHBOARD_URL: ${{ env.DASHBOARD_URL || env.DEFAULT_DASHBOARD_URL }}
+          DEFAULT_DASHBOARD_URL: ${{ env.DEFAULT_DASHBOARD_URL }}
+          LOAD_TEST_USE_DASHBOARD_PROXY: 'true'
+          ECOBE_ENGINE_API_KEY: ${{ secrets.ECOBE_ENGINE_API_KEY }}
+          ECOBE_INTERNAL_API_KEY: ${{ secrets.ECOBE_INTERNAL_API_KEY }}
+          DECISION_API_SIGNATURE_SECRET: ${{ secrets.DECISION_API_SIGNATURE_SECRET }}
+
+      - name: Upload load-test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-proof-load-report
+          path: ecobe-engine/data/perf/ci-load-tests/latest.json
+
+  release-proof-status:
+    name: Release Proof
+    runs-on: [self-hosted, linux, x64, do, ecobe, release]
+    needs: [engine-release-proof, engine-live-load]
+    if: always()
+    steps:
+      - name: Check release-proof jobs
+        shell: bash
+        run: |
+          if [ "${{ needs.engine-release-proof.result }}" != "success" ] || \
+             [ "${{ needs.engine-live-load.result }}" != "success" ]; then
+            echo "Release proof failed"
+            exit 1
+          fi
+          echo "Release proof passed"
+
+  failure-alert:
+    name: Release Proof Failure Alert
+    runs-on: [self-hosted, linux, x64, do, ecobe, general]
+    needs: [engine-release-proof, engine-live-load]
+    if: ${{ always() && (needs.engine-release-proof.result == 'failure' || needs.engine-live-load.result == 'failure') }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Send failure alert
+        run: node .github/scripts/send-resend-alert.mjs
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_ALERTS: ${{ secrets.RESEND_FROM_ALERTS }}
+          ALERT_INBOX_EMAIL: ${{ secrets.ALERT_INBOX_EMAIL }}
+          ALERT_SUBJECT: CO2 Router release proof failure
+          ALERT_SUMMARY: Engine release proof or live load gate failed.

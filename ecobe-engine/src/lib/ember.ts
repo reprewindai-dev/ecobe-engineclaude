@@ -70,17 +70,17 @@ export class EmberClient {
     this.apiKey = env.EMBER_API_KEY
   }
 
-  private async logSuccess() {
+  private async logSuccess(latencyMs?: number) {
     try {
-      await recordIntegrationSuccess('EMBER')
+      await recordIntegrationSuccess('EMBER', { latencyMs })
     } catch (error) {
       console.warn('Failed to record Ember success metric:', error)
     }
   }
 
-  private async logFailure(message: string) {
+  private async logFailure(message: string, latencyMs?: number) {
     try {
-      await recordIntegrationFailure('EMBER', message)
+      await recordIntegrationFailure('EMBER', message, { latencyMs })
     } catch (error) {
       console.warn('Failed to record Ember failure metric:', error)
     }
@@ -105,6 +105,7 @@ export class EmberClient {
       return []
     }
 
+    const startedAt = Date.now()
     try {
       const params: any = {
         entity_code: entityCode,
@@ -124,11 +125,11 @@ export class EmberClient {
         )
       )
 
-      await this.logSuccess()
+      await this.logSuccess(Date.now() - startedAt)
       return response.data.data || []
     } catch (error: any) {
       console.error(`Failed to fetch Ember monthly carbon intensity for ${entityCode}:`, error.message)
-      await this.logFailure(error.message ?? 'Failed to fetch carbon intensity')
+      await this.logFailure(error.message ?? 'Failed to fetch carbon intensity', Date.now() - startedAt)
       return []
     }
   }
@@ -139,6 +140,7 @@ export class EmberClient {
       return []
     }
 
+    const startedAt = Date.now()
     try {
       const params: any = {
         entity_code: entityCode,
@@ -158,11 +160,11 @@ export class EmberClient {
         )
       )
 
-      await this.logSuccess()
+      await this.logSuccess(Date.now() - startedAt)
       return response.data.data || []
     } catch (error: any) {
       console.error(`Failed to fetch Ember yearly carbon intensity for ${entityCode}:`, error.message)
-      await this.logFailure(error.message ?? 'Failed to fetch carbon intensity')
+      await this.logFailure(error.message ?? 'Failed to fetch carbon intensity', Date.now() - startedAt)
       return []
     }
   }
@@ -173,6 +175,7 @@ export class EmberClient {
       return []
     }
 
+    const startedAt = Date.now()
     try {
       const params: any = {
         entity_code: entityCode,
@@ -191,11 +194,11 @@ export class EmberClient {
         )
       )
 
-      await this.logSuccess()
+      await this.logSuccess(Date.now() - startedAt)
       return response.data.data || []
     } catch (error: any) {
       console.error(`Failed to fetch Ember electricity demand for ${entityCode}:`, error.message)
-      await this.logFailure(error.message ?? 'Failed to fetch electricity demand')
+      await this.logFailure(error.message ?? 'Failed to fetch electricity demand', Date.now() - startedAt)
       return []
     }
   }
@@ -206,6 +209,7 @@ export class EmberClient {
       return []
     }
 
+    const startedAt = Date.now()
     try {
       const params: any = {
         entity_code: entityCode,
@@ -224,11 +228,11 @@ export class EmberClient {
         )
       )
 
-      await this.logSuccess()
+      await this.logSuccess(Date.now() - startedAt)
       return response.data.data || []
     } catch (error: any) {
       console.error(`Failed to fetch Ember electricity generation for ${entityCode}:`, error.message)
-      await this.logFailure(error.message ?? 'Failed to fetch electricity generation')
+      await this.logFailure(error.message ?? 'Failed to fetch electricity generation', Date.now() - startedAt)
       return []
     }
   }
@@ -239,6 +243,7 @@ export class EmberClient {
       return []
     }
 
+    const startedAt = Date.now()
     try {
       const params: any = {
         entity_code: entityCode,
@@ -257,11 +262,11 @@ export class EmberClient {
         )
       )
 
-      await this.logSuccess()
+      await this.logSuccess(Date.now() - startedAt)
       return response.data.data || []
     } catch (error: any) {
       console.error(`Failed to fetch Ember installed capacity for ${entityCode}:`, error.message)
-      await this.logFailure(error.message ?? 'Failed to fetch installed capacity')
+      await this.logFailure(error.message ?? 'Failed to fetch installed capacity', Date.now() - startedAt)
       return []
     }
   }

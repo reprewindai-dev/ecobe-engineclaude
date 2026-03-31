@@ -1,0 +1,242 @@
+version: 1
+system: co2-router
+contracts:
+  - name: bronze.provider-signals-ingest
+    mode: streaming_and_batch
+    inputs:
+      - watttime_api
+      - gridstatus_api
+      - eia_930_ingestion
+      - ember_api
+      - gb_carbon_api
+      - dk_carbon_source
+      - fingrid_api
+    outputs:
+      - provider_signal_raw
+    transform_rules:
+      - Preserve raw payload and transport metadata unchanged.
+      - Stamp provider, region, observed_at, ingested_at, freshness_sec, and source_signature.
+      - Reject malformed observations without mutating prior raw records.
+    data_quality_checks:
+      - provider must be present
+      - observed_at must parse as timestamptz
+      - payload must be valid json
+      - duplicate provider-region-observed_at writes must be idempotent
+    dependencies: []
+    retry_failure_behavior:
+      retry: provider-specific exponential backoff
+      idempotency_key: provider+region+observed_at
+      fail_state: mark source degraded and defer recovery to background loops
+      schema_evolution: store additive payload fields in signal_payload jsonb
+
+  - name: bronze.water-artifact-ingest
+    mode: batch
+    inputs:
+      - data/source/water/*
+      - normalized_water_bundle_generation
+    outputs:
+      - water_artifact_raw
+    transform_rules:
+      - Capture dataset_name, dataset_version, manifest_hash, computed_hash, artifact_path, and metadata.
+      - Reject artifacts with missing hashes from verified bundle promotion.
+    data_quality_checks:
+      - computed_hash must exist for verified datasets
+      - artifact_path must resolve inside canonical water directories
+    dependencies: []
+    retry_failure_behavior:
+      retry: no automatic retry for invalid artifacts
+      idempotency_key: dataset_name+dataset_version+computed_hash
+      fail_state: production boot fails closed if no healthy artifact set exists
+      schema_evolution: additive metadata only
+
+  - name: silver.routing-signal-normalization
+    mode: streaming
+    inputs:
+      - provider_signal_raw
+      - provider_disagreement
+      - region_mapping
+    outputs:
+      - routing_signal_normalized
+      - redis:grid-signal:routing:{region}:{minute_bucket}
+      - redis:grid-signal:routing-lkg:{region}
+    transform_rules:
+      - Normalize provider observations to canonical region-minute buckets.
+      - Select winning routing signal according to provider doctrine and quality checks.
+      - Persist minute-bucket warm cache and region-scoped last-known-good record.
+      - Mark degraded sources instead of retrying live within the request path.
+    data_quality_checks:
+      - minute_bucket must be zero-second normalized
+      - confidence must be between 0 and 1
+      - provider_source must be populated
+    dependencies:
+      - bronze.provider-signals-ingest
+    retry_failure_behavior:
+      retry: background warm loop only
+      idempotency_key: region+minute_bucket
+      fail_state: serve conservative last-known-good path
+      schema_evolution: additive provenance_payload fields only
+
+  - name: silver.water-authority-normalization
+    mode: batch
+    inputs:
+      - water_artifact_raw
+      - facility_overlay_inputs
+    outputs:
+      - water_authority_normalized
+    transform_rules:
+      - Build canonical region/scenario authority views from verified datasets.
+      - Produce supplier_set, evidence_refs, bundle_hash, manifest_hash, and confidence.
+    data_quality_checks:
+      - authority_mode must be basin, facility_overlay, or fallback
+      - supplier_set must not be empty for non-fallback records
+    dependencies:
+      - bronze.water-artifact-ingest
+    retry_failure_behavior:
+      retry: rebuild normalized bundle from verified source set
+      idempotency_key: region+scenario+authority_mode+bundle_hash
+      fail_state: boot falls back to last-known-good normalized bundle or fails closed
+      schema_evolution: additive metadata only
+
+  - name: silver.policy-input-assembly
+    mode: streaming
+    inputs:
+      - routing_signal_normalized
+      - water_authority_normalized
+      - incoming_decision_request
+    outputs:
+      - policy_input_assembly
+    transform_rules:
+      - Expand preferredRegions into candidate set.
+      - Attach water authority, bottleneck score, explicit weights, and provisional decision.
+      - Freeze all inputs needed for replay before governance evaluation.
+    data_quality_checks:
+      - candidate_set must contain at least one region
+      - selected provisional region must exist in candidate_set
+      - explicit weights, if present, must sum to > 0
+    dependencies:
+      - silver.routing-signal-normalization
+      - silver.water-authority-normalization
+    retry_failure_behavior:
+      retry: none on malformed caller input
+      idempotency_key: decision_frame_id
+      fail_state: decision request rejected
+      schema_evolution: additive fields only, no destructive mutation of request record
+
+  - name: gold.runtime-decision-authorization
+    mode: streaming
+    inputs:
+      - policy_input_assembly
+      - seked_internal_or_external_policy
+    outputs:
+      - ci_decision_fact
+      - proof_chain_record
+    transform_rules:
+      - Evaluate water guardrails before final authorization.
+      - Apply governance source if configured.
+      - Emit decision, reason_code, selected_region, baseline_region, proof_hash, and response envelope.
+    data_quality_checks:
+      - decision must be one of run_now, reroute, delay, throttle, deny
+      - proof_hash must exist
+      - selected_region must be populated
+    dependencies:
+      - silver.policy-input-assembly
+    retry_failure_behavior:
+      retry: request-level idempotency only
+      idempotency_key: request_signature_or_idempotency_key
+      fail_state: fail closed when persistence transaction fails
+      schema_evolution: additive response fields only; public contract remains backward compatible
+
+  - name: gold.trace-ledger-append
+    mode: streaming
+    inputs:
+      - ci_decision_fact
+      - policy_input_assembly
+      - proof_chain_record
+    outputs:
+      - decision_trace_ledger
+    transform_rules:
+      - Construct canonical trace payload from frozen inputs, normalized candidates, governance, proof, and performance.
+      - Hash payload, append sequence_number, and chain previous_trace_hash.
+    data_quality_checks:
+      - trace_hash must be deterministic for identical seed input
+      - sequence_number must be monotonic
+      - input_signal_hash must be present
+    dependencies:
+      - gold.runtime-decision-authorization
+    retry_failure_behavior:
+      retry: same transaction scope as decision persistence
+      idempotency_key: decision_frame_id
+      fail_state: decision request fails closed if post-migration trace cannot persist
+      schema_evolution: additive payload fields only, no mutation of existing trace rows
+
+  - name: gold.event-outbox-dispatch
+    mode: streaming
+    inputs:
+      - ci_decision_fact
+      - decision_trace_ledger
+      - integration_webhook_sink
+    outputs:
+      - decision_event_outbox_fact
+      - incoming_event_raw
+    transform_rules:
+      - Build signed DecisionEvaluatedV1 envelope.
+      - Enqueue outbox row and dispatch to active sinks.
+      - Record delivery receipts and verifier acknowledgements.
+    data_quality_checks:
+      - signature secret must be configured for signed dispatch
+      - delivery_status transitions must be valid
+      - sink endpoints must be https in production
+    dependencies:
+      - gold.trace-ledger-append
+    retry_failure_behavior:
+      retry: exponential backoff using outbox scheduler
+      idempotency_key: outbox_id
+      fail_state: move to dead letter after max attempts and raise alert
+      schema_evolution: additive event fields only, versioned event schema
+
+  - name: platinum.slo-rollup
+    mode: batch
+    inputs:
+      - ci_decision_fact
+      - decision_trace_ledger
+      - decision_event_outbox_fact
+    outputs:
+      - decision_slo_rollup
+    transform_rules:
+      - Compute p50, p95, p99 total and compute latency.
+      - Compute trace coverage, replay verification rate, provider degraded share.
+    data_quality_checks:
+      - sample_count must equal contributing decision rows
+      - p95 values must be >= p50 values
+    dependencies:
+      - gold.runtime-decision-authorization
+      - gold.trace-ledger-append
+      - gold.event-outbox-dispatch
+    retry_failure_behavior:
+      retry: scheduled recompute
+      idempotency_key: rollup_window_start+rollup_window_end
+      fail_state: preserve last successful rollup
+      schema_evolution: additive metrics only
+
+  - name: platinum.tenant-usage-billing-rollup
+    mode: batch
+    inputs:
+      - ci_decision_fact
+      - organization
+      - org_usage_counter
+    outputs:
+      - tenant_usage_rollup
+      - customer_value_analytics
+    transform_rules:
+      - Aggregate decision volume and governed decision share by billing period.
+      - Aggregate carbon avoided, water shifted, cost optimized, and proof coverage.
+    data_quality_checks:
+      - tenant_id must be present for billed rows
+      - billing_period must be month aligned
+    dependencies:
+      - gold.runtime-decision-authorization
+    retry_failure_behavior:
+      retry: scheduled recompute
+      idempotency_key: tenant_id+billing_period
+      fail_state: preserve prior rollup and alert finance/ops
+      schema_evolution: additive financial and value metrics only

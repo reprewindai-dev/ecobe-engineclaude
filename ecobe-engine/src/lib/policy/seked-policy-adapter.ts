@@ -2,6 +2,80 @@ import { z } from 'zod'
 
 import { env } from '../../config/env'
 import type { WaterDecisionAction, WaterPolicyProfile } from '../water/types'
+import { evaluateInternalSekedPolicy } from './seked-internal'
+
+const SekedGovernanceWeightsSchema = z.object({
+  carbon: z.number().nullable().optional(),
+  water: z.number().nullable().optional(),
+  latency: z.number().nullable().optional(),
+  cost: z.number().nullable().optional(),
+})
+
+const SekedGovernanceThresholdsSchema = z.object({
+  amberMin: z.number().optional(),
+  redMin: z.number().optional(),
+  minSignalConfidence: z.number().optional(),
+  waterStressDelay: z.number().optional(),
+  waterStressDeny: z.number().optional(),
+})
+
+const SekedPolicyCandidateSchema = z.object({
+  region: z.string(),
+  score: z.number(),
+  carbonIntensity: z.number(),
+  waterStressIndex: z.number(),
+  waterScarcityImpact: z.number(),
+  guardrailCandidateBlocked: z.boolean(),
+})
+
+const SekedPolicyAdapterRequestSchema = z.object({
+  decisionFrameId: z.string(),
+  policyProfile: z.enum([
+    'default',
+    'drought_sensitive',
+    'eu_data_center_reporting',
+    'high_water_sensitivity',
+  ]),
+  policyVersion: z.string(),
+  decisionMode: z.enum(['runtime_authorization', 'scenario_planning']),
+  criticality: z.enum(['critical', 'standard', 'batch']),
+  allowDelay: z.boolean(),
+  facilityId: z.string().nullable(),
+  scenario: z.enum(['current', '2030', '2050', '2080']),
+  bottleneckScore: z.number().nullable(),
+  preferredRegions: z.array(z.string()),
+  waterAuthority: z.object({
+    authorityMode: z.enum(['basin', 'facility_overlay', 'fallback']),
+    confidence: z.number(),
+    supplierSet: z.array(z.string()),
+    evidenceRefs: z.array(z.string()),
+  }),
+  candidateSupplierProvenance: z.array(
+    z.object({
+      region: z.string(),
+      supplierSet: z.array(z.string()),
+      evidenceRefs: z.array(z.string()),
+      authorityMode: z.enum(['basin', 'facility_overlay', 'fallback']),
+    })
+  ),
+  weights: z
+    .object({
+      carbon: z.number().nullable(),
+      water: z.number().nullable(),
+      latency: z.number().nullable(),
+      cost: z.number().nullable(),
+    })
+    .optional(),
+  strict: z.boolean().optional(),
+  candidates: z.array(SekedPolicyCandidateSchema),
+  provisionalDecision: z.object({
+    action: z.enum(['run_now', 'reroute', 'delay', 'throttle', 'deny']),
+    reasonCode: z.string(),
+    selectedRegion: z.string(),
+    baselineRegion: z.string(),
+  }),
+  timestamp: z.string(),
+})
 
 const SekedDirectiveSchema = z.object({
   allow: z.boolean().optional(),
@@ -13,49 +87,23 @@ const SekedDirectiveSchema = z.object({
   maxCarbonIntensity: z.number().optional(),
   policyReference: z.string().optional(),
   rationale: z.string().optional(),
+  governance: z
+    .object({
+      source: z.string().optional(),
+      score: z.number().optional(),
+      zone: z.enum(['green', 'amber', 'red']).optional(),
+      weights: SekedGovernanceWeightsSchema.optional(),
+      thresholds: SekedGovernanceThresholdsSchema.optional(),
+    })
+    .optional(),
 })
 
-export interface SekedPolicyCandidate {
-  region: string
-  score: number
-  carbonIntensity: number
-  waterStressIndex: number
-  waterScarcityImpact: number
-  guardrailCandidateBlocked: boolean
-}
-
-export interface SekedPolicyAdapterRequest {
-  decisionFrameId: string
-  policyProfile: WaterPolicyProfile
-  policyVersion: string
-  decisionMode: 'runtime_authorization' | 'scenario_planning'
-  criticality: 'critical' | 'standard' | 'batch'
-  allowDelay: boolean
-  facilityId: string | null
-  scenario: 'current' | '2030' | '2050' | '2080'
-  bottleneckScore: number | null
-  preferredRegions: string[]
-  waterAuthority: {
-    authorityMode: 'basin' | 'facility_overlay' | 'fallback'
-    confidence: number
-    supplierSet: string[]
-    evidenceRefs: string[]
-  }
-  candidateSupplierProvenance: Array<{
-    region: string
-    supplierSet: string[]
-    evidenceRefs: string[]
-    authorityMode: 'basin' | 'facility_overlay' | 'fallback'
-  }>
-  candidates: SekedPolicyCandidate[]
-  provisionalDecision: {
-    action: WaterDecisionAction
-    reasonCode: string
-    selectedRegion: string
-    baselineRegion: string
-  }
-  timestamp: string
-}
+export type SekedGovernanceWeights = z.infer<typeof SekedGovernanceWeightsSchema>
+export type SekedGovernanceThresholds = z.infer<typeof SekedGovernanceThresholdsSchema>
+export type SekedPolicyCandidate = z.infer<typeof SekedPolicyCandidateSchema>
+export type SekedPolicyAdapterRequest = z.infer<typeof SekedPolicyAdapterRequestSchema>
+export type SekedDirective = z.infer<typeof SekedDirectiveSchema>
+export { SekedPolicyAdapterRequestSchema, SekedPolicyCandidateSchema }
 
 export interface SekedPolicyAdapterResult {
   enabled: boolean
@@ -68,7 +116,7 @@ export interface SekedPolicyAdapterResult {
   fallbackUsed: boolean
   hardFailure: boolean
   enforcedFailureAction: WaterDecisionAction | null
-  response: z.infer<typeof SekedDirectiveSchema> | null
+  response: SekedDirective | null
 }
 
 export function parseSekedStrictProfiles() {
@@ -95,8 +143,12 @@ export async function evaluateSekedPolicyAdapter(
   const strictProfiles = parseSekedStrictProfiles()
   const strict = strictProfiles.has(request.policyProfile)
   const timeoutMs = Math.max(100, env.SEKED_POLICY_ADAPTER_TIMEOUT_MS)
+  const normalizedRequest: SekedPolicyAdapterRequest = {
+    ...request,
+    strict,
+  }
 
-  if (!env.SEKED_POLICY_ADAPTER_ENABLED || !env.SEKED_POLICY_ADAPTER_URL) {
+  if (!env.SEKED_POLICY_ADAPTER_ENABLED) {
     return {
       enabled: false,
       strict,
@@ -112,6 +164,10 @@ export async function evaluateSekedPolicyAdapter(
     }
   }
 
+  if (!env.SEKED_POLICY_ADAPTER_URL) {
+    return evaluateInternalSekedPolicy(normalizedRequest)
+  }
+
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     'x-ecobe-adapter': 'seked-policy-adapter-v1',
@@ -124,7 +180,7 @@ export async function evaluateSekedPolicyAdapter(
     const response = await fetch(env.SEKED_POLICY_ADAPTER_URL, {
       method: 'POST',
       headers,
-      body: JSON.stringify(request),
+      body: JSON.stringify(normalizedRequest),
       signal: AbortSignal.timeout(timeoutMs),
     })
 
