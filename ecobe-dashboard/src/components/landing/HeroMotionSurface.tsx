@@ -22,6 +22,13 @@ export function HeroMotionSurface({
   liveDecision: ControlSurfaceDecisionSummary | null
 }) {
   const actionMeta = liveDecision ? formatAction(liveDecision.action) : null
+  const workloadLabel = liveDecision?.workloadLabel ?? 'Live decision frame hydrating'
+  const baselineCarbon = liveDecision?.baselineCarbonIntensity
+  const waterStressIndex = liveDecision?.waterStressIndex
+  const selectedRegion = liveDecision?.selectedRegion
+  const carbonDelta = liveDecision?.carbonReductionPct
+  const signalConfidence = liveDecision?.signalConfidence
+  const totalLatency = liveDecision?.latencyMs?.total
 
   return (
     <section className="relative overflow-hidden rounded-[32px] border border-white/10 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.18),transparent_38%),linear-gradient(180deg,rgba(5,10,20,0.96),rgba(2,8,18,0.98))] px-6 py-8 shadow-[0_25px_120px_rgba(0,0,0,0.45)] sm:px-10 sm:py-10 lg:px-12 lg:py-12">
@@ -115,15 +122,15 @@ export function HeroMotionSurface({
             <div className="mt-4 grid gap-3">
               <div className="rounded-2xl border border-white/8 bg-white/4 p-4">
                 <div className="text-sm font-semibold text-white">
-                  {liveDecision?.workloadLabel ?? 'CI execution frame'}
+                  {workloadLabel}
                 </div>
                 <div className="mt-2 flex items-center gap-2 text-xs text-slate-400">
                   <span>baseline</span>
                   <span className="rounded-full bg-white/6 px-2 py-1 text-slate-200">
-                    {liveDecision?.baselineCarbonIntensity ?? '--'} gCO2/kWh
+                    {baselineCarbon != null ? `${baselineCarbon} gCO2/kWh` : 'awaiting live carbon'}
                   </span>
                   <span className="rounded-full bg-white/6 px-2 py-1 text-slate-200">
-                    {liveDecision?.waterStressIndex?.toFixed(1) ?? '--'} stress
+                    {waterStressIndex != null ? `${waterStressIndex.toFixed(1)} stress` : 'water posture pending'}
                   </span>
                 </div>
               </div>
@@ -143,7 +150,7 @@ export function HeroMotionSurface({
                       binding outcome
                     </div>
                     <div className="mt-2 text-xl font-bold text-white">
-                      {actionMeta?.label ?? 'Run Now'}
+                      {actionMeta?.label ?? 'Shell Ready'}
                     </div>
                   </div>
                   {actionMeta && (
@@ -154,16 +161,16 @@ export function HeroMotionSurface({
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-300">
                   <span className="rounded-full bg-white/6 px-2 py-1">
-                    {liveDecision?.selectedRegion ?? 'us-east1'}
+                    {selectedRegion ?? 'region pending'}
                   </span>
                   <span className="rounded-full bg-white/6 px-2 py-1">
-                    {(liveDecision?.carbonReductionPct ?? 0).toFixed(1)}% carbon delta
+                    {carbonDelta != null ? `${carbonDelta.toFixed(1)}% carbon delta` : 'carbon delta pending'}
                   </span>
                   <span className="rounded-full bg-white/6 px-2 py-1">
-                    {(liveDecision?.signalConfidence ?? 0).toFixed(2)} confidence
+                    {signalConfidence != null ? `${signalConfidence.toFixed(2)} confidence` : 'signal confidence pending'}
                   </span>
                   <span className="rounded-full bg-white/6 px-2 py-1">
-                    {liveDecision?.latencyMs?.total?.toFixed(0) ?? '--'} ms
+                    {totalLatency != null ? `${totalLatency.toFixed(0)} ms` : 'latency pending'}
                   </span>
                 </div>
               </div>

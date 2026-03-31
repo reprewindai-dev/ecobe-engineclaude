@@ -56,13 +56,13 @@ export const designPartnerTimeline = [
     phase: 'Month 0',
     title: 'Qualification and setup',
     detail:
-      'Confirm ICP fit, lock scope, sign the design partner agreement, define success metrics, create the CRM record, and schedule kickoff.',
+      'Confirm fit, lock scope, sign the design partner agreement, define success metrics, and schedule kickoff.',
   },
   {
     phase: 'Month 1',
     title: 'Activation',
     detail:
-      'Onboard technically, connect the first workflow, run the first real policy decision, and record first_value_at as soon as live value appears.',
+      'Onboard technically, connect the first workflow, run the first real policy decision, and capture first value as soon as live impact appears.',
   },
   {
     phase: 'Month 2',
@@ -91,13 +91,13 @@ export const designPartnerSuccessMetrics = [
   'Time to first value',
   'Live workloads or policies governed',
   'Biweekly call completion rate',
-  'Partner-sourced revenue and converted_to_paid_at',
+  'Partner-sourced revenue and paid conversion timing',
   'Expansion to additional workflows',
   'Case study, quote, or anonymized proof asset created',
 ] as const
 
 export const designPartnerPageCopy = {
-  eyebrow: 'Design Partner Program V1',
+  eyebrow: 'Design Partner Program',
   title: 'Help shape the pre-execution control plane for compute.',
   summary:
     'CO2 Router decides whether compute is allowed to run, where it should run, and under what environmental conditions before execution happens. This is a structured pilot for a small number of teams that want live value, direct access, and a clear commercial path if the system proves itself in one real workflow.',

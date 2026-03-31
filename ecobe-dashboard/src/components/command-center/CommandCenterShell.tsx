@@ -16,6 +16,7 @@ import {
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { ACTION_META } from '@/components/control-surface/action-styles'
+import { FALLBACK_COMMAND_CENTER_SNAPSHOT } from '@/lib/control-surface/fallbacks'
 import {
   useCommandCenterSnapshot,
   useDecisionTrace,
@@ -708,31 +709,38 @@ function SystemHealthPanel({ providers, snapshot }: { providers: ControlSurfaceP
 
       <div className="mt-4 rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
         <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Providers</div>
-        <div className="mt-3 space-y-2">
-          {providers.slice(0, 6).map((provider) => (
-            <div key={provider.id} className="rounded-[16px] border border-white/8 bg-slate-950/60 px-3 py-2">
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-sm font-medium text-white">{provider.label}</div>
-                <span className={clsx('rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.16em]', getStatusTone(provider.status === 'healthy' ? 'active' : provider.status === 'offline' ? 'blocked' : 'marginal'))}>
-                  {provider.statusLabel ?? provider.status}
-                </span>
-              </div>
-              <div className="mt-1 text-xs text-slate-400">
-                {provider.providerType === 'water'
-                  ? `bundle age ${formatSecondsCompact(provider.freshnessSec)} / ttl ${formatSecondsCompact(provider.ttlSec)}`
-                  : `staleness ${formatSecondsCompact(provider.freshnessSec)} / latency ${provider.latencyMs != null ? `${provider.latencyMs}ms` : 'unavailable'}`}
-              </div>
-              {provider.providerType === 'water' ? (
-                <div className="mt-1 text-xs text-slate-500">
-                  provenance {provider.provenanceStatus ?? 'unavailable'}
+        {providers.length ? (
+          <div className="mt-3 space-y-2">
+            {providers.slice(0, 6).map((provider) => (
+              <div key={provider.id} className="rounded-[16px] border border-white/8 bg-slate-950/60 px-3 py-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-medium text-white">{provider.label}</div>
+                  <span className={clsx('rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.16em]', getStatusTone(provider.status === 'healthy' ? 'active' : provider.status === 'offline' ? 'blocked' : 'marginal'))}>
+                    {provider.statusLabel ?? provider.status}
+                  </span>
                 </div>
-              ) : null}
-              {provider.degradedReason ? (
-                <div className="mt-1 text-xs text-amber-200/90">{provider.degradedReason}</div>
-              ) : null}
-            </div>
-          ))}
-        </div>
+                <div className="mt-1 text-xs text-slate-400">
+                  {provider.providerType === 'water'
+                    ? `bundle age ${formatSecondsCompact(provider.freshnessSec)} / ttl ${formatSecondsCompact(provider.ttlSec)}`
+                    : `staleness ${formatSecondsCompact(provider.freshnessSec)} / latency ${provider.latencyMs != null ? `${provider.latencyMs}ms` : 'unavailable'}`}
+                </div>
+                {provider.providerType === 'water' ? (
+                  <div className="mt-1 text-xs text-slate-500">
+                    provenance {provider.provenanceStatus ?? 'unavailable'}
+                  </div>
+                ) : null}
+                {provider.degradedReason ? (
+                  <div className="mt-1 text-xs text-amber-200/90">{provider.degradedReason}</div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-3 rounded-[16px] border border-white/8 bg-slate-950/60 px-3 py-3 text-sm leading-7 text-slate-300">
+            Live provider state is hydrating. The command-center shell stays resolved while the
+            active signal window attaches.
+          </div>
+        )}
       </div>
     </section>
   )
@@ -839,7 +847,7 @@ function RecentDecisionQueue({
       </div>
 
       <div className="mt-4 space-y-2">
-        {items.map((item) => {
+        {items.length ? items.map((item) => {
           const actionMeta = resolveActionMeta(item.action)
           return (
             <button
@@ -858,7 +866,12 @@ function RecentDecisionQueue({
               <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />
             </button>
           )
-        })}
+        }) : (
+          <div className="rounded-[18px] border border-white/10 bg-white/[0.03] px-4 py-4 text-sm leading-7 text-slate-300">
+            The decision queue shell is ready. The first live execution frame will attach here
+            without shifting the rest of the command center.
+          </div>
+        )}
       </div>
     </section>
   )
@@ -1021,7 +1034,7 @@ function DecisionDetailSheet({
 
 export function CommandCenterShell() {
   const snapshotQuery = useCommandCenterSnapshot()
-  const snapshot = snapshotQuery.data
+  const snapshot = snapshotQuery.data ?? FALLBACK_COMMAND_CENTER_SNAPSHOT
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null)
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
   const isDesktop = useDesktopBreakpoint()
@@ -1057,15 +1070,15 @@ export function CommandCenterShell() {
       ? snapshot?.decisionCore.selectedReplay ?? null
       : ((selectedReplayQuery.data as LiveSystemReplayResponse | null) ?? null)
 
-  const governance = useMemo(() => {
-    if (!snapshot) return null
-    return deriveGovernance(snapshot, selectedTrace, selectedReplay)
-  }, [selectedReplay, selectedTrace, snapshot])
+  const governance = useMemo(
+    () => deriveGovernance(snapshot, selectedTrace, selectedReplay),
+    [selectedReplay, selectedTrace, snapshot]
+  )
 
-  const worldModel = useMemo(() => {
-    if (!snapshot) return null
-    return deriveWorldModel(snapshot.decisionCore.recentDecisions, selectedTrace, selectedReplay)
-  }, [selectedReplay, selectedTrace, snapshot])
+  const worldModel = useMemo(
+    () => deriveWorldModel(snapshot.decisionCore.recentDecisions, selectedTrace, selectedReplay),
+    [selectedReplay, selectedTrace, snapshot]
+  )
 
   useEffect(() => {
     if (isDesktop) {
@@ -1083,22 +1096,6 @@ export function CommandCenterShell() {
     }
   }, [isDesktop, mobileDetailOpen])
 
-  if (snapshotQuery.isLoading) {
-    return (
-      <div className="rounded-[32px] border border-white/10 bg-white/[0.03] p-8 text-sm text-slate-300">
-        Loading command center...
-      </div>
-    )
-  }
-
-  if (snapshotQuery.error || !snapshot || !governance || !worldModel) {
-    return (
-      <div className="rounded-[32px] border border-rose-400/20 bg-rose-400/10 p-8 text-sm text-rose-200">
-        {snapshotQuery.error instanceof Error ? snapshotQuery.error.message : 'Failed to load the command center'}
-      </div>
-    )
-  }
-
   const activeProofHash = selectedTrace?.payload.proof.proofHash ?? selectedDecision?.proofHash ?? null
   const activeEvidenceRefs = selectedTrace?.payload.proof.evidenceRefs ?? []
   const activeProviderRefs = selectedTrace?.payload.proof.providerSnapshotRefs ?? []
@@ -1113,6 +1110,13 @@ export function CommandCenterShell() {
   return (
     <>
       <div className="space-y-5">
+        {snapshotQuery.error ? (
+          <section className="rounded-[24px] border border-amber-300/20 bg-amber-300/10 px-5 py-4 text-sm text-amber-100">
+            Live command-center data is reconnecting. The control surface shell stays resolved so
+            operators can orient immediately while decision, proof, and replay data reattach.
+          </section>
+        ) : null}
+
         <GlobalCommandHeader snapshot={snapshot} selectedTrace={selectedTrace} selectedReplay={selectedReplay} />
 
         <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1.25fr)_420px]">

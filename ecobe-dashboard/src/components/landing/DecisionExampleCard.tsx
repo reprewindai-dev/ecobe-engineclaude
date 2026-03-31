@@ -19,7 +19,7 @@ export function DecisionExampleCard({
   decision,
   proofContext,
 }: {
-  decision: CiRouteResponse | ControlSurfaceDecisionSummary
+  decision: CiRouteResponse | ControlSurfaceDecisionSummary | null
   proofContext: {
     proofRef: string | null
     governance: string
@@ -28,21 +28,23 @@ export function DecisionExampleCard({
     provenance: string
   }
 }) {
-  const action = formatAction(isRouteResponse(decision) ? decision.decision : decision.action)
-  const routeDecision = isRouteResponse(decision) ? decision : null
-  const summaryDecision = routeDecision ? null : (decision as ControlSurfaceDecisionSummary)
+  const action = decision
+    ? formatAction(isRouteResponse(decision) ? decision.decision : decision.action)
+    : formatAction('run_now')
+  const routeDecision = decision && isRouteResponse(decision) ? decision : null
+  const summaryDecision = routeDecision || !decision ? null : (decision as ControlSurfaceDecisionSummary)
 
   const baselineRegion = routeDecision?.baseline.region ?? 'baseline region'
   const selectedRegion = routeDecision?.selected.region ?? summaryDecision?.selectedRegion ?? 'selected region'
-  const baselineCarbon = routeDecision?.baseline.carbonIntensity ?? summaryDecision?.baselineCarbonIntensity ?? 0
-  const selectedCarbon = routeDecision?.selected.carbonIntensity ?? summaryDecision?.carbonIntensity ?? 0
-  const baselineWater = routeDecision?.baseline.waterImpactLiters ?? summaryDecision?.waterBaselineLiters ?? 0
-  const selectedWater = routeDecision?.selected.waterImpactLiters ?? summaryDecision?.waterSelectedLiters ?? 0
+  const baselineCarbon = routeDecision?.baseline.carbonIntensity ?? summaryDecision?.baselineCarbonIntensity ?? null
+  const selectedCarbon = routeDecision?.selected.carbonIntensity ?? summaryDecision?.carbonIntensity ?? null
+  const baselineWater = routeDecision?.baseline.waterImpactLiters ?? summaryDecision?.waterBaselineLiters ?? null
+  const selectedWater = routeDecision?.selected.waterImpactLiters ?? summaryDecision?.waterSelectedLiters ?? null
   const totalLatency = routeDecision?.latencyMs?.total ?? summaryDecision?.latencyMs?.total ?? null
-  const carbonReductionPct = routeDecision?.savings.carbonReductionPct ?? summaryDecision?.carbonReductionPct ?? 0
+  const carbonReductionPct = routeDecision?.savings.carbonReductionPct ?? summaryDecision?.carbonReductionPct ?? null
   const waterImpactDeltaLiters =
-    routeDecision?.savings.waterImpactDeltaLiters ?? summaryDecision?.waterImpactDeltaLiters ?? 0
-  const signalConfidence = routeDecision?.signalConfidence ?? summaryDecision?.signalConfidence ?? 0
+    routeDecision?.savings.waterImpactDeltaLiters ?? summaryDecision?.waterImpactDeltaLiters ?? null
+  const signalConfidence = routeDecision?.signalConfidence ?? summaryDecision?.signalConfidence ?? null
 
   return (
     <motion.section
@@ -58,8 +60,9 @@ export function DecisionExampleCard({
           Binding decision with proof attached
         </h2>
         <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300 sm:text-base">
-          This is not reporting after the fact. The control plane decides before execution,
-          preserves the policy trace, and emits proof with the workload frame.
+          {decision
+            ? 'This is not reporting after the fact. The control plane decides before execution, preserves the policy trace, and emits proof with the workload frame.'
+            : 'The proof card stays visible even before the current live frame resolves. Execution authority, proof references, and governance context remain part of the public surface instead of hiding behind a loading shell.'}
         </p>
       </div>
       <div className={`rounded-[28px] border bg-slate-950/70 p-5 ${action.border} ${action.glow}`}>
@@ -74,16 +77,16 @@ export function DecisionExampleCard({
             <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">baseline</div>
             <div className="mt-2 text-xl font-bold text-white">{baselineRegion}</div>
             <div className="mt-4 space-y-2 text-sm text-slate-300">
-              <div>{baselineCarbon} gCO2/kWh</div>
-              <div>{baselineWater.toFixed(2)} L estimated</div>
+              <div>{baselineCarbon != null ? `${baselineCarbon} gCO2/kWh` : 'live carbon pending'}</div>
+              <div>{baselineWater != null ? `${baselineWater.toFixed(2)} L estimated` : 'water estimate pending'}</div>
             </div>
           </div>
           <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
             <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">selected</div>
             <div className="mt-2 text-xl font-bold text-white">{selectedRegion}</div>
             <div className="mt-4 space-y-2 text-sm text-slate-300">
-              <div>{selectedCarbon} gCO2/kWh</div>
-              <div>{selectedWater.toFixed(2)} L estimated</div>
+              <div>{selectedCarbon != null ? `${selectedCarbon} gCO2/kWh` : 'selected region pending'}</div>
+              <div>{selectedWater != null ? `${selectedWater.toFixed(2)} L estimated` : 'selected water pending'}</div>
             </div>
           </div>
         </div>
@@ -91,19 +94,19 @@ export function DecisionExampleCard({
           <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
             <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">carbon delta</div>
             <div className="mt-2 text-lg font-bold text-white">
-              {carbonReductionPct.toFixed(1)}%
+              {carbonReductionPct != null ? `${carbonReductionPct.toFixed(1)}%` : 'pending'}
             </div>
           </div>
           <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
             <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">water delta</div>
             <div className="mt-2 text-lg font-bold text-white">
-              {waterImpactDeltaLiters.toFixed(2)} L
+              {waterImpactDeltaLiters != null ? `${waterImpactDeltaLiters.toFixed(2)} L` : 'pending'}
             </div>
           </div>
           <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
             <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">confidence</div>
             <div className="mt-2 text-lg font-bold text-white">
-              {(signalConfidence * 100).toFixed(0)}%
+              {signalConfidence != null ? `${(signalConfidence * 100).toFixed(0)}%` : 'pending'}
             </div>
           </div>
           <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
@@ -116,10 +119,14 @@ export function DecisionExampleCard({
         <div className="mt-5 rounded-2xl border border-white/8 bg-white/[0.03] p-4">
           <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">why</div>
           <div className="mt-2 text-sm text-slate-300">
-            {routeDecision?.recommendation ?? summaryDecision?.summaryReason ?? 'Decision rationale available in proof.'}
+            {routeDecision?.recommendation ??
+              summaryDecision?.summaryReason ??
+              'Live decision rationale will attach here when the current proof frame resolves.'}
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            {(routeDecision?.policyTrace.reasonCodes ?? [decision.reasonCode]).slice(0, 4).map((reason) => (
+            {(routeDecision?.policyTrace.reasonCodes ?? (decision ? [decision.reasonCode] : ['LIVE_FRAME_PENDING']))
+              .slice(0, 4)
+              .map((reason) => (
               <span
                 key={reason}
                 className="rounded-full border border-white/8 bg-white/[0.03] px-2.5 py-1 text-[11px] text-slate-300"
