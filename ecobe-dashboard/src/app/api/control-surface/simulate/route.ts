@@ -11,6 +11,10 @@ import type {
   SimulationMode,
 } from '@/types/control-surface'
 
+type FullSimulationResponse = CiRouteResponse & {
+  proofEnvelope?: Record<string, unknown> | null
+}
+
 export const dynamic = 'force-dynamic'
 
 const allowedJobTypes = new Set(['standard', 'heavy', 'light'])
@@ -139,7 +143,43 @@ export async function POST(request: Request) {
     })
     const engineMs = performance.now() - engineStartedAt
 
-    const responsePayload = mode === 'full' ? data : toFastSimulationResponse(data)
+    let responsePayload: FullSimulationResponse | SimulationFastResponse = toFastSimulationResponse(data)
+
+    if (mode === 'full') {
+      const fullData = data as FullSimulationResponse
+      let proofEnvelope = fullData.proofEnvelope ?? null
+
+      try {
+        const [traceRecord, replayBundle] = await Promise.all([
+          fetchEngineJson(`/ci/decisions/${encodeURIComponent(data.decisionFrameId)}/trace`, undefined, {
+            internal: true,
+          }),
+          fetchEngineJson(`/ci/decisions/${encodeURIComponent(data.decisionFrameId)}/replay`, undefined, {
+            internal: true,
+          }),
+        ])
+
+        proofEnvelope = {
+          ...(fullData.proofEnvelope ?? {}),
+          detailMode: 'full',
+          detailHydratedAt: new Date().toISOString(),
+          traceRecord,
+          replayBundle,
+        }
+      } catch (error) {
+        proofEnvelope = {
+          ...(fullData.proofEnvelope ?? {}),
+          detailMode: 'full',
+          detailHydrationError:
+            error instanceof Error ? error.message : 'Unable to hydrate full proof details',
+        }
+      }
+
+      responsePayload = {
+        ...fullData,
+        proofEnvelope,
+      }
+    }
     const serializationStartedAt = performance.now()
     const serialized = JSON.stringify(responsePayload)
     const serializationMs = performance.now() - serializationStartedAt
