@@ -53,7 +53,16 @@ jobs:
           node-version: '20'
 
       - name: Verify live engine release contract
+        env:
+          RELEASE_PROOF_OUTPUT_PATH: .github-artifacts/release-proof/result.json
         run: node .github/scripts/verify-live-release.mjs
+
+      - name: Upload release-proof result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-proof-result
+          path: .github-artifacts/release-proof/result.json
 
   engine-live-load:
     name: Engine Live Load

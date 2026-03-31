@@ -8,6 +8,13 @@ const dashboardUrl = (process.env.DASHBOARD_URL || process.env.DEFAULT_DASHBOARD
 const internalKey = (process.env.ECOBE_INTERNAL_API_KEY || process.env.ECOBE_ENGINE_API_KEY || '').trim()
 const signatureSecret = process.env.DECISION_API_SIGNATURE_SECRET?.trim() || ''
 const outputPath = process.env.RELEASE_PROOF_OUTPUT_PATH?.trim()
+const checkpoint = {
+  ok: false,
+  checkedAt: new Date().toISOString(),
+  baseUrl,
+  dashboardUrl: dashboardUrl || null,
+  stages: {},
+}
 
 if (!baseUrl) {
   console.error('Missing ECOBE_ENGINE_URL or DEFAULT_ECOBE_ENGINE_URL.')
@@ -17,6 +24,14 @@ if (!baseUrl) {
 function assert(condition, message) {
   if (!condition) {
     throw new Error(message)
+  }
+}
+
+function stage(name, details = {}) {
+  checkpoint.stages[name] = {
+    ok: true,
+    checkedAt: new Date().toISOString(),
+    ...details,
   }
 }
 
@@ -263,90 +278,64 @@ function findMetric(snapshot, name) {
   return metrics.find((metric) => metric?.name === name) ?? null
 }
 
-const health = await fetchJson('/health')
-assert(['healthy', 'ok', 'degraded'].includes(String(health.json?.status)), '/health missing valid status')
+function writeResult(result) {
+  if (!outputPath) return
+  const resolved = path.resolve(repoRoot, outputPath)
+  fs.mkdirSync(path.dirname(resolved), { recursive: true })
+  fs.writeFileSync(resolved, JSON.stringify(result, null, 2))
+}
 
-const ciHealth = await fetchJson('/api/v1/ci/health')
-assert(typeof ciHealth.json === 'object' && ciHealth.json !== null, '/api/v1/ci/health missing object payload')
+async function main() {
+  const health = await fetchJson('/health')
+  assert(['healthy', 'ok', 'degraded'].includes(String(health.json?.status)), '/health missing valid status')
+  stage('health', { status: health.json?.status ?? null })
 
-const slo = await fetchJson('/api/v1/ci/slo')
-const p95Total = Number(slo.json?.currentMs?.total?.p95 ?? NaN)
-const p95Compute = Number(slo.json?.currentMs?.compute?.p95 ?? NaN)
-assert(Number.isFinite(p95Total), '/api/v1/ci/slo missing p95 total')
-assert(Number.isFinite(p95Compute), '/api/v1/ci/slo missing p95 compute')
-assert(p95Total <= 100, `engine p95 total above gate: ${p95Total}`)
-assert(p95Compute <= 50, `engine p95 compute above gate: ${p95Compute}`)
+  const ciHealth = await fetchJson('/api/v1/ci/health')
+  assert(typeof ciHealth.json === 'object' && ciHealth.json !== null, '/api/v1/ci/health missing object payload')
+  stage('ciHealth', { status: ciHealth.json?.status ?? 'ok' })
 
-const provenance = await fetchJson('/api/v1/water/provenance')
-const provenanceVerified = Number(
-  provenance.json?.verified ??
-    provenance.json?.summary?.verified ??
-    provenance.json?.counts?.verified ??
-    0,
-)
-const provenanceMismatch = Number(
-  provenance.json?.mismatch ??
-    provenance.json?.mismatched ??
-    provenance.json?.summary?.mismatch ??
-    provenance.json?.counts?.mismatch ??
-    0,
-)
-assert(provenanceVerified >= 1, 'water provenance verification missing or empty')
+  const slo = await fetchJson('/api/v1/ci/slo')
+  const p95Total = Number(slo.json?.currentMs?.total?.p95 ?? NaN)
+  const p95Compute = Number(slo.json?.currentMs?.compute?.p95 ?? NaN)
+  assert(Number.isFinite(p95Total), '/api/v1/ci/slo missing p95 total')
+  assert(Number.isFinite(p95Compute), '/api/v1/ci/slo missing p95 compute')
+  assert(p95Total <= 100, `engine p95 total above gate: ${p95Total}`)
+  assert(p95Compute <= 50, `engine p95 compute above gate: ${p95Compute}`)
+  stage('slo', { p95Total, p95Compute, counts: slo.json?.counts ?? null })
 
-const cache = await waitForWarmCoverage()
-const requiredWarmCoveragePct = Number(cache.json?.cache?.requiredWarmCoveragePct ?? NaN)
-assert(Number.isFinite(requiredWarmCoveragePct), 'system/cache missing requiredWarmCoveragePct')
-assert(requiredWarmCoveragePct >= 95, `required warm coverage below gate: ${requiredWarmCoveragePct}`)
+  const provenance = await fetchJson('/api/v1/water/provenance')
+  const provenanceVerified = Number(
+    provenance.json?.verified ??
+      provenance.json?.summary?.verified ??
+      provenance.json?.counts?.verified ??
+      0,
+  )
+  const provenanceMismatch = Number(
+    provenance.json?.mismatch ??
+      provenance.json?.mismatched ??
+      provenance.json?.summary?.mismatch ??
+      provenance.json?.counts?.mismatch ??
+      0,
+  )
+  assert(provenanceVerified >= 1, 'water provenance verification missing or empty')
+  stage('provenance', { verified: provenanceVerified, mismatch: provenanceMismatch })
 
-const authorize = await authorizeDecision()
-const decisionFrameId = authorize.json?.decisionFrameId
-assert(typeof decisionFrameId === 'string' && decisionFrameId.length > 0, 'authorize response missing decisionFrameId')
-assert(Boolean(authorize.response.headers.get('Replay-Trace-ID')), 'authorize response missing Replay-Trace-ID header')
-assert(Boolean(authorize.response.headers.get('X-CO2Router-Trace-Hash')), 'authorize response missing X-CO2Router-Trace-Hash header')
-
-const trace = await waitForDecisionArtifact(
-  `/api/v1/ci/decisions/${decisionFrameId}/trace`,
-  internalHeaders(),
-  [404]
-)
-assert(trace.json?.decisionFrameId === decisionFrameId, 'trace response missing matching decisionFrameId')
-
-const replay = await waitForDecisionArtifact(
-  `/api/v1/ci/decisions/${decisionFrameId}/replay`,
-  internalHeaders(),
-  [404, 422]
-)
-assert(replay.json?.decisionFrameId === decisionFrameId, 'replay response missing matching decisionFrameId')
-assert(replay.json?.deterministicMatch === true, 'replay response is not deterministic')
-
-const telemetry = await fetchJson('/api/v1/ci/telemetry')
-const leakMetric = findMetric(telemetry.json, 'ecobe.routing.hot_path.provider_leak.count')
-const leakSum = Number(leakMetric?.sum ?? 0)
-assert(leakSum === 0, `hot-path provider leak count must be zero, got ${leakSum}`)
-
-const result = {
-  ok: true,
-  checkedAt: new Date().toISOString(),
-  baseUrl,
-  smoke: {
-    health: health.json?.status,
-    ciHealth: ciHealth.json?.status ?? 'ok',
-  },
-  slo: {
-    p95Total,
-    p95Compute,
-    counts: slo.json?.counts ?? null,
-  },
-  provenance: {
-    verified: provenanceVerified,
-    mismatch: provenanceMismatch,
-  },
-  cache: {
+  const cache = await waitForWarmCoverage()
+  const requiredWarmCoveragePct = Number(cache.json?.cache?.requiredWarmCoveragePct ?? NaN)
+  assert(Number.isFinite(requiredWarmCoveragePct), 'system/cache missing requiredWarmCoveragePct')
+  assert(requiredWarmCoveragePct >= 95, `required warm coverage below gate: ${requiredWarmCoveragePct}`)
+  stage('cache', {
     requiredWarmCoveragePct,
     requiredLkgCoveragePct: cache.json?.cache?.requiredLkgCoveragePct ?? null,
     healthy: cache.json?.cache?.healthy ?? null,
-  },
-  authorize: {
+  })
+
+  const authorize = await authorizeDecision()
+  const decisionFrameId = authorize.json?.decisionFrameId
+  assert(typeof decisionFrameId === 'string' && decisionFrameId.length > 0, 'authorize response missing decisionFrameId')
+  assert(Boolean(authorize.response.headers.get('Replay-Trace-ID')), 'authorize response missing Replay-Trace-ID header')
+  assert(Boolean(authorize.response.headers.get('X-CO2Router-Trace-Hash')), 'authorize response missing X-CO2Router-Trace-Hash header')
+  stage('authorize', {
     mode: authorize.mode,
     decisionFrameId,
     replayTraceId: authorize.response.headers.get('Replay-Trace-ID'),
@@ -356,21 +345,84 @@ const result = {
       authorize.json?.policyTrace?.governance?.source ??
       authorize.json?.governance?.source ??
       null,
-  },
-  replay: {
+  })
+
+  const trace = await waitForDecisionArtifact(
+    `/api/v1/ci/decisions/${decisionFrameId}/trace`,
+    internalHeaders(),
+    [404]
+  )
+  assert(trace.json?.decisionFrameId === decisionFrameId, 'trace response missing matching decisionFrameId')
+  stage('trace', { decisionFrameId })
+
+  const replay = await waitForDecisionArtifact(
+    `/api/v1/ci/decisions/${decisionFrameId}/replay`,
+    internalHeaders(),
+    [404, 422]
+  )
+  assert(replay.json?.decisionFrameId === decisionFrameId, 'replay response missing matching decisionFrameId')
+  assert(replay.json?.deterministicMatch === true, 'replay response is not deterministic')
+  stage('replay', {
+    decisionFrameId,
     deterministicMatch: replay.json?.deterministicMatch === true,
     mismatches: replay.json?.mismatches ?? [],
-  },
-  telemetry: {
+  })
+
+  const telemetry = await fetchJson('/api/v1/ci/telemetry')
+  const leakMetric = findMetric(telemetry.json, 'ecobe.routing.hot_path.provider_leak.count')
+  const leakSum = Number(leakMetric?.sum ?? 0)
+  const replayMismatchCount = Number(findMetric(telemetry.json, 'ecobe.replay.mismatch.count')?.sum ?? 0)
+  assert(leakSum === 0, `hot-path provider leak count must be zero, got ${leakSum}`)
+  stage('telemetry', {
     hotPathProviderLeakCount: leakSum,
-    replayMismatchCount: Number(findMetric(telemetry.json, 'ecobe.replay.mismatch.count')?.sum ?? 0),
-  },
+    replayMismatchCount,
+  })
+
+  const result = {
+    ...checkpoint,
+    ok: true,
+    checkedAt: new Date().toISOString(),
+    smoke: {
+      health: health.json?.status,
+      ciHealth: ciHealth.json?.status ?? 'ok',
+    },
+    slo: {
+      p95Total,
+      p95Compute,
+      counts: slo.json?.counts ?? null,
+    },
+    provenance: {
+      verified: provenanceVerified,
+      mismatch: provenanceMismatch,
+    },
+    cache: {
+      requiredWarmCoveragePct,
+      requiredLkgCoveragePct: cache.json?.cache?.requiredLkgCoveragePct ?? null,
+      healthy: cache.json?.cache?.healthy ?? null,
+    },
+    authorize: checkpoint.stages.authorize,
+    replay: checkpoint.stages.replay,
+    telemetry: checkpoint.stages.telemetry,
+  }
+
+  writeResult(result)
+  console.log(JSON.stringify(result, null, 2))
 }
 
-if (outputPath) {
-  const resolved = path.resolve(repoRoot, outputPath)
-  fs.mkdirSync(path.dirname(resolved), { recursive: true })
-  fs.writeFileSync(resolved, JSON.stringify(result, null, 2))
+try {
+  await main()
+} catch (error) {
+  const failure = {
+    ...checkpoint,
+    ok: false,
+    failedAt: new Date().toISOString(),
+    error: {
+      message: error instanceof Error ? error.message : String(error),
+      status: error?.status ?? null,
+      payload: error?.payload ?? null,
+    },
+  }
+  writeResult(failure)
+  console.error(JSON.stringify(failure, null, 2))
+  process.exit(1)
 }
-
-console.log(JSON.stringify(result, null, 2))

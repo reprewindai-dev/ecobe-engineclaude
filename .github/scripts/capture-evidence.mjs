@@ -52,6 +52,56 @@ async function fetchJson(url, options = {}) {
   return { response, json }
 }
 
+async function fetchDashboardProxyJson(pathname) {
+  const proxiedPath = pathname.replace(/^\/api\/v1\//, '')
+  return fetchJson(`${dashboardUrl}/api/ecobe/${proxiedPath}`)
+}
+
+async function tryDirectAuthorize(body) {
+  return fetchJson(`${engineUrl}/api/v1/ci/authorize`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(signature ? { 'x-ecobe-signature': `v1=${signature}` } : {}),
+    },
+    body,
+  })
+}
+
+async function tryDashboardProxyAuthorize(body) {
+  return fetchJson(`${dashboardUrl}/api/ecobe/ci/authorize`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body,
+  })
+}
+
+async function authorizeWithFallback(body) {
+  try {
+    return await tryDirectAuthorize(body)
+  } catch (error) {
+    if (dashboardUrl) {
+      return tryDashboardProxyAuthorize(body)
+    }
+    throw error
+  }
+}
+
+async function fetchDecisionArtifact(pathname) {
+  try {
+    return await fetchJson(`${engineUrl}${pathname}`, {
+      headers: internalHeaders(),
+    })
+  } catch (error) {
+    if (dashboardUrl) {
+      return fetchDashboardProxyJson(pathname)
+    }
+    throw error
+  }
+}
+
 const authorizePayload = {
   requestId: `evidence-${Date.now()}`,
   idempotencyKey: `evidence-${Date.now()}-idempotent`,
@@ -78,14 +128,7 @@ const [slo, commandCenter, provenance] = await Promise.all([
   fetchJson(`${engineUrl}/api/v1/water/provenance`),
 ])
 
-const authorize = await fetchJson(`${engineUrl}/api/v1/ci/authorize`, {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    ...(signature ? { 'x-ecobe-signature': `v1=${signature}` } : {}),
-  },
-  body: authorizeBody,
-})
+const authorize = await authorizeWithFallback(authorizeBody)
 
 const decisionFrameId = authorize.json?.decisionFrameId
 if (!decisionFrameId) {
@@ -93,12 +136,8 @@ if (!decisionFrameId) {
 }
 
 const [trace, replay] = await Promise.all([
-  fetchJson(`${engineUrl}/api/v1/ci/decisions/${decisionFrameId}/trace`, {
-    headers: internalHeaders(),
-  }),
-  fetchJson(`${engineUrl}/api/v1/ci/decisions/${decisionFrameId}/replay`, {
-    headers: internalHeaders(),
-  }),
+  fetchDecisionArtifact(`/api/v1/ci/decisions/${decisionFrameId}/trace`),
+  fetchDecisionArtifact(`/api/v1/ci/decisions/${decisionFrameId}/replay`),
 ])
 
 mkdir(publicDir)
