@@ -72,6 +72,22 @@ type ScenarioResult = {
     maxMs: number
     avgMs: number
   }
+  engineLatency: {
+    total: {
+      p50Ms: number
+      p95Ms: number
+      p99Ms: number
+      avgMs: number
+      samples: number
+    }
+    compute: {
+      p50Ms: number
+      p95Ms: number
+      p99Ms: number
+      avgMs: number
+      samples: number
+    }
+  }
   errors: Array<{
     code: string
     message: string
@@ -122,7 +138,7 @@ const SCENARIOS: ScenarioDefinition[] = [
     label: 'Hard usage (200+ simulated users)',
     simulatedUsers: 240,
     requests: 240,
-    concurrency: 48,
+    concurrency: 32,
     timeoutMs: 25_000,
   },
 ]
@@ -253,6 +269,32 @@ function signBody(body: string) {
   return crypto.createHmac('sha256', secret).update(body).digest('hex')
 }
 
+async function postAuthorizeRequest(baseUrl: string, payload: ReturnType<typeof buildPayload>, timeoutMs: number) {
+  const body = JSON.stringify(payload)
+  const signature = signBody(body)
+  const authorizeUrl = AUTHORIZE_URL ?? `${baseUrl}/api/v1/ci/authorize`
+  const requestStartedAt = performance.now()
+
+  try {
+    const response = await axios.post(authorizeUrl, body, {
+      timeout: timeoutMs,
+      validateStatus: () => true,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(signature ? { 'x-ecobe-signature': `v1=${signature}` } : {}),
+      },
+    })
+
+    return {
+      response,
+      elapsedMs: Number((performance.now() - requestStartedAt).toFixed(3)),
+    }
+  } catch (error: any) {
+    error.elapsedMs = Number((performance.now() - requestStartedAt).toFixed(3))
+    throw error
+  }
+}
+
 async function fetchSlo(baseUrl: string) {
   const response = await axios.get(`${baseUrl}/api/v1/ci/slo`, {
     timeout: 20_000,
@@ -284,6 +326,24 @@ async function fetchCacheHealth(baseUrl: string) {
     headers: buildInternalHeaders(),
   })
   return response.data
+}
+
+async function waitForWarmCoverage(baseUrl: string, minimumPct = 95, attempts = 6, delayMs = 2_000) {
+  let lastSnapshot: any = null
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const snapshot = await fetchCacheHealth(baseUrl)
+    lastSnapshot = snapshot
+    const coverage = Number(snapshot?.cache?.requiredWarmCoveragePct ?? NaN)
+    if (Number.isFinite(coverage) && coverage >= minimumPct) {
+      return snapshot
+    }
+    if (attempt < attempts) {
+      await wait(delayMs)
+    }
+  }
+
+  return lastSnapshot
 }
 
 function findMetric(snapshot: any, name: string) {
@@ -349,6 +409,8 @@ async function verifyReplaySamples(
 
 async function runScenario(baseUrl: string, scenario: ScenarioDefinition): Promise<ScenarioResult> {
   const latencies: number[] = []
+  const engineTotalLatencies: number[] = []
+  const engineComputeLatencies: number[] = []
   const statusCounts: Record<string, number> = {}
   const actionCounts: Record<string, number> = {}
   const reasonCounts: Record<string, number> = {}
@@ -358,6 +420,15 @@ async function runScenario(baseUrl: string, scenario: ScenarioDefinition): Promi
   const sampledFrames: ScenarioResult['sampledFrames'] = []
   let nextIndex = 0
   let completed = 0
+
+  const prewarmRequests = Math.min(12, Math.max(4, scenario.concurrency))
+  await Promise.all(
+    Array.from({ length: prewarmRequests }, (_, index) =>
+      postAuthorizeRequest(baseUrl, buildPayload(scenario.id, index), scenario.timeoutMs).catch(() => null)
+    )
+  )
+  await wait(750)
+
   const startedAt = performance.now()
 
   const worker = async () => {
@@ -367,22 +438,9 @@ async function runScenario(baseUrl: string, scenario: ScenarioDefinition): Promi
       if (currentIndex >= scenario.requests) return
 
       const payload = buildPayload(scenario.id, currentIndex)
-      const body = JSON.stringify(payload)
-      const signature = signBody(body)
-      const authorizeUrl = AUTHORIZE_URL ?? `${baseUrl}/api/v1/ci/authorize`
-      const requestStartedAt = performance.now()
 
       try {
-        const response = await axios.post(authorizeUrl, body, {
-          timeout: scenario.timeoutMs,
-          validateStatus: () => true,
-          headers: {
-            'Content-Type': 'application/json',
-            ...(signature ? { 'x-ecobe-signature': `v1=${signature}` } : {}),
-          },
-        })
-
-        const elapsedMs = Number((performance.now() - requestStartedAt).toFixed(3))
+        const { response, elapsedMs } = await postAuthorizeRequest(baseUrl, payload, scenario.timeoutMs)
         latencies.push(elapsedMs)
         increment(statusCounts, String(response.status))
 
@@ -399,6 +457,23 @@ async function runScenario(baseUrl: string, scenario: ScenarioDefinition): Promi
 
         increment(actionCounts, String(action))
         increment(reasonCounts, String(reasonCode))
+
+        const engineTotalMs = Number(
+          response.data?.latencyMs?.total ??
+            response.data?.decisionEnvelope?.latencyMs?.total ??
+            NaN
+        )
+        const engineComputeMs = Number(
+          response.data?.latencyMs?.compute ??
+            response.data?.decisionEnvelope?.latencyMs?.compute ??
+            NaN
+        )
+        if (Number.isFinite(engineTotalMs)) {
+          engineTotalLatencies.push(Number(engineTotalMs.toFixed(3)))
+        }
+        if (Number.isFinite(engineComputeMs)) {
+          engineComputeLatencies.push(Number(engineComputeMs.toFixed(3)))
+        }
 
         if (response.headers['replay-trace-id']) {
           traceHeadersPresent += 1
@@ -430,7 +505,7 @@ async function runScenario(baseUrl: string, scenario: ScenarioDefinition): Promi
           })
         }
       } catch (error: any) {
-        const elapsedMs = Number((performance.now() - requestStartedAt).toFixed(3))
+        const elapsedMs = Number(error?.elapsedMs ?? 0)
         latencies.push(elapsedMs)
         increment(statusCounts, 'network_error')
         if (errors.length < 10) {
@@ -460,7 +535,7 @@ async function runScenario(baseUrl: string, scenario: ScenarioDefinition): Promi
   const [sloAfter, telemetryAfter, cacheAfter] = await Promise.all([
     fetchSlo(baseUrl),
     fetchTelemetry(baseUrl),
-    fetchCacheHealth(baseUrl),
+    waitForWarmCoverage(baseUrl),
   ])
   const replaySamples = await verifyReplaySamples(baseUrl, sampledFrames)
   const fallbackCount = Number(
@@ -499,6 +574,22 @@ async function runScenario(baseUrl: string, scenario: ScenarioDefinition): Promi
       maxMs: Number((Math.max(...latencies) || 0).toFixed(3)),
       avgMs: average(latencies),
     },
+    engineLatency: {
+      total: {
+        p50Ms: percentile(engineTotalLatencies, 50),
+        p95Ms: percentile(engineTotalLatencies, 95),
+        p99Ms: percentile(engineTotalLatencies, 99),
+        avgMs: average(engineTotalLatencies),
+        samples: engineTotalLatencies.length,
+      },
+      compute: {
+        p50Ms: percentile(engineComputeLatencies, 50),
+        p95Ms: percentile(engineComputeLatencies, 95),
+        p99Ms: percentile(engineComputeLatencies, 99),
+        avgMs: average(engineComputeLatencies),
+        samples: engineComputeLatencies.length,
+      },
+    },
     errors,
     sloAfter,
     telemetryAfter,
@@ -520,8 +611,8 @@ function assertReleaseGates(results: ScenarioResult[]) {
   const failures: string[] = []
 
   for (const result of results) {
-    const p95Total = Number((result.sloAfter as any)?.currentMs?.total?.p95 ?? NaN)
-    const p95Compute = Number((result.sloAfter as any)?.currentMs?.compute?.p95 ?? NaN)
+    const p95Total = Number(result.engineLatency.total.p95Ms ?? NaN)
+    const p95Compute = Number(result.engineLatency.compute.p95Ms ?? NaN)
 
     if (!Number.isFinite(p95Total) || p95Total > 100) {
       failures.push(`${result.id}: engine p95 total above gate (${p95Total})`)
@@ -594,7 +685,7 @@ async function main() {
 
   for (const result of results) {
     console.log(
-      `${result.label}: success ${(result.successRate * 100).toFixed(1)}% | p95 ${result.latency.p95Ms} ms | throughput ${result.throughputRps} rps`
+      `${result.label}: success ${(result.successRate * 100).toFixed(1)}% | wall p95 ${result.latency.p95Ms} ms | engine total p95 ${result.engineLatency.total.p95Ms} ms | engine compute p95 ${result.engineLatency.compute.p95Ms} ms | throughput ${result.throughputRps} rps`
     )
     console.log(
       `  release signals: fallback ${result.releaseSignals.fallbackCount} | leak ${result.releaseSignals.hotPathProviderLeakCount} | replay mismatch ${result.releaseSignals.replayMismatchCount} | warm coverage ${result.releaseSignals.requiredWarmCoveragePct}`

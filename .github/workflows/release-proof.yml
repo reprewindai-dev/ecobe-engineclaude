@@ -96,6 +96,7 @@ jobs:
           DECISION_API_SIGNATURE_SECRET: ${{ secrets.DECISION_API_SIGNATURE_SECRET }}
 
       - name: Upload load-test report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: release-proof-load-report
