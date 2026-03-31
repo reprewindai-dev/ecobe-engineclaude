@@ -69,17 +69,29 @@ function listFiles(startDir) {
   return files
 }
 
-function getChangedFiles() {
+function getChangedEntries() {
   const baseSha = process.env.GITHUB_BASE_SHA?.trim()
   const candidates = []
 
+  const parseNameStatus = (value) =>
+    value
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => {
+        const parts = line.trim().split(/\s+/)
+        const status = parts[0]
+        const filePath = normalizePath(parts.at(-1) ?? '')
+        return filePath ? { status, filePath } : null
+      })
+      .filter(Boolean)
+
   if (baseSha) {
     try {
-      const diff = execFileSync('git', ['diff', '--name-only', `${baseSha}...HEAD`], {
+      const diff = execFileSync('git', ['diff', '--name-status', `${baseSha}...HEAD`], {
         cwd: repoRoot,
         encoding: 'utf8',
       })
-      candidates.push(...diff.split(/\r?\n/).filter(Boolean))
+      candidates.push(...parseNameStatus(diff))
     } catch {
       // fall through
     }
@@ -87,11 +99,11 @@ function getChangedFiles() {
 
   if (candidates.length === 0) {
     try {
-      const staged = execFileSync('git', ['diff', '--cached', '--name-only'], {
+      const staged = execFileSync('git', ['diff', '--cached', '--name-status'], {
         cwd: repoRoot,
         encoding: 'utf8',
       })
-      candidates.push(...staged.split(/\r?\n/).filter(Boolean))
+      candidates.push(...parseNameStatus(staged))
     } catch {
       // no-op
     }
@@ -103,11 +115,25 @@ function getChangedFiles() {
       encoding: 'utf8',
     })
     for (const line of porcelain.split(/\r?\n/).filter(Boolean)) {
-      candidates.push(line.slice(3).trim())
+      const status = line.slice(0, 2).trim() || 'M'
+      const filePath = normalizePath(line.slice(3).trim())
+      if (filePath) {
+        candidates.push({ status, filePath })
+      }
     }
   }
 
-  return Array.from(new Set(candidates.map(normalizePath).filter(Boolean)))
+  return Array.from(
+    new Map(
+      candidates
+        .map((entry) => ({
+          status: String(entry.status ?? '').trim().toUpperCase(),
+          filePath: normalizePath(entry.filePath ?? ''),
+        }))
+        .filter((entry) => entry.filePath)
+        .map((entry) => [entry.filePath, entry])
+    ).values()
+  )
 }
 
 function getTrackedGitlinks() {
@@ -185,7 +211,7 @@ function assertDesignPartnerSchema() {
 }
 
 const repoFiles = listFiles(repoRoot)
-const changedFiles = getChangedFiles()
+const changedEntries = getChangedEntries()
 const failures = []
 
 const canonicalRepoFiles = repoFiles.filter((file) => !blockedPrefixes.some((prefix) => file.startsWith(prefix)))
@@ -201,9 +227,15 @@ if (looseArtifacts.length > 0) {
   failures.push(`loose live artifacts still exist in app directories:\n${looseArtifacts.map((file) => ` - ${file}`).join('\n')}`)
 }
 
-const disallowedChanged = changedFiles.filter((file) => !isAllowedPath(file))
+const disallowedChanged = changedEntries.filter(
+  ({ filePath, status }) => status !== 'D' && !isAllowedPath(filePath)
+)
 if (disallowedChanged.length > 0) {
-  failures.push(`non-allowlisted files are present in the freeze branch diff:\n${disallowedChanged.map((file) => ` - ${file}`).join('\n')}`)
+  failures.push(
+    `non-allowlisted files are present in the freeze branch diff:\n${disallowedChanged
+      .map(({ status, filePath }) => ` - ${status} ${filePath}`)
+      .join('\n')}`
+  )
 }
 
 const disallowedGitlinks = trackedGitlinks.filter(
@@ -236,7 +268,7 @@ console.log(
     {
       ok: true,
       checkedAt: new Date().toISOString(),
-      changedFiles,
+      changedFiles: changedEntries,
     },
     null,
     2
