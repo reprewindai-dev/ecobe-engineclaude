@@ -1,0 +1,76 @@
+{
+  "generatedAt": "2026-03-31T00:22:52.682Z",
+  "engineSlo": {
+    "samples": 250,
+    "sampleSource": "memory",
+    "selection": "memory_window",
+    "window": {
+      "startedAt": null,
+      "endedAt": null,
+      "activeWindowMinutes": null
+    },
+    "p50": {
+      "totalMs": 43,
+      "computeMs": 29
+    },
+    "p95": {
+      "totalMs": 56,
+      "computeMs": 39
+    },
+    "p99": {
+      "totalMs": 65,
+      "computeMs": 48
+    },
+    "current": {
+      "totalMs": 59,
+      "computeMs": 44
+    },
+    "budget": {
+      "totalP95Ms": 100,
+      "computeP95Ms": 50
+    },
+    "withinBudget": {
+      "total": true,
+      "compute": true
+    },
+    "budgetMs": {
+      "totalP95": 100,
+      "computeP95": 50
+    },
+    "currentMs": {
+      "total": {
+        "p50": 43,
+        "p95": 56,
+        "p99": 65,
+        "current": 59
+      },
+      "compute": {
+        "p50": 29,
+        "p95": 39,
+        "p99": 48,
+        "current": 44
+      }
+    },
+    "counts": {
+      "totalSamples": 250,
+      "computeSamples": 250
+    }
+  },
+  "commandCenter": {
+    "generatedAt": "2026-03-31T00:23:05.283Z"
+  },
+  "provenance": {
+    "verified": 4,
+    "mismatch": 0
+  },
+  "proof": {
+    "decisionFrameId": "9e663658-ce6a-4bd5-a81e-c481eeffdee8",
+    "replayTraceId": "9e663658-ce6a-4bd5-a81e-c481eeffdee8",
+    "traceHash": "319db5cdb6821eb8f262dc3008831497b6f02379e7db62227152b1230251674a",
+    "deterministicMatch": true,
+    "proofHash": "c6aec8e8faf8f7a49054376adfcfbb8338c8175191e7f72dba3229cb8bfa62b5",
+    "governanceSource": "SEKED_INTERNAL_V1",
+    "selectedRegion": "us-west-2",
+    "reasonCode": "ALLOW"
+  }
+}

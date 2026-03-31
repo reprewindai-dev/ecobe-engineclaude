@@ -150,13 +150,41 @@ writeJson(path.join(publicDir, 'summary.json'), {
     generatedAt: commandCenter.json?.generatedAt ?? null,
   },
   provenance: {
-    verified: provenance.json?.verified ?? null,
+    verified:
+      provenance.json?.verified ??
+      provenance.json?.summary?.verified ??
+      provenance.json?.counts?.verified ??
+      null,
+    mismatch:
+      provenance.json?.mismatch ??
+      provenance.json?.summary?.mismatch ??
+      provenance.json?.counts?.mismatch ??
+      null,
   },
   proof: {
     decisionFrameId,
     replayTraceId: authorize.response.headers.get('Replay-Trace-ID'),
     traceHash: authorize.response.headers.get('X-CO2Router-Trace-Hash'),
     deterministicMatch: replay.json?.deterministicMatch ?? null,
+    proofHash:
+      authorize.json?.proofHash ??
+      authorize.json?.proofEnvelope?.proofHash ??
+      trace.json?.proofHash ??
+      null,
+    governanceSource:
+      trace.json?.governanceSource ??
+      authorize.json?.policyTrace?.sekedPolicy?.source ??
+      authorize.json?.policyTrace?.governance?.source ??
+      authorize.json?.governance?.source ??
+      null,
+    selectedRegion:
+      authorize.json?.selectedRegion ??
+      authorize.json?.decisionEnvelope?.selectedTarget?.region ??
+      null,
+    reasonCode:
+      authorize.json?.reasonCode ??
+      authorize.json?.decisionEnvelope?.reasonCode ??
+      null,
   },
 })
 
