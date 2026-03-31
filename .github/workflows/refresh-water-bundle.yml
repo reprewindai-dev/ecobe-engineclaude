@@ -15,7 +15,7 @@ concurrency:
 jobs:
   refresh-water-bundle:
     name: Refresh Water Bundle
-    runs-on: [self-hosted, linux, x64, do, ecobe, general]
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ecobe-engine
