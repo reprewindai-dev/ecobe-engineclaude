@@ -68,7 +68,8 @@ function attachHealthRoutes(app: express.Express) {
         fingrid: Boolean(env.FINGRID_API_KEY),
         providers: {
           watttime: Boolean(env.WATTTIME_USERNAME && env.WATTTIME_PASSWORD),
-          gridstatus: Boolean(env.GRIDSTATUS_API_KEY || env.EIA_API_KEY),
+          gridstatus: Boolean(env.GRIDSTATUS_API_KEY),
+          eia930: Boolean(env.EIA_API_KEY),
           ember: Boolean(env.EMBER_API_KEY),
           gbCarbon: true,
           dkCarbon: true,

@@ -1,9 +1,9 @@
 import * as cron from 'node-cron'
+import { env } from '../config/env'
 import { eia930 } from '../lib/grid-signals/eia-client'
 import { gridStatus } from '../lib/grid-signals/gridstatus-client'
 import { BalanceParser } from '../lib/grid-signals/balance-parser'
 import { InterchangeParser } from '../lib/grid-signals/interchange-parser'
-import { SubregionParser } from '../lib/grid-signals/subregion-parser'
 import { FuelMixParser } from '../lib/grid-signals/fuel-mix-parser'
 import { GridFeatureEngine } from '../lib/grid-signals/grid-feature-engine'
 import { GridSignalCache } from '../lib/grid-signals/grid-signal-cache'
@@ -40,13 +40,17 @@ export class EIAIngestionWorker {
   private isRunning = false
   private ingestionTask?: cron.ScheduledTask
   private useGridStatus: boolean
+  private hasDirectEiaFallback: boolean
 
   constructor() {
     this.useGridStatus = gridStatus.isAvailable
-    if (this.useGridStatus) {
+    this.hasDirectEiaFallback = Boolean(env.EIA_API_KEY)
+    if (this.useGridStatus && this.hasDirectEiaFallback) {
+      console.log('EIA ingestion: GridStatus.io adapter active with direct EIA fallback')
+    } else if (this.useGridStatus) {
       console.log('EIA ingestion: GridStatus.io adapter active (real fuel mix data)')
     } else {
-      console.log('EIA ingestion: Using direct EIA API (fuel mix via subregion heuristic)')
+      console.log('EIA ingestion: Using direct EIA API (real fuel mix + direct interchange)')
     }
   }
 
@@ -114,9 +118,11 @@ export class EIAIngestionWorker {
       const endTime = new Date()
       const startTime = new Date(endTime.getTime() - 48 * 60 * 60 * 1000)
 
-      const results = await Promise.allSettled(
-        DEFAULT_REGIONS.map(config => this.ingestRegion(config, startTime, endTime))
-      )
+      const results = this.useGridStatus
+        ? await Promise.allSettled(
+            DEFAULT_REGIONS.map(config => this.ingestRegion(config, startTime, endTime))
+          )
+        : await this.runSequentialIngestion(startTime, endTime)
 
       // Log results
       let successCount = 0
@@ -165,7 +171,18 @@ export class EIAIngestionWorker {
     console.log(`Ingesting EIA-930 data for ${config.region} (${config.balancingAuthority}) [${this.useGridStatus ? 'GridStatus' : 'EIA'}]`)
 
     if (this.useGridStatus) {
-      return this.ingestFromGridStatus(config, startTime, endTime)
+      try {
+        return await this.ingestFromGridStatus(config, startTime, endTime)
+      } catch (error) {
+        if (!this.hasDirectEiaFallback) {
+          throw error
+        }
+
+        console.warn(
+          `GridStatus ingestion produced no usable data for ${config.region}; falling back to direct EIA`
+        )
+        return this.ingestFromDirectEia(config, startTime, endTime)
+      }
     } else {
       return this.ingestFromDirectEia(config, startTime, endTime)
     }
@@ -186,6 +203,10 @@ export class EIAIngestionWorker {
       gridStatus.getInterchange(config.eiaRespondent, startTime, endTime),
       gridStatus.getFuelMix(config.eiaRespondent, startTime, endTime),
     ])
+
+    if (balanceData.length === 0 && interchangeData.length === 0 && fuelMixData.length === 0) {
+      throw new Error(`GridStatus returned no usable data for ${config.region}`)
+    }
 
     // Store raw balance/interchange data for audit
     await this.storeRawData(config, balanceData, interchangeData, [])
@@ -220,6 +241,10 @@ export class EIAIngestionWorker {
     const snapshotsWithFeatures = GridFeatureEngine.updateSnapshotsWithFeatures(merged)
     const finalSnapshots = GridFeatureEngine.updateSignalQuality(snapshotsWithFeatures)
 
+    if (finalSnapshots.length === 0) {
+      throw new Error(`GridStatus produced zero processed snapshots for ${config.region}`)
+    }
+
     // Store, cache, audit
     await this.storeProcessedSnapshots(finalSnapshots)
     await this.cacheSnapshots(config.region, finalSnapshots)
@@ -241,15 +266,17 @@ export class EIAIngestionWorker {
     startTime: Date,
     endTime: Date
   ): Promise<{ snapshotsProcessed: number; rawRecordsStored: number; featuresCalculated: number }> {
-    // Fetch raw data from EIA API
-    const [balanceData, interchangeData, subregionData] = await Promise.all([
-      eia930.getBalance(config.eiaRespondent, startTime, endTime),
-      eia930.getInterchange(config.eiaRespondent, startTime, endTime),
-      eia930.getSubregion(config.eiaRespondent, startTime, endTime)
-    ])
+    // Direct EIA uses real hourly balance, interchange, and fuel-type routes.
+    const balanceData = await eia930.getBalance(config.eiaRespondent, startTime, endTime)
+    const interchangeData = await eia930.getInterchange(config.eiaRespondent, startTime, endTime)
+    const fuelMixData = await eia930.getFuelMix(config.eiaRespondent, startTime, endTime)
+
+    if (balanceData.length === 0 && interchangeData.length === 0 && fuelMixData.length === 0) {
+      throw new Error(`Direct EIA returned no usable data for ${config.region}`)
+    }
 
     // Store raw data for audit
-    await this.storeRawData(config, balanceData, interchangeData, subregionData)
+    await this.storeRawData(config, balanceData, interchangeData, [])
 
     // Parse and normalize data
     const balanceSnapshots = BalanceParser.parseBalanceData(
@@ -265,23 +292,26 @@ export class EIAIngestionWorker {
       config.balancingAuthority
     )
 
-    // Heuristic subregion parser (less accurate than GridStatus fuel mix)
-    const subregionSnapshots = SubregionParser.parseSubregionData(
-      subregionData,
+    const fuelMixSnapshots = FuelMixParser.parseFuelMixData(
+      fuelMixData,
       config.region,
       config.balancingAuthority
     )
 
     // Merge all data sources
-    const mergedSnapshots = this.mergeSnapshots(
+    let mergedSnapshots = InterchangeParser.mergeIntoSnapshots(
       balanceWithChanges,
-      interchangeSnapshots,
-      subregionSnapshots
+      interchangeSnapshots
     )
+    mergedSnapshots = FuelMixParser.mergeIntoSnapshots(mergedSnapshots, fuelMixSnapshots)
 
     // Calculate derived features
     const snapshotsWithFeatures = GridFeatureEngine.updateSnapshotsWithFeatures(mergedSnapshots)
     const finalSnapshots = GridFeatureEngine.updateSignalQuality(snapshotsWithFeatures)
+
+    if (finalSnapshots.length === 0) {
+      throw new Error(`Direct EIA produced zero processed snapshots for ${config.region}`)
+    }
 
     // Store processed snapshots
     await this.storeProcessedSnapshots(finalSnapshots)
@@ -290,9 +320,31 @@ export class EIAIngestionWorker {
 
     return {
       snapshotsProcessed: finalSnapshots.length,
-      rawRecordsStored: balanceData.length + interchangeData.length + subregionData.length,
+      rawRecordsStored: balanceData.length + interchangeData.length,
       featuresCalculated: finalSnapshots.length
     }
+  }
+
+  private async runSequentialIngestion(startTime: Date, endTime: Date) {
+    const results: Array<
+      | PromiseFulfilledResult<{
+          snapshotsProcessed: number
+          rawRecordsStored: number
+          featuresCalculated: number
+        }>
+      | PromiseRejectedResult
+    > = []
+
+    for (const config of DEFAULT_REGIONS) {
+      try {
+        const value = await this.ingestRegion(config, startTime, endTime)
+        results.push({ status: 'fulfilled', value })
+      } catch (error) {
+        results.push({ status: 'rejected', reason: error })
+      }
+    }
+
+    return results
   }
 
   /**
@@ -360,48 +412,6 @@ export class EIAIngestionWorker {
         skipDuplicates: true
       })
     }
-  }
-
-  /**
-   * Merge snapshots from different data sources (direct EIA path only)
-   */
-  private mergeSnapshots(
-    balanceSnapshots: any[],
-    interchangeSnapshots: any[],
-    subregionSnapshots: any[]
-  ): any[] {
-    // Create a map by timestamp for efficient merging
-    const snapshotMap = new Map<string, any>()
-
-    // Start with balance snapshots (primary source)
-    for (const snapshot of balanceSnapshots) {
-      snapshotMap.set(snapshot.timestamp, { ...snapshot })
-    }
-
-    // Merge interchange data
-    for (const interchange of interchangeSnapshots) {
-      const existing = snapshotMap.get(interchange.timestamp)
-      if (existing) {
-        existing.netInterchangeMwh = interchange.netInterchangeMwh
-        if (interchange.metadata) {
-          existing.metadata = { ...existing.metadata, ...interchange.metadata }
-        }
-      }
-    }
-
-    // Merge subregion data
-    for (const subregion of subregionSnapshots) {
-      const existing = snapshotMap.get(subregion.timestamp)
-      if (existing) {
-        existing.renewableRatio = subregion.renewableRatio
-        existing.fossilRatio = subregion.fossilRatio
-        if (subregion.metadata) {
-          existing.metadata = { ...existing.metadata, ...subregion.metadata }
-        }
-      }
-    }
-
-    return Array.from(snapshotMap.values())
   }
 
   /**

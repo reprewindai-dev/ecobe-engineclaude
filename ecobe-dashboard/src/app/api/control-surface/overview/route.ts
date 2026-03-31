@@ -72,9 +72,15 @@ type DecisionFeed = {
 type ProviderTrustResponse = {
   freshness: Array<{
     provider: string
-    latestObservedAt: string
-    freshnessSec: number
+    latestObservedAt: string | null
+    freshnessSec: number | null
     isStale: boolean
+    configured: boolean
+    status: 'healthy' | 'degraded' | 'offline'
+    statusReasonCode: 'HEALTHY_LIVE' | 'DEGRADED_STALE' | 'DEGRADED_RATE_LIMIT' | 'OFFLINE'
+    ttlSec: number
+    lastError: string | null
+    lastLatencyMs: number | null
   }>
   providers: Record<
     string,
@@ -82,9 +88,9 @@ type ProviderTrustResponse = {
       zone: string
       signalType: string
         value: number
-        confidence: number
-        freshnessSec: number
-        observedAt: string
+        confidence: number | null
+        freshnessSec: number | null
+        observedAt: string | null
         metadata?: Record<string, unknown> | null
       }>
   >
@@ -202,27 +208,59 @@ function buildProviders(providerTrust: ProviderTrustResponse): ControlSurfacePro
     providerTrust.freshness.map((item) => [item.provider.toUpperCase(), item])
   )
 
-  const carbonProviders = Object.entries(providerTrust.providers).map(([key, snapshots]) => {
+  const providerEntries = new Map<string, ProviderTrustResponse['providers'][string]>()
+  for (const [key, snapshots] of Object.entries(providerTrust.providers)) {
+    providerEntries.set(key.toUpperCase(), snapshots)
+  }
+  for (const freshnessItem of providerTrust.freshness) {
+    const key = freshnessItem.provider.toUpperCase()
+    if (!providerEntries.has(key)) {
+      providerEntries.set(key, [])
+    }
+  }
+
+  const carbonProviders = Array.from(providerEntries.entries()).map(([key, snapshots]) => {
     const fresh = freshnessMap.get(key) ?? freshnessMap.get(key.toLowerCase())
     const latestConfidence = snapshots[0]?.confidence ?? null
     const isStale = Boolean(fresh?.isStale)
-    const status: ControlSurfaceProviderNode['status'] = isStale ? 'degraded' : 'healthy'
+    const status: ControlSurfaceProviderNode['status'] = fresh?.status ?? (isStale ? 'degraded' : 'healthy')
     const mode: ControlSurfaceProviderNode['mode'] =
-      key === 'ember' ? 'mirrored' : isStale ? 'fallback' : 'live'
+      status === 'offline'
+        ? 'fallback'
+        : key === 'EMBER_STRUCTURAL_BASELINE'
+          ? 'mirrored'
+          : isStale
+            ? 'fallback'
+            : 'live'
     const signalAuthority: ControlSurfaceProviderNode['signalAuthority'] =
-      key.toLowerCase().includes('watttime') ? 'marginal' : isStale ? 'fallback' : 'average'
+      status === 'offline'
+        ? 'fallback'
+        : key.toLowerCase().includes('watttime')
+          ? 'marginal'
+          : isStale
+            ? 'fallback'
+            : 'average'
     return {
       id: key,
       label: key.replace(/_/g, ' '),
       providerType: 'carbon' as const,
       status,
-      freshnessSec: fresh && fresh.freshnessSec >= 0 ? fresh.freshnessSec : null,
+      statusReasonCode: fresh?.statusReasonCode ?? (status === 'offline' ? 'OFFLINE' : isStale ? 'DEGRADED_STALE' : 'HEALTHY_LIVE'),
+      freshnessSec: fresh && fresh.freshnessSec != null && fresh.freshnessSec >= 0 ? fresh.freshnessSec : null,
+      latencyMs: fresh?.lastLatencyMs ?? null,
       confidence: latestConfidence,
       mirrored: true,
       lineageCount: snapshots.length,
       mode,
       signalAuthority,
-      degradedReason: isStale ? 'Freshness breached safe mirror window' : null,
+      degradedReason:
+        status === 'offline'
+          ? 'Provider is not configured in the current production environment.'
+          : isStale
+            ? fresh?.statusReasonCode === 'DEGRADED_RATE_LIMIT'
+              ? 'Provider is rate limited or quota constrained.'
+              : 'Freshness breached safe mirror window.'
+            : null,
       mirrorVersion: typeof snapshots[0]?.metadata?.['version'] === 'string'
         ? String(snapshots[0]?.metadata?.['version'])
         : null,

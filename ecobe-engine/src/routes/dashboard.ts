@@ -1145,38 +1145,31 @@ router.get('/savings', async (req, res) => {
 
 router.get('/methodology/providers', async (_req, res) => {
   try {
-    const metrics = (await getIntegrationMetricsSummary()) as IntegrationMetricRecord[]
-    const bySource = new Map<string, IntegrationMetricRecord>(
-      metrics.map((metric: IntegrationMetricRecord) => [metric.source, metric])
+    const freshness = await getProviderFreshness()
+    const byProvider = new Map(
+      freshness.map((provider) => [provider.provider, provider] as const)
     )
 
     const providers = [
-      ['WattTime', 'WATTTIME'],
-      ['GridStatus EIA-930', 'GRIDSTATUS'],
-      ['Ember', 'EMBER'],
+      ['WattTime', 'WATTTIME_MOER'],
+      ['GridStatus', 'GRIDSTATUS'],
+      ['EIA-930', 'EIA_930'],
+      ['Ember', 'EMBER_STRUCTURAL_BASELINE'],
       ['GB Carbon Intensity', 'GB_CARBON'],
       ['DK Carbon', 'DK_CARBON'],
       ['FI Carbon', 'FI_CARBON'],
-    ].map(([name, source]) => {
-      const metric = bySource.get(source)
-      const successRate = metric ? computeIntegrationSuccessRate(metric) : null
-      const stalenessSec = metric?.lastSuccessAt
-        ? Math.max(0, Math.floor((Date.now() - metric.lastSuccessAt.getTime()) / 1000))
-        : null
+    ].map(([name, providerKey]) => {
+      const provider = byProvider.get(providerKey)
 
       return {
         name,
-        status:
-          metric == null
-            ? 'offline'
-            : metric.alertActive || (successRate ?? 0) < 0.8
-              ? 'degraded'
-              : 'healthy',
-        latencyMs: metric?.lastLatencyMs != null ? Math.round(metric.lastLatencyMs) : null,
-        lastLatencyMs: metric?.lastLatencyMs != null ? Math.round(metric.lastLatencyMs) : null,
-        lastSuccessAt: metric?.lastSuccessAt?.toISOString() ?? null,
-        stalenessSec,
+        status: provider?.status ?? 'offline',
+        latencyMs: provider?.lastLatencyMs != null ? Math.round(provider.lastLatencyMs) : null,
+        lastLatencyMs: provider?.lastLatencyMs != null ? Math.round(provider.lastLatencyMs) : null,
+        lastSuccessAt: provider?.latestObservedAt ?? null,
+        stalenessSec: provider?.freshnessSec ?? null,
         disagreementPct: null,
+        configured: provider?.configured ?? false,
       }
     })
 

@@ -68,9 +68,15 @@ type DecisionFeed = {
 type ProviderTrustResponse = {
   freshness: Array<{
     provider: string
-    latestObservedAt: string
-    freshnessSec: number
+    latestObservedAt: string | null
+    freshnessSec: number | null
     isStale: boolean
+    configured: boolean
+    status: 'healthy' | 'degraded' | 'offline'
+    statusReasonCode: 'HEALTHY_LIVE' | 'DEGRADED_STALE' | 'DEGRADED_RATE_LIMIT' | 'OFFLINE'
+    ttlSec: number
+    lastError: string | null
+    lastLatencyMs: number | null
   }>
   providers: Record<
     string,
@@ -78,9 +84,9 @@ type ProviderTrustResponse = {
       zone: string
       signalType: string
       value: number
-      confidence: number
-      freshnessSec: number
-      observedAt: string
+      confidence: number | null
+      freshnessSec: number | null
+      observedAt: string | null
       metadata?: Record<string, unknown> | null
     }>
   >
@@ -302,43 +308,63 @@ function buildProviders(
     const latestMetadata = record.snapshots[0]?.metadata ?? null
     const fallbackFreshnessSec = record.snapshots[0]?.freshnessSec ?? null
     const freshnessSec =
-      fresh && fresh.freshnessSec >= 0
+      fresh?.freshnessSec != null && fresh.freshnessSec >= 0
         ? fresh.freshnessSec
         : fallbackFreshnessSec
     const metadataText = latestMetadata ? JSON.stringify(latestMetadata).toLowerCase() : ''
     const rateLimited =
       metadataText.includes('429') || metadataText.includes('rate limit') || metadataText.includes('quota')
-    const isStale =
-      fresh && fresh.freshnessSec >= 0
-        ? Boolean(fresh.isStale)
-        : freshnessSec != null
-          ? freshnessSec > resolveLiveProviderTtl(canonicalKey)
-          : false
-    const statusReasonCode: ControlSurfaceProviderNode['statusReasonCode'] = isStale
-      ? rateLimited
-        ? 'DEGRADED_RATE_LIMIT'
-        : 'DEGRADED_STALE'
-      : 'HEALTHY_LIVE'
+    const isStale = fresh ? Boolean(fresh.isStale) : freshnessSec != null
+      ? freshnessSec > resolveLiveProviderTtl(canonicalKey)
+      : false
+    const status: ControlSurfaceProviderNode['status'] =
+      fresh?.status ?? (isStale ? 'degraded' : 'healthy')
+    const statusReasonCode: ControlSurfaceProviderNode['statusReasonCode'] =
+      fresh?.statusReasonCode ??
+      (status === 'offline'
+        ? 'OFFLINE'
+        : isStale
+          ? rateLimited
+            ? 'DEGRADED_RATE_LIMIT'
+            : 'DEGRADED_STALE'
+          : 'HEALTHY_LIVE')
 
     return {
       id: canonicalKey,
       label: providerLabel(canonicalKey),
       providerType: 'carbon' as const,
-      status: isStale ? 'degraded' : 'healthy',
+      status,
       statusReasonCode,
       statusLabel: humanizeStatusReason(statusReasonCode),
       freshnessSec,
-      latencyMs: resolveLatencyMs(latestMetadata),
+      latencyMs: fresh?.lastLatencyMs ?? resolveLatencyMs(latestMetadata),
       confidence: latestConfidence,
       mirrored: canonicalKey === 'EMBER_STRUCTURAL_BASELINE',
       lineageCount: record.snapshots.length,
-      mode: canonicalKey === 'EMBER_STRUCTURAL_BASELINE' ? 'mirrored' : isStale ? 'fallback' : 'live',
-      signalAuthority: canonicalKey.includes('WATTTIME') ? 'marginal' : isStale ? 'fallback' : 'average',
-      degradedReason: isStale
-        ? rateLimited
-          ? 'Provider is rate limited or quota constrained.'
-          : 'Freshness breached the safe live-signal window.'
-        : null,
+      mode:
+        status === 'offline'
+          ? 'fallback'
+          : canonicalKey === 'EMBER_STRUCTURAL_BASELINE'
+            ? 'mirrored'
+            : isStale
+              ? 'fallback'
+              : 'live',
+      signalAuthority:
+        status === 'offline'
+          ? 'fallback'
+          : canonicalKey.includes('WATTTIME')
+            ? 'marginal'
+            : isStale
+              ? 'fallback'
+              : 'average',
+      degradedReason:
+        status === 'offline'
+          ? 'Provider is not configured in the current production environment.'
+          : isStale
+            ? statusReasonCode === 'DEGRADED_RATE_LIMIT'
+              ? 'Provider is rate limited or quota constrained.'
+              : 'Freshness breached the safe live-signal window.'
+            : null,
       mirrorVersion: typeof latestMetadata?.version === 'string' ? latestMetadata.version : null,
     } satisfies ControlSurfaceProviderNode
   })

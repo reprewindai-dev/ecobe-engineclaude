@@ -5,6 +5,7 @@
  * Stores WattTime, Electricity Maps, Ember, and EIA-930 snapshots.
  */
 
+import { env } from '../../config/env'
 import { prisma } from '../db'
 
 export interface ProviderSignalSnapshot {
@@ -93,7 +94,30 @@ const PROVIDER_FRESHNESS_THRESHOLDS_SEC: Record<string, number> = {
   FI_CARBON: 1800,
 }
 
+const CANONICAL_PROVIDER_ORDER = [
+  'WATTTIME_MOER',
+  'GRIDSTATUS',
+  'EIA_930',
+  'GB_CARBON',
+  'DK_CARBON',
+  'FI_CARBON',
+  'EMBER_STRUCTURAL_BASELINE',
+  'ELECTRICITY_MAPS',
+] as const
+
+const PROVIDER_CONFIGURATION: Record<string, () => boolean> = {
+  WATTTIME_MOER: () => Boolean(env.WATTTIME_USERNAME && env.WATTTIME_PASSWORD),
+  GRIDSTATUS: () => Boolean(env.GRIDSTATUS_API_KEY),
+  EIA_930: () => Boolean(env.EIA_API_KEY),
+  GB_CARBON: () => true,
+  DK_CARBON: () => true,
+  FI_CARBON: () => Boolean(env.FINGRID_API_KEY),
+  EMBER_STRUCTURAL_BASELINE: () => Boolean(env.EMBER_API_KEY),
+  ELECTRICITY_MAPS: () => Boolean(env.ELECTRICITY_MAPS_API_KEY),
+}
+
 const INTEGRATION_SOURCE_TO_PROVIDER: Record<string, string> = {
+  ELECTRICITY_MAPS: 'ELECTRICITY_MAPS',
   WATTTIME: 'WATTTIME_MOER',
   GRIDSTATUS: 'GRIDSTATUS',
   EIA_930: 'EIA_930',
@@ -142,10 +166,23 @@ export function canonicalizeProviderIdentity(provider: string): string {
  */
 export async function getProviderFreshness(): Promise<Array<{
   provider: string
-  latestObservedAt: string
-  freshnessSec: number
+  latestObservedAt: string | null
+  freshnessSec: number | null
   isStale: boolean
+  configured: boolean
+  status: 'healthy' | 'degraded' | 'offline'
+  statusReasonCode: 'HEALTHY_LIVE' | 'DEGRADED_STALE' | 'DEGRADED_RATE_LIMIT' | 'OFFLINE'
+  ttlSec: number
+  lastError: string | null
+  lastLatencyMs: number | null
 }>> {
+  type IntegrationMetricSummary = {
+    source: string
+    lastSuccessAt: Date | null
+    lastError: string | null
+    lastLatencyMs: number | null
+  }
+
   const [latestSnapshots, integrationMetrics] = await Promise.all([
     prisma.providerSnapshot.findMany({
       orderBy: { observedAt: 'desc' },
@@ -164,9 +201,12 @@ export async function getProviderFreshness(): Promise<Array<{
       select: {
         source: true,
         lastSuccessAt: true,
+        lastError: true,
+        lastLatencyMs: true,
       },
     }),
   ])
+  const typedIntegrationMetrics = integrationMetrics as IntegrationMetricSummary[]
 
   const latestByProvider = new Map<string, Date>()
   for (const snapshot of latestSnapshots) {
@@ -176,7 +216,7 @@ export async function getProviderFreshness(): Promise<Array<{
     }
   }
 
-  for (const metric of integrationMetrics) {
+  for (const metric of typedIntegrationMetrics) {
     if (!metric.lastSuccessAt) continue
     const provider = INTEGRATION_SOURCE_TO_PROVIDER[metric.source]
     if (!provider) continue
@@ -187,17 +227,79 @@ export async function getProviderFreshness(): Promise<Array<{
     }
   }
 
-  return Array.from(latestByProvider.entries())
-    .map(([provider, observedAt]) => {
-      const freshnessSec = Math.floor((Date.now() - observedAt.getTime()) / 1000)
+  const metricByProvider = new Map(
+    typedIntegrationMetrics
+      .map((metric) => {
+        const provider = INTEGRATION_SOURCE_TO_PROVIDER[metric.source]
+        if (!provider) return null
+        return [provider, metric] as const
+      })
+      .filter((entry): entry is readonly [string, IntegrationMetricSummary] => entry !== null)
+  )
+
+  const discoveredProviders = new Set<string>([
+    ...CANONICAL_PROVIDER_ORDER,
+    ...Array.from(latestByProvider.keys()),
+    ...Array.from(metricByProvider.keys()),
+  ])
+
+  return Array.from(discoveredProviders)
+    .map((provider) => {
+      const configured = PROVIDER_CONFIGURATION[provider]?.() ?? true
+      const observedAt = configured ? latestByProvider.get(provider) ?? null : null
+      const freshnessSec =
+        observedAt != null ? Math.floor((Date.now() - observedAt.getTime()) / 1000) : null
+      const ttlSec = PROVIDER_FRESHNESS_THRESHOLDS_SEC[provider] ?? 3600
+      const isStale = configured && (freshnessSec == null || freshnessSec > ttlSec)
+      const metric = metricByProvider.get(provider)
+      const lastError = metric?.lastError ?? null
+      const lowerLastError = lastError?.toLowerCase() ?? ''
+      const rateLimited =
+        lowerLastError.includes('429') ||
+        lowerLastError.includes('rate limit') ||
+        lowerLastError.includes('quota')
+      const status: 'healthy' | 'degraded' | 'offline' = !configured
+        ? 'offline'
+        : isStale
+          ? 'degraded'
+          : 'healthy'
+      const statusReasonCode: 'HEALTHY_LIVE' | 'DEGRADED_STALE' | 'DEGRADED_RATE_LIMIT' | 'OFFLINE' = !configured
+        ? 'OFFLINE'
+        : isStale && rateLimited
+          ? 'DEGRADED_RATE_LIMIT'
+          : isStale
+            ? 'DEGRADED_STALE'
+            : 'HEALTHY_LIVE'
+
       return {
         provider,
-        latestObservedAt: observedAt.toISOString(),
+        latestObservedAt: observedAt?.toISOString() ?? null,
         freshnessSec,
-        isStale: freshnessSec > (PROVIDER_FRESHNESS_THRESHOLDS_SEC[provider] ?? 3600),
+        isStale,
+        configured,
+        status,
+        statusReasonCode,
+        ttlSec,
+        lastError,
+        lastLatencyMs: metric?.lastLatencyMs ?? null,
       }
     })
-    .sort((a, b) => a.provider.localeCompare(b.provider))
+    .sort((a, b) => {
+      const aIndex = CANONICAL_PROVIDER_ORDER.indexOf(a.provider as (typeof CANONICAL_PROVIDER_ORDER)[number])
+      const bIndex = CANONICAL_PROVIDER_ORDER.indexOf(b.provider as (typeof CANONICAL_PROVIDER_ORDER)[number])
+
+      if (aIndex === -1 && bIndex === -1) {
+        return a.provider.localeCompare(b.provider)
+      }
+      if (aIndex === -1) {
+        return 1
+      }
+      if (bIndex === -1) {
+        return -1
+      }
+
+      return aIndex - bIndex
+    })
 }
 
 /**

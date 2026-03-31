@@ -4,6 +4,8 @@ import { providerRouter } from './carbon/provider-router'
 import { GridSignalCache } from './grid-signals/grid-signal-cache'
 import { recordTelemetryMetric, telemetryMetricNames } from './observability/telemetry'
 import { redis } from './redis'
+import { gbCarbonIntensity } from './gb-carbon-intensity'
+import { storeProviderSnapshot } from './routing/provider-snapshots'
 
 const DEFAULT_SUPPORTED_REGIONS = [
   'us-east-1',
@@ -21,6 +23,8 @@ const SUPPORTED_REGIONS =
 
 const recentRegions = new Map<string, number>()
 let warmLoopTimer: NodeJS.Timeout | null = null
+let lastAmbientProviderProbeAt = 0
+const AMBIENT_PROVIDER_PROBE_INTERVAL_MS = 15 * 60 * 1000
 
 function getWarmRegions() {
   const now = Date.now()
@@ -117,6 +121,8 @@ export async function warmCacheOnStartup(): Promise<void> {
         console.warn(`  warm failure: ${String(result.reason)}`)
       }
     }
+
+    await probeAmbientProviders()
   } catch (error) {
     console.error('Fatal error during routing cache warming:', error)
     recordTelemetryMetric(telemetryMetricNames.routingWarmLoopFailureCount, 'counter', 1, {
@@ -127,6 +133,41 @@ export async function warmCacheOnStartup(): Promise<void> {
       running: Boolean(warmLoopTimer),
       nextRun: nextRunAt.toISOString(),
     })
+  }
+}
+
+async function probeAmbientProviders() {
+  const now = Date.now()
+  if (now - lastAmbientProviderProbeAt < AMBIENT_PROVIDER_PROBE_INTERVAL_MS) {
+    return
+  }
+
+  lastAmbientProviderProbeAt = now
+
+  try {
+    const current = await gbCarbonIntensity.getCurrentIntensity()
+    const signalValue = current?.intensity.actual ?? current?.intensity.forecast ?? null
+    if (current && signalValue != null) {
+      const observedAt = new Date(current.from)
+      const freshnessSec = Math.max(0, Math.round((Date.now() - observedAt.getTime()) / 1000))
+
+      await storeProviderSnapshot({
+        provider: 'GB_CARBON',
+        zone: 'GB',
+        signalType: 'carbon_intensity',
+        signalValue,
+        observedAt,
+        freshnessSec,
+        confidence: current.intensity.actual == null ? 0.75 : 0.85,
+        metadata: {
+          probeSource: 'ambient_warm_loop',
+          index: current.intensity.index,
+          forecastUsed: current.intensity.actual == null,
+        },
+      })
+    }
+  } catch (error) {
+    console.warn('Ambient provider probe failed:', error)
   }
 }
 
