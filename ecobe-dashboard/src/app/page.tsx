@@ -84,17 +84,17 @@ export default function LandingPage() {
                   live decision
                 </div>
                 <div className="mt-2 text-lg font-semibold text-white">
-                  {decision.workloadLabel ?? 'Live decision frame hydrating'}
+                  {decision.workloadLabel ?? 'Current execution frame'}
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-300">
                   <span className="rounded-full bg-white/[0.04] px-2 py-1">{decision.action}</span>
                   <span className="rounded-full bg-white/[0.04] px-2 py-1">
-                    {decision.selectedRegion ?? 'region pending'}
+                    {decision.selectedRegion ?? 'routing region on frame'}
                   </span>
                   <span className="rounded-full bg-white/[0.04] px-2 py-1">
                     {decision.carbonReductionPct != null
                       ? `${decision.carbonReductionPct.toFixed(1)}% carbon delta`
-                      : 'carbon delta pending'}
+                      : 'carbon delta on frame'}
                   </span>
                 </div>
               </div>
@@ -110,7 +110,7 @@ export default function LandingPage() {
               },
               {
                 title: 'Governance',
-                detail: 'SAIQ and policy state remain visible as product structure, even when the current live frame is still hydrating.',
+                detail: 'SAIQ and policy state remain visible as product structure while the current live frame attaches.',
               },
             ].map((item) => (
               <div
