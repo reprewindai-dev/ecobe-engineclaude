@@ -12,6 +12,10 @@ import type {
   SimulationMode,
   SimulationRouteResponse,
 } from '@/types/control-surface'
+import {
+  FALLBACK_COMMAND_CENTER_SNAPSHOT,
+  FALLBACK_LIVE_SYSTEM_SNAPSHOT,
+} from '@/lib/control-surface/fallbacks'
 
 const REFRESH_INTERVAL_MS = 30_000
 
@@ -48,6 +52,7 @@ export function useCommandCenterSnapshot() {
     queryFn: () => getJson<CommandCenterSnapshot>('/api/control-surface/command-center'),
     staleTime: 15_000,
     refetchInterval: 15_000,
+    placeholderData: FALLBACK_COMMAND_CENTER_SNAPSHOT,
   })
 }
 
@@ -83,6 +88,7 @@ export function useLiveSystemSnapshot() {
     queryFn: () => getJson<LiveSystemSnapshot>('/api/control-surface/live-system'),
     staleTime: REFRESH_INTERVAL_MS,
     refetchInterval: REFRESH_INTERVAL_MS,
+    placeholderData: FALLBACK_LIVE_SYSTEM_SNAPSHOT,
   })
 }
 

@@ -24,33 +24,40 @@ export function SignalDoctrineSection({
       </div>
       <div className="mt-8 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
         <div className="rounded-[28px] border border-white/8 bg-slate-950/60 p-5">
-          <div className="space-y-3">
-            {providers.slice(0, 6).map((provider, index) => (
-              <motion.div
-                key={provider.id}
-                initial={{ opacity: 0, x: -8 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: index * 0.05 }}
-                className="flex items-center justify-between rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3"
-              >
-                <div>
-                  <div className="text-sm font-semibold text-white">{provider.label}</div>
-                  <div className="mt-1 text-xs text-slate-500">
-                    {provider.lineageCount} mirrored observations
+          {providers.length ? (
+            <div className="space-y-3">
+              {providers.slice(0, 6).map((provider, index) => (
+                <motion.div
+                  key={provider.id}
+                  initial={{ opacity: 0, x: -8 }}
+                  whileInView={{ opacity: 1, x: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: index * 0.05 }}
+                  className="flex items-center justify-between rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3"
+                >
+                  <div>
+                    <div className="text-sm font-semibold text-white">{provider.label}</div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {provider.lineageCount} mirrored observations
+                    </div>
                   </div>
-                </div>
-                <div className="text-right">
-                  <div className={`text-sm font-semibold ${provider.status === 'healthy' ? 'text-emerald-300' : 'text-amber-300'}`}>
-                    {provider.status}
+                  <div className="text-right">
+                    <div className={`text-sm font-semibold ${provider.status === 'healthy' ? 'text-emerald-300' : 'text-amber-300'}`}>
+                      {provider.status}
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {provider.freshnessSec == null ? 'freshness n/a' : `${provider.freshnessSec}s`}
+                    </div>
                   </div>
-                  <div className="mt-1 text-xs text-slate-500">
-                    {provider.freshnessSec == null ? 'freshness n/a' : `${provider.freshnessSec}s`}
-                  </div>
-                </div>
-              </motion.div>
-            ))}
-          </div>
+                </motion.div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-4 text-sm leading-7 text-slate-300">
+              Live provider posture attaches here without replacing the rest of the page. The
+              control doctrine remains visible first; the current signal window hydrates second.
+            </div>
+          )}
         </div>
         <div className="rounded-[28px] border border-cyan-300/12 bg-[radial-gradient(circle_at_center,rgba(45,212,191,0.12),transparent_60%),rgba(2,8,23,0.84)] p-5">
           <div className="grid h-full gap-5 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
