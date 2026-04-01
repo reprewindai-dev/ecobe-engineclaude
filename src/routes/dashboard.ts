@@ -1835,14 +1835,25 @@ router.get('/regions', async (_req, res) => {
   }
 })
 
+const savingsWindowSchema = z.enum(['24h', '7d', '30d', '90d'])
+
 const savingsQuerySchema = z.object({
-  range: z.enum(['7d', '30d', '90d']).default('30d'),
+  range: z.enum(['7d', '30d', '90d']).optional(),
+  window: savingsWindowSchema.optional(),
 })
 
 router.get('/savings', async (req, res) => {
   try {
-    const { range } = savingsQuerySchema.parse(req.query)
-    const days = range === '7d' ? 7 : range === '90d' ? 90 : 30
+    const { range, window } = savingsQuerySchema.parse(req.query)
+    const resolvedWindow = window ?? range ?? '30d'
+    const days =
+      resolvedWindow === '24h'
+        ? 1
+        : resolvedWindow === '7d'
+          ? 7
+          : resolvedWindow === '90d'
+            ? 90
+            : 30
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
 
     const freshness = await getDecisionProjectionFreshness()
@@ -1880,7 +1891,10 @@ router.get('/savings', async (req, res) => {
       responseMeta = buildProjectionResponseMetadata(freshness, 'canonical_fallback')
     } else {
       const decisions = await prisma.dashboardRoutingDecision.findMany({
-        where: { createdAt: { gte: since } },
+        where: {
+          createdAt: { gte: since },
+          sourceCiDecisionId: { not: null },
+        },
         select: {
           co2BaselineG: true,
           co2ChosenG: true,
@@ -1919,12 +1933,12 @@ router.get('/savings', async (req, res) => {
 
     res.json({
       ...responseMeta,
-      window: range,
+      window: resolvedWindow,
       co2AvoidedKg: Math.round(totalAvoided / 1000 * 100) / 100, // Convert g to kg
       avgMultiplier: totalChosen > 0 ? Math.round((totalBaseline / totalChosen) * 100) / 100 : 1.34,
       bestToday: 1.91, // Temporary static value
       last100AvgDelta: totalDecisions > 0 ? Math.round(totalAvoided / Math.min(totalDecisions, 100) * 100) / 100 : 0,
-      timeRange: range,
+      timeRange: resolvedWindow,
       totalBaselineG: Math.round(totalBaseline),
       totalChosenG: Math.round(totalChosen),
       totalAvoidedG: Math.round(totalAvoided),
