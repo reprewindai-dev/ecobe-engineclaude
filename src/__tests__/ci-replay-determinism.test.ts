@@ -1,7 +1,6 @@
 jest.mock('../lib/carbon/provider-router', () => ({
   providerRouter: {
-    getCachedRoutingSignalRecord: jest.fn().mockResolvedValue(null),
-    getRoutingSignalRecord: jest.fn().mockResolvedValue({
+    getHotPathRoutingSignalRecord: jest.fn().mockResolvedValue({
       signal: {
         carbonIntensity: 180,
         source: 'watttime',
@@ -23,6 +22,7 @@ jest.mock('../lib/carbon/provider-router', () => ({
       stalenessSec: 0,
       lastLatencyMs: 12,
       degraded: false,
+      cacheSource: 'warm',
     }),
     cacheRoutingSignal: jest.fn().mockResolvedValue(undefined),
   },
@@ -198,8 +198,7 @@ describe('ci replay determinism', () => {
     expect(first.response.selectedRegion).toBe(second.response.selectedRegion)
     expect(first.response.reasonCode).toBe(second.response.reasonCode)
     expect(first.response.proofHash).toBe(second.response.proofHash)
-    expect(providerRouter.getRoutingSignalRecord).toHaveBeenCalledTimes(1)
-    expect(providerRouter.getCachedRoutingSignalRecord).toHaveBeenCalledTimes(1)
+    expect(providerRouter.getHotPathRoutingSignalRecord).toHaveBeenCalledTimes(1)
     expect(waterBundle.loadWaterArtifacts).not.toHaveBeenCalled()
     expect(waterBundle.validateWaterArtifacts).not.toHaveBeenCalled()
   })

@@ -10,8 +10,12 @@ export const prisma = {
     findMany: jest.fn().mockResolvedValue([]),
   },
   dashboardRoutingDecision: {
+    create: jest.fn().mockResolvedValue({}),
     findMany: jest.fn().mockResolvedValue([]),
+    findFirst: jest.fn().mockResolvedValue(null),
     groupBy: jest.fn().mockResolvedValue([]),
+    count: jest.fn().mockResolvedValue(0),
+    upsert: jest.fn().mockResolvedValue({}),
   },
   carbonCredit: {
     create: jest.fn().mockResolvedValue({}),
@@ -32,6 +36,15 @@ export const prisma = {
     create: jest.fn().mockResolvedValue({}),
     findMany: jest.fn().mockResolvedValue([]),
     findFirst: jest.fn().mockResolvedValue(null),
+  },
+  decisionProjectionOutbox: {
+    findMany: jest.fn().mockResolvedValue([]),
+    findUnique: jest.fn().mockResolvedValue(null),
+    count: jest.fn().mockResolvedValue(0),
+    create: jest.fn().mockResolvedValue({}),
+    upsert: jest.fn().mockResolvedValue({}),
+    update: jest.fn().mockResolvedValue({}),
+    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
   },
   integrationMetric: {
     findUnique: jest.fn().mockResolvedValue(null),

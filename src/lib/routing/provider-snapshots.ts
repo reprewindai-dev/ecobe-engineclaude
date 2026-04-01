@@ -5,6 +5,7 @@
  * Stores WattTime, Electricity Maps, Ember, and EIA-930 snapshots.
  */
 
+import { env } from '../../config/env'
 import { prisma } from '../db'
 
 export interface ProviderSignalSnapshot {
@@ -103,6 +104,16 @@ const INTEGRATION_SOURCE_TO_PROVIDER: Record<string, string> = {
   FI_CARBON: 'FI_CARBON',
 }
 
+const CORE_PROVIDERS = [
+  'WATTTIME_MOER',
+  'GRIDSTATUS',
+  'EIA_930',
+  'EMBER_STRUCTURAL_BASELINE',
+  'GB_CARBON',
+  'DK_CARBON',
+  'FI_CARBON',
+] as const
+
 function normalizeProviderToken(provider: string): string {
   return provider.trim().toLowerCase().replace(/[\s-]+/g, '_')
 }
@@ -145,7 +156,23 @@ export async function getProviderFreshness(): Promise<Array<{
   latestObservedAt: string
   freshnessSec: number
   isStale: boolean
+  configured: boolean
+  status: 'healthy' | 'degraded' | 'offline'
+  statusReasonCode: string
+  ttlSec: number
+  lastError: string | null
+  lastLatencyMs: number | null
 }>> {
+  const configuredProviders: Record<string, boolean> = {
+    WATTTIME_MOER: Boolean(env.WATTTIME_USERNAME && env.WATTTIME_PASSWORD),
+    GRIDSTATUS: Boolean(env.GRIDSTATUS_API_KEY),
+    EIA_930: Boolean(env.EIA_API_KEY),
+    EMBER_STRUCTURAL_BASELINE: Boolean(env.EMBER_API_KEY),
+    GB_CARBON: true,
+    DK_CARBON: true,
+    FI_CARBON: Boolean(env.FINGRID_API_KEY),
+  }
+
   const [latestSnapshots, integrationMetrics] = await Promise.all([
     prisma.providerSnapshot.findMany({
       orderBy: { observedAt: 'desc' },
@@ -164,11 +191,24 @@ export async function getProviderFreshness(): Promise<Array<{
       select: {
         source: true,
         lastSuccessAt: true,
+        lastFailureAt: true,
+        lastError: true,
+        lastLatencyMs: true,
       },
     }),
   ])
 
   const latestByProvider = new Map<string, Date>()
+  const metricByProvider = new Map<
+    string,
+    {
+      lastSuccessAt: Date | null
+      lastFailureAt: Date | null
+      lastError: string | null
+      lastLatencyMs: number | null
+    }
+  >()
+
   for (const snapshot of latestSnapshots) {
     const provider = canonicalizeProviderIdentity(snapshot.provider)
     if (!latestByProvider.has(provider)) {
@@ -177,24 +217,67 @@ export async function getProviderFreshness(): Promise<Array<{
   }
 
   for (const metric of integrationMetrics) {
-    if (!metric.lastSuccessAt) continue
     const provider = INTEGRATION_SOURCE_TO_PROVIDER[metric.source]
     if (!provider) continue
 
-    const currentObservedAt = latestByProvider.get(provider)
-    if (!currentObservedAt || metric.lastSuccessAt.getTime() > currentObservedAt.getTime()) {
-      latestByProvider.set(provider, metric.lastSuccessAt)
+    metricByProvider.set(provider, {
+      lastSuccessAt: metric.lastSuccessAt,
+      lastFailureAt: metric.lastFailureAt,
+      lastError: metric.lastError,
+      lastLatencyMs: metric.lastLatencyMs,
+    })
+
+    if (metric.lastSuccessAt) {
+      const currentObservedAt = latestByProvider.get(provider)
+      if (!currentObservedAt || metric.lastSuccessAt.getTime() > currentObservedAt.getTime()) {
+        latestByProvider.set(provider, metric.lastSuccessAt)
+      }
     }
   }
 
-  return Array.from(latestByProvider.entries())
-    .map(([provider, observedAt]) => {
-      const freshnessSec = Math.floor((Date.now() - observedAt.getTime()) / 1000)
+  return Array.from(CORE_PROVIDERS)
+    .map(provider => {
+      const observedAt = latestByProvider.get(provider)
+      const metric = metricByProvider.get(provider)
+      const ttlSec = PROVIDER_FRESHNESS_THRESHOLDS_SEC[provider] ?? 3600
+      const configured = configuredProviders[provider] ?? true
+      const freshnessSec = observedAt ? Math.floor((Date.now() - observedAt.getTime()) / 1000) : -1
+      const isStale = observedAt ? freshnessSec > ttlSec : true
+
+      let status: 'healthy' | 'degraded' | 'offline'
+      let statusReasonCode: string
+
+      if (!configured) {
+        status = 'offline'
+        statusReasonCode = 'missing_config'
+      } else if (!observedAt && metric?.lastError) {
+        status = 'degraded'
+        statusReasonCode = 'upstream_error'
+      } else if (!observedAt) {
+        status = 'offline'
+        statusReasonCode = 'never_observed'
+      } else if (metric?.lastFailureAt && (!metric.lastSuccessAt || metric.lastFailureAt > metric.lastSuccessAt)) {
+        status = 'degraded'
+        statusReasonCode = 'upstream_error'
+      } else if (isStale) {
+        status = 'degraded'
+        statusReasonCode = 'freshness_breached'
+      } else {
+        status = 'healthy'
+        statusReasonCode = 'fresh'
+      }
+
       return {
         provider,
-        latestObservedAt: observedAt.toISOString(),
+        latestObservedAt: observedAt?.toISOString() ?? '',
         freshnessSec,
-        isStale: freshnessSec > (PROVIDER_FRESHNESS_THRESHOLDS_SEC[provider] ?? 3600),
+        isStale,
+        configured,
+        status,
+        statusReasonCode,
+        ttlSec,
+        lastError: metric?.lastError ?? null,
+        lastLatencyMs: metric?.lastLatencyMs ?? null,
       }
     })
     .sort((a, b) => a.provider.localeCompare(b.provider))

@@ -1,0 +1,1670 @@
+{
+  "generatedAt": "2026-03-31T00:13:04.834Z",
+  "baseUrl": "https://ecobe-engineclaude-production.up.railway.app",
+  "scenarios": [
+    {
+      "id": "minimal",
+      "label": "Minimal usage",
+      "baseUrl": "https://ecobe-engineclaude-production.up.railway.app",
+      "simulatedUsers": 8,
+      "requests": 12,
+      "concurrency": 1,
+      "durationMs": 3714.334,
+      "throughputRps": 3.231,
+      "successRate": 1,
+      "statusCounts": {
+        "200": 12
+      },
+      "actionCounts": {
+        "run_now": 8,
+        "delay": 4
+      },
+      "reasonCounts": {
+        "ALLOW": 8,
+        "SEKED_POLICY_RED_ZONE": 4
+      },
+      "traceHeadersPresent": 12,
+      "traceHashHeadersPresent": 12,
+      "latency": {
+        "minMs": 266.408,
+        "p50Ms": 308.32,
+        "p95Ms": 370.775,
+        "p99Ms": 370.775,
+        "maxMs": 370.775,
+        "avgMs": 309.368
+      },
+      "engineLatency": {
+        "total": {
+          "p50Ms": 42,
+          "p95Ms": 48,
+          "p99Ms": 48,
+          "avgMs": 41.5,
+          "samples": 12
+        },
+        "compute": {
+          "p50Ms": 28,
+          "p95Ms": 33,
+          "p99Ms": 33,
+          "avgMs": 27.75,
+          "samples": 12
+        }
+      },
+      "errors": [],
+      "sloAfter": {
+        "samples": 250,
+        "sampleSource": "memory",
+        "selection": "memory_window",
+        "window": {
+          "startedAt": null,
+          "endedAt": null,
+          "activeWindowMinutes": null
+        },
+        "p50": {
+          "totalMs": 43,
+          "computeMs": 28
+        },
+        "p95": {
+          "totalMs": 61,
+          "computeMs": 43
+        },
+        "p99": {
+          "totalMs": 70,
+          "computeMs": 52
+        },
+        "current": {
+          "totalMs": 42,
+          "computeMs": 28
+        },
+        "budget": {
+          "totalP95Ms": 100,
+          "computeP95Ms": 50
+        },
+        "withinBudget": {
+          "total": true,
+          "compute": true
+        },
+        "budgetMs": {
+          "totalP95": 100,
+          "computeP95": 50
+        },
+        "currentMs": {
+          "total": {
+            "p50": 43,
+            "p95": 61,
+            "p99": 70,
+            "current": 42
+          },
+          "compute": {
+            "p50": 28,
+            "p95": 43,
+            "p99": 52,
+            "current": 28
+          }
+        },
+        "counts": {
+          "totalSamples": 250,
+          "computeSamples": 250
+        }
+      },
+      "telemetryAfter": {
+        "generatedAt": "2026-03-31T00:12:41.645Z",
+        "otel": {
+          "enabled": false,
+          "endpoint": null,
+          "serviceName": "ecobe-engine"
+        },
+        "metrics": {
+          "generatedAt": "2026-03-31T00:12:41.650Z",
+          "metrics": [
+            {
+              "name": "http.server.request.duration.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 271324,
+              "lastValue": 21,
+              "lastRecordedAt": "2026-03-31T00:12:41.623Z",
+              "p50": 547,
+              "p95": 1118,
+              "attributes": {
+                "method": "POST",
+                "route": "/verify",
+                "status_code": 201
+              }
+            },
+            {
+              "name": "ecobe.routing.cache.coverage.pct",
+              "kind": "gauge",
+              "samples": 500,
+              "sum": 50000,
+              "lastValue": 100,
+              "lastRecordedAt": "2026-03-31T00:12:28.776Z",
+              "p50": 100,
+              "p95": 100,
+              "attributes": {
+                "scope": "warm_loop"
+              }
+            },
+            {
+              "name": "ecobe.routing.warm_loop.cycle.count",
+              "kind": "counter",
+              "samples": 436,
+              "sum": 436,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:12:28.776Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "requested_regions": 8,
+                "warmed_regions": 8
+              }
+            },
+            {
+              "name": "ecobe.routing.warm_loop.lag.seconds",
+              "kind": "gauge",
+              "samples": 436,
+              "sum": 244,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:12:28.776Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "scope": "warm_loop"
+              }
+            },
+            {
+              "name": "ecobe.authorization.policy.evaluation.count",
+              "kind": "counter",
+              "samples": 500,
+              "sum": 500,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:12:41.316Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "decision_action": "run_now",
+                "criticality": "critical",
+                "critical_path": true
+              }
+            },
+            {
+              "name": "ecobe.authorization.action.count",
+              "kind": "counter",
+              "samples": 500,
+              "sum": 500,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:12:41.316Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "action": "run_now",
+                "runtime": "http",
+                "transport": "sync_http"
+              }
+            },
+            {
+              "name": "ecobe.authorization.signal.disagreement.pct",
+              "kind": "gauge",
+              "samples": 500,
+              "sum": 0,
+              "lastValue": 0,
+              "lastRecordedAt": "2026-03-31T00:12:41.316Z",
+              "p50": 0,
+              "p95": 0,
+              "attributes": {
+                "action": "run_now",
+                "runtime": "http"
+              }
+            },
+            {
+              "name": "ecobe.authorization.artifact_snapshot.latency.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 2,
+              "lastValue": 0,
+              "lastRecordedAt": "2026-03-31T00:12:41.316Z",
+              "p50": 0,
+              "p95": 0,
+              "attributes": {
+                "runtime": "http",
+                "transport": "sync_http"
+              }
+            },
+            {
+              "name": "ecobe.authorization.candidate_evaluation.latency.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 13128,
+              "lastValue": 27,
+              "lastRecordedAt": "2026-03-31T00:12:41.316Z",
+              "p50": 27,
+              "p95": 40,
+              "attributes": {
+                "runtime": "http",
+                "transport": "sync_http"
+              }
+            },
+            {
+              "name": "ecobe.authorization.policy_hook.latency.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 72,
+              "lastValue": 0,
+              "lastRecordedAt": "2026-03-31T00:12:41.316Z",
+              "p50": 0,
+              "p95": 1,
+              "attributes": {
+                "runtime": "http",
+                "transport": "sync_http"
+              }
+            },
+            {
+              "name": "ecobe.authorization.doctrine_assembly.latency.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 351,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:12:41.316Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "runtime": "http",
+                "transport": "sync_http"
+              }
+            },
+            {
+              "name": "ecobe.authorization.trace_assembly.latency.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 31,
+              "lastValue": 0,
+              "lastRecordedAt": "2026-03-31T00:12:41.316Z",
+              "p50": 0,
+              "p95": 1,
+              "attributes": {
+                "runtime": "http",
+                "transport": "sync_http"
+              }
+            },
+            {
+              "name": "ecobe.replay.consistency.count",
+              "kind": "counter",
+              "samples": 284,
+              "sum": 284,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:12:31.839Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "decision_frame_id": "83ec1087-0f15-47f3-a1bb-5b4caab27987"
+              }
+            },
+            {
+              "name": "ecobe.outbox.lag.seconds",
+              "kind": "gauge",
+              "samples": 47,
+              "sum": 357.459,
+              "lastValue": 309.994,
+              "lastRecordedAt": "2026-03-31T00:11:55.182Z",
+              "p50": 0,
+              "p95": 13.764,
+              "attributes": {
+                "pending": 1114,
+                "failed": 0,
+                "dead_letter": 0
+              }
+            },
+            {
+              "name": "ecobe.provider.resolution.latency.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 3570,
+              "lastValue": 14,
+              "lastRecordedAt": "2026-03-31T00:12:41.315Z",
+              "p50": 1,
+              "p95": 17,
+              "attributes": {
+                "region": "eu-central-1",
+                "cache_status": "degraded-safe",
+                "source": "fallback"
+              }
+            },
+            {
+              "name": "ecobe.routing.cache.hit.count",
+              "kind": "counter",
+              "samples": 500,
+              "sum": 500,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:12:41.315Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "region": "eu-central-1",
+                "cache_status": "degraded-safe"
+              }
+            },
+            {
+              "name": "ecobe.provider.freshness.seconds",
+              "kind": "gauge",
+              "samples": 500,
+              "sum": 20675,
+              "lastValue": 14,
+              "lastRecordedAt": "2026-03-31T00:12:41.315Z",
+              "p50": 39,
+              "p95": 71,
+              "attributes": {
+                "region": "eu-central-1",
+                "source": "DEGRADED_SAFE_DEGRADED_SAFE_DEGRADED_SAFE_DEGRADED_SAFE_DEGRADED_SAFE_DEGRADED_SAFE_EMBER_STRUCTURAL_BASELINE",
+                "signal_mode": "fallback"
+              }
+            },
+            {
+              "name": "ecobe.water.authority.freshness.seconds",
+              "kind": "gauge",
+              "samples": 500,
+              "sum": 6549242,
+              "lastValue": 13129,
+              "lastRecordedAt": "2026-03-31T00:12:41.315Z",
+              "p50": 13096,
+              "p95": 13126,
+              "attributes": {
+                "region": "eu-central-1",
+                "authority_mode": "basin",
+                "scenario": "current"
+              }
+            },
+            {
+              "name": "ecobe.water.scenario_planning.count",
+              "kind": "counter",
+              "samples": 500,
+              "sum": 500,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:11:55.647Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "scenario": "2080",
+                "authority_mode": "basin"
+              }
+            },
+            {
+              "name": "ecobe.authorization.decision.count",
+              "kind": "counter",
+              "samples": 500,
+              "sum": 500,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:12:41.452Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "action": "run_now",
+                "signal_mode": "marginal",
+                "accounting_method": "marginal",
+                "critical_path": true
+              }
+            },
+            {
+              "name": "ecobe.authorization.decision.latency.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 21852,
+              "lastValue": 42,
+              "lastRecordedAt": "2026-03-31T00:12:41.452Z",
+              "p50": 43,
+              "p95": 58,
+              "attributes": {
+                "action": "run_now",
+                "cache_status": "warm"
+              }
+            },
+            {
+              "name": "ecobe.authorization.fallback.count",
+              "kind": "counter",
+              "samples": 441,
+              "sum": 441,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:12:40.427Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "action": "delay",
+                "runtime": "http"
+              }
+            },
+            {
+              "name": "ecobe.water.guardrail.triggered.count",
+              "kind": "counter",
+              "samples": 500,
+              "sum": 500,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:12:40.703Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "action": "delay",
+                "profile": "drought_sensitive",
+                "runtime": "http"
+              }
+            }
+          ]
+        }
+      },
+      "cacheAfter": {
+        "timestamp": "2026-03-31T00:12:41.656Z",
+        "cache": {
+          "totalKeys": 256,
+          "keyTypes": {
+            "disagreement": 126,
+            "routing-lkg": 4,
+            "routing": 126
+          },
+          "regions": {
+            "ap-northeast-1": 34,
+            "ap-southeast-1": 34,
+            "eu-central-1": 34,
+            "eu-west-1": 34,
+            "us-east-1": 35,
+            "us-east-2": 25,
+            "us-west-1": 25,
+            "us-west-2": 35
+          },
+          "l1": {
+            "routingSignalEntries": 6,
+            "routingLkgEntries": 0
+          },
+          "regionCount": 8,
+          "requiredWarmCoveragePct": 100,
+          "requiredLkgCoveragePct": 33.333,
+          "requiredRegions": [
+            "us-east-1",
+            "us-west-2",
+            "eu-west-1",
+            "eu-central-1",
+            "ap-southeast-1",
+            "ap-northeast-1"
+          ],
+          "healthy": false
+        }
+      },
+      "sampledFrames": [
+        {
+          "decisionFrameId": "2af4595d-3e96-40df-b587-b4ac317e6387",
+          "replayTraceId": "2af4595d-3e96-40df-b587-b4ac317e6387",
+          "traceHash": "a82c6df6abac9818c1de229ca92ef22e275fe0a5bde1bd7531735fbbc85fbf62"
+        },
+        {
+          "decisionFrameId": "75f8fca0-266e-4c99-9504-55ded4642b45",
+          "replayTraceId": "75f8fca0-266e-4c99-9504-55ded4642b45",
+          "traceHash": "60bcf1cb84b615bf4baddc560a52a78e2ce847869a482108a6d528d53f4cb305"
+        },
+        {
+          "decisionFrameId": "723cfeb3-4530-4e82-9153-981ac7a031b7",
+          "replayTraceId": "723cfeb3-4530-4e82-9153-981ac7a031b7",
+          "traceHash": "d9bf6687eeb3affc9cffc3d9aad73c2840da236ef243ac7124913211e8d4335e"
+        },
+        {
+          "decisionFrameId": "40127123-2d3b-4964-80c1-b43c2cc0ddeb",
+          "replayTraceId": "40127123-2d3b-4964-80c1-b43c2cc0ddeb",
+          "traceHash": "ce93eee0e75e25a9abadc36a50f014e00e695a14edd0ceaf637c55f5a95adfe3"
+        },
+        {
+          "decisionFrameId": "6c6876ac-01af-4e74-b90c-5efce1260518",
+          "replayTraceId": "6c6876ac-01af-4e74-b90c-5efce1260518",
+          "traceHash": "81b8321692b7bf40b5cc05cd8899498dfeca73266ce1c9ca569c64132a0097ba"
+        }
+      ],
+      "replaySamples": [
+        {
+          "decisionFrameId": "2af4595d-3e96-40df-b587-b4ac317e6387",
+          "traceOk": true,
+          "replayOk": true,
+          "deterministicMatch": true,
+          "mismatches": []
+        },
+        {
+          "decisionFrameId": "75f8fca0-266e-4c99-9504-55ded4642b45",
+          "traceOk": true,
+          "replayOk": true,
+          "deterministicMatch": true,
+          "mismatches": []
+        },
+        {
+          "decisionFrameId": "723cfeb3-4530-4e82-9153-981ac7a031b7",
+          "traceOk": true,
+          "replayOk": true,
+          "deterministicMatch": true,
+          "mismatches": []
+        },
+        {
+          "decisionFrameId": "40127123-2d3b-4964-80c1-b43c2cc0ddeb",
+          "traceOk": true,
+          "replayOk": true,
+          "deterministicMatch": true,
+          "mismatches": []
+        },
+        {
+          "decisionFrameId": "6c6876ac-01af-4e74-b90c-5efce1260518",
+          "traceOk": true,
+          "replayOk": true,
+          "deterministicMatch": true,
+          "mismatches": []
+        }
+      ],
+      "releaseSignals": {
+        "fallbackCount": 441,
+        "hotPathProviderLeakCount": 0,
+        "replayMismatchCount": 0,
+        "requiredWarmCoveragePct": 100
+      }
+    },
+    {
+      "id": "medium",
+      "label": "Medium usage",
+      "baseUrl": "https://ecobe-engineclaude-production.up.railway.app",
+      "simulatedUsers": 60,
+      "requests": 90,
+      "concurrency": 12,
+      "durationMs": 3807.82,
+      "throughputRps": 23.636,
+      "successRate": 1,
+      "statusCounts": {
+        "200": 90
+      },
+      "actionCounts": {
+        "delay": 36,
+        "run_now": 54
+      },
+      "reasonCounts": {
+        "SEKED_POLICY_RED_ZONE": 36,
+        "ALLOW": 54
+      },
+      "traceHeadersPresent": 90,
+      "traceHashHeadersPresent": 90,
+      "latency": {
+        "minMs": 273.43,
+        "p50Ms": 470.054,
+        "p95Ms": 760.238,
+        "p99Ms": 920.008,
+        "maxMs": 920.008,
+        "avgMs": 490.426
+      },
+      "engineLatency": {
+        "total": {
+          "p50Ms": 42,
+          "p95Ms": 52,
+          "p99Ms": 63,
+          "avgMs": 41.422,
+          "samples": 90
+        },
+        "compute": {
+          "p50Ms": 28,
+          "p95Ms": 37,
+          "p99Ms": 45,
+          "avgMs": 27.056,
+          "samples": 90
+        }
+      },
+      "errors": [],
+      "sloAfter": {
+        "samples": 250,
+        "sampleSource": "memory",
+        "selection": "memory_window",
+        "window": {
+          "startedAt": null,
+          "endedAt": null,
+          "activeWindowMinutes": null
+        },
+        "p50": {
+          "totalMs": 42,
+          "computeMs": 28
+        },
+        "p95": {
+          "totalMs": 52,
+          "computeMs": 37
+        },
+        "p99": {
+          "totalMs": 59,
+          "computeMs": 43
+        },
+        "current": {
+          "totalMs": 31,
+          "computeMs": 17
+        },
+        "budget": {
+          "totalP95Ms": 100,
+          "computeP95Ms": 50
+        },
+        "withinBudget": {
+          "total": true,
+          "compute": true
+        },
+        "budgetMs": {
+          "totalP95": 100,
+          "computeP95": 50
+        },
+        "currentMs": {
+          "total": {
+            "p50": 42,
+            "p95": 52,
+            "p99": 59,
+            "current": 31
+          },
+          "compute": {
+            "p50": 28,
+            "p95": 37,
+            "p99": 43,
+            "current": 17
+          }
+        },
+        "counts": {
+          "totalSamples": 250,
+          "computeSamples": 250
+        }
+      },
+      "telemetryAfter": {
+        "generatedAt": "2026-03-31T00:12:50.840Z",
+        "otel": {
+          "enabled": false,
+          "endpoint": null,
+          "serviceName": "ecobe-engine"
+        },
+        "metrics": {
+          "generatedAt": "2026-03-31T00:12:50.843Z",
+          "metrics": [
+            {
+              "name": "http.server.request.duration.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 274534,
+              "lastValue": 188,
+              "lastRecordedAt": "2026-03-31T00:12:50.725Z",
+              "p50": 484,
+              "p95": 1118,
+              "attributes": {
+                "method": "POST",
+                "route": "/authorize",
+                "status_code": 200
+              }
+            },
+            {
+              "name": "ecobe.routing.cache.coverage.pct",
+              "kind": "gauge",
+              "samples": 500,
+              "sum": 50000,
+              "lastValue": 100,
+              "lastRecordedAt": "2026-03-31T00:12:43.799Z",
+              "p50": 100,
+              "p95": 100,
+              "attributes": {
+                "scope": "warm_loop"
+              }
+            },
+            {
+              "name": "ecobe.routing.warm_loop.cycle.count",
+              "kind": "counter",
+              "samples": 437,
+              "sum": 437,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:12:43.799Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "requested_regions": 8,
+                "warmed_regions": 8
+              }
+            },
+            {
+              "name": "ecobe.routing.warm_loop.lag.seconds",
+              "kind": "gauge",
+              "samples": 437,
+              "sum": 245,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:12:43.799Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "scope": "warm_loop"
+              }
+            },
+            {
+              "name": "ecobe.authorization.policy.evaluation.count",
+              "kind": "counter",
+              "samples": 500,
+              "sum": 500,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:12:50.567Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "decision_action": "delay",
+                "criticality": "batch",
+                "critical_path": false
+              }
+            },
+            {
+              "name": "ecobe.authorization.action.count",
+              "kind": "counter",
+              "samples": 500,
+              "sum": 500,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:12:50.567Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "action": "delay",
+                "runtime": "http",
+                "transport": "sync_http"
+              }
+            },
+            {
+              "name": "ecobe.authorization.signal.disagreement.pct",
+              "kind": "gauge",
+              "samples": 500,
+              "sum": 0,
+              "lastValue": 0,
+              "lastRecordedAt": "2026-03-31T00:12:50.567Z",
+              "p50": 0,
+              "p95": 0,
+              "attributes": {
+                "action": "delay",
+                "runtime": "http"
+              }
+            },
+            {
+              "name": "ecobe.authorization.artifact_snapshot.latency.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 2,
+              "lastValue": 0,
+              "lastRecordedAt": "2026-03-31T00:12:50.568Z",
+              "p50": 0,
+              "p95": 0,
+              "attributes": {
+                "runtime": "http",
+                "transport": "sync_http"
+              }
+            },
+            {
+              "name": "ecobe.authorization.candidate_evaluation.latency.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 13042,
+              "lastValue": 16,
+              "lastRecordedAt": "2026-03-31T00:12:50.568Z",
+              "p50": 27,
+              "p95": 40,
+              "attributes": {
+                "runtime": "http",
+                "transport": "sync_http"
+              }
+            },
+            {
+              "name": "ecobe.authorization.policy_hook.latency.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 68,
+              "lastValue": 0,
+              "lastRecordedAt": "2026-03-31T00:12:50.568Z",
+              "p50": 0,
+              "p95": 1,
+              "attributes": {
+                "runtime": "http",
+                "transport": "sync_http"
+              }
+            },
+            {
+              "name": "ecobe.authorization.doctrine_assembly.latency.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 347,
+              "lastValue": 0,
+              "lastRecordedAt": "2026-03-31T00:12:50.568Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "runtime": "http",
+                "transport": "sync_http"
+              }
+            },
+            {
+              "name": "ecobe.authorization.trace_assembly.latency.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 31,
+              "lastValue": 0,
+              "lastRecordedAt": "2026-03-31T00:12:50.568Z",
+              "p50": 0,
+              "p95": 1,
+              "attributes": {
+                "runtime": "http",
+                "transport": "sync_http"
+              }
+            },
+            {
+              "name": "ecobe.replay.consistency.count",
+              "kind": "counter",
+              "samples": 291,
+              "sum": 291,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:12:47.928Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "decision_frame_id": "83ec1087-0f15-47f3-a1bb-5b4caab27987"
+              }
+            },
+            {
+              "name": "ecobe.outbox.lag.seconds",
+              "kind": "gauge",
+              "samples": 47,
+              "sum": 357.459,
+              "lastValue": 309.994,
+              "lastRecordedAt": "2026-03-31T00:11:55.182Z",
+              "p50": 0,
+              "p95": 13.764,
+              "attributes": {
+                "pending": 1114,
+                "failed": 0,
+                "dead_letter": 0
+              }
+            },
+            {
+              "name": "ecobe.provider.resolution.latency.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 3566,
+              "lastValue": 0,
+              "lastRecordedAt": "2026-03-31T00:12:50.567Z",
+              "p50": 1,
+              "p95": 17,
+              "attributes": {
+                "region": "us-east-2",
+                "cache_status": "warm",
+                "source": "watttime"
+              }
+            },
+            {
+              "name": "ecobe.routing.cache.hit.count",
+              "kind": "counter",
+              "samples": 500,
+              "sum": 500,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:12:50.567Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "region": "us-east-2",
+                "cache_status": "warm"
+              }
+            },
+            {
+              "name": "ecobe.provider.freshness.seconds",
+              "kind": "gauge",
+              "samples": 500,
+              "sum": 17560,
+              "lastValue": 51,
+              "lastRecordedAt": "2026-03-31T00:12:50.567Z",
+              "p50": 39,
+              "p95": 71,
+              "attributes": {
+                "region": "us-east-2",
+                "source": "WARM_CACHE_WATTTIME_MOER",
+                "signal_mode": "marginal"
+              }
+            },
+            {
+              "name": "ecobe.water.authority.freshness.seconds",
+              "kind": "gauge",
+              "samples": 500,
+              "sum": 6560267,
+              "lastValue": 13138,
+              "lastRecordedAt": "2026-03-31T00:12:50.567Z",
+              "p50": 13133,
+              "p95": 13138,
+              "attributes": {
+                "region": "us-west-2",
+                "authority_mode": "basin",
+                "scenario": "current"
+              }
+            },
+            {
+              "name": "ecobe.water.scenario_planning.count",
+              "kind": "counter",
+              "samples": 500,
+              "sum": 500,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:11:55.647Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "scenario": "2080",
+                "authority_mode": "basin"
+              }
+            },
+            {
+              "name": "ecobe.authorization.decision.count",
+              "kind": "counter",
+              "samples": 500,
+              "sum": 500,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:12:50.704Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "action": "delay",
+                "signal_mode": "marginal",
+                "accounting_method": "marginal",
+                "critical_path": false
+              }
+            },
+            {
+              "name": "ecobe.authorization.decision.latency.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 21701,
+              "lastValue": 31,
+              "lastRecordedAt": "2026-03-31T00:12:50.704Z",
+              "p50": 43,
+              "p95": 58,
+              "attributes": {
+                "action": "delay",
+                "cache_status": "warm"
+              }
+            },
+            {
+              "name": "ecobe.authorization.fallback.count",
+              "kind": "counter",
+              "samples": 463,
+              "sum": 463,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:12:50.532Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "action": "delay",
+                "runtime": "http"
+              }
+            },
+            {
+              "name": "ecobe.water.guardrail.triggered.count",
+              "kind": "counter",
+              "samples": 500,
+              "sum": 500,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:12:50.567Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "action": "delay",
+                "profile": "drought_sensitive",
+                "runtime": "http"
+              }
+            }
+          ]
+        }
+      },
+      "cacheAfter": {
+        "timestamp": "2026-03-31T00:12:50.961Z",
+        "cache": {
+          "totalKeys": 256,
+          "keyTypes": {
+            "disagreement": 126,
+            "routing-lkg": 4,
+            "routing": 126
+          },
+          "regions": {
+            "ap-northeast-1": 34,
+            "ap-southeast-1": 34,
+            "eu-central-1": 34,
+            "eu-west-1": 34,
+            "us-east-1": 35,
+            "us-east-2": 25,
+            "us-west-1": 25,
+            "us-west-2": 35
+          },
+          "l1": {
+            "routingSignalEntries": 8,
+            "routingLkgEntries": 0
+          },
+          "regionCount": 8,
+          "requiredWarmCoveragePct": 100,
+          "requiredLkgCoveragePct": 33.333,
+          "requiredRegions": [
+            "us-east-1",
+            "us-west-2",
+            "eu-west-1",
+            "eu-central-1",
+            "ap-southeast-1",
+            "ap-northeast-1"
+          ],
+          "healthy": false
+        }
+      },
+      "sampledFrames": [
+        {
+          "decisionFrameId": "37749f55-2c26-4d14-a7b0-fdb492dcaf24",
+          "replayTraceId": "37749f55-2c26-4d14-a7b0-fdb492dcaf24",
+          "traceHash": "121b3cc8b0ea44c4faa56baccfab3879218a55ccc8e6e8c3ac7ec830a7c56962"
+        },
+        {
+          "decisionFrameId": "84ce1b83-5116-4f73-88cd-e680ea4ab5e3",
+          "replayTraceId": "84ce1b83-5116-4f73-88cd-e680ea4ab5e3",
+          "traceHash": "32e17229a2a9e1024bdede4a849da90b4bf484cbb4566fffac686812998379ff"
+        },
+        {
+          "decisionFrameId": "0f81ce37-483c-4d4c-b649-83577f4294ff",
+          "replayTraceId": "0f81ce37-483c-4d4c-b649-83577f4294ff",
+          "traceHash": "be5314da828822cf5301e7a9c85b8be0c6cd7606199c75d915a6b3800da75be2"
+        },
+        {
+          "decisionFrameId": "72472912-ab45-4110-ae4b-f441df1c6948",
+          "replayTraceId": "72472912-ab45-4110-ae4b-f441df1c6948",
+          "traceHash": "36d428cd88290e3474f8aa2c28a540e36bde130e4b731c34145694c7adc0b4aa"
+        },
+        {
+          "decisionFrameId": "2c5db312-e843-4e4e-b55e-5038160e882c",
+          "replayTraceId": "2c5db312-e843-4e4e-b55e-5038160e882c",
+          "traceHash": "37376b7422643a680085a6a62772df68dc5643b779b9aa6ddf91b3e35e0978e0"
+        }
+      ],
+      "replaySamples": [
+        {
+          "decisionFrameId": "37749f55-2c26-4d14-a7b0-fdb492dcaf24",
+          "traceOk": true,
+          "replayOk": true,
+          "deterministicMatch": true,
+          "mismatches": []
+        },
+        {
+          "decisionFrameId": "84ce1b83-5116-4f73-88cd-e680ea4ab5e3",
+          "traceOk": true,
+          "replayOk": true,
+          "deterministicMatch": true,
+          "mismatches": []
+        },
+        {
+          "decisionFrameId": "0f81ce37-483c-4d4c-b649-83577f4294ff",
+          "traceOk": true,
+          "replayOk": true,
+          "deterministicMatch": true,
+          "mismatches": []
+        },
+        {
+          "decisionFrameId": "72472912-ab45-4110-ae4b-f441df1c6948",
+          "traceOk": true,
+          "replayOk": true,
+          "deterministicMatch": true,
+          "mismatches": []
+        },
+        {
+          "decisionFrameId": "2c5db312-e843-4e4e-b55e-5038160e882c",
+          "traceOk": true,
+          "replayOk": true,
+          "deterministicMatch": true,
+          "mismatches": []
+        }
+      ],
+      "releaseSignals": {
+        "fallbackCount": 463,
+        "hotPathProviderLeakCount": 0,
+        "replayMismatchCount": 0,
+        "requiredWarmCoveragePct": 100
+      }
+    },
+    {
+      "id": "hard",
+      "label": "Hard usage (200+ simulated users)",
+      "baseUrl": "https://ecobe-engineclaude-production.up.railway.app",
+      "simulatedUsers": 240,
+      "requests": 240,
+      "concurrency": 32,
+      "durationMs": 10612.003,
+      "throughputRps": 22.616,
+      "successRate": 1,
+      "statusCounts": {
+        "200": 240
+      },
+      "actionCounts": {
+        "run_now": 144,
+        "delay": 93,
+        "reroute": 3
+      },
+      "reasonCounts": {
+        "ALLOW": 144,
+        "SEKED_POLICY_RED_ZONE": 93,
+        "SEKED_POLICY_AMBER_REROUTE": 3
+      },
+      "traceHeadersPresent": 240,
+      "traceHashHeadersPresent": 240,
+      "latency": {
+        "minMs": 830.037,
+        "p50Ms": 1281.958,
+        "p95Ms": 1794.767,
+        "p99Ms": 2075.591,
+        "maxMs": 2155.829,
+        "avgMs": 1319.857
+      },
+      "engineLatency": {
+        "total": {
+          "p50Ms": 44,
+          "p95Ms": 60,
+          "p99Ms": 71,
+          "avgMs": 44.179,
+          "samples": 240
+        },
+        "compute": {
+          "p50Ms": 29,
+          "p95Ms": 42,
+          "p99Ms": 52,
+          "avgMs": 28.817,
+          "samples": 240
+        }
+      },
+      "errors": [],
+      "sloAfter": {
+        "samples": 250,
+        "sampleSource": "memory",
+        "selection": "memory_window",
+        "window": {
+          "startedAt": null,
+          "endedAt": null,
+          "activeWindowMinutes": null
+        },
+        "p50": {
+          "totalMs": 44,
+          "computeMs": 29
+        },
+        "p95": {
+          "totalMs": 61,
+          "computeMs": 42
+        },
+        "p99": {
+          "totalMs": 78,
+          "computeMs": 57
+        },
+        "current": {
+          "totalMs": 30,
+          "computeMs": 15
+        },
+        "budget": {
+          "totalP95Ms": 100,
+          "computeP95Ms": 50
+        },
+        "withinBudget": {
+          "total": true,
+          "compute": true
+        },
+        "budgetMs": {
+          "totalP95": 100,
+          "computeP95": 50
+        },
+        "currentMs": {
+          "total": {
+            "p50": 44,
+            "p95": 61,
+            "p99": 78,
+            "current": 30
+          },
+          "compute": {
+            "p50": 29,
+            "p95": 42,
+            "p99": 57,
+            "current": 15
+          }
+        },
+        "counts": {
+          "totalSamples": 250,
+          "computeSamples": 250
+        }
+      },
+      "telemetryAfter": {
+        "generatedAt": "2026-03-31T00:13:07.092Z",
+        "otel": {
+          "enabled": false,
+          "endpoint": null,
+          "serviceName": "ecobe-engine"
+        },
+        "metrics": {
+          "generatedAt": "2026-03-31T00:13:07.100Z",
+          "metrics": [
+            {
+              "name": "http.server.request.duration.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 319165,
+              "lastValue": 21,
+              "lastRecordedAt": "2026-03-31T00:13:07.065Z",
+              "p50": 521,
+              "p95": 1297,
+              "attributes": {
+                "method": "POST",
+                "route": "/verify",
+                "status_code": 201
+              }
+            },
+            {
+              "name": "ecobe.routing.cache.coverage.pct",
+              "kind": "gauge",
+              "samples": 500,
+              "sum": 50000,
+              "lastValue": 100,
+              "lastRecordedAt": "2026-03-31T00:13:00.803Z",
+              "p50": 100,
+              "p95": 100,
+              "attributes": {
+                "scope": "warm_loop"
+              }
+            },
+            {
+              "name": "ecobe.routing.warm_loop.cycle.count",
+              "kind": "counter",
+              "samples": 438,
+              "sum": 438,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:13:00.803Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "requested_regions": 8,
+                "warmed_regions": 8
+              }
+            },
+            {
+              "name": "ecobe.routing.warm_loop.lag.seconds",
+              "kind": "gauge",
+              "samples": 438,
+              "sum": 248,
+              "lastValue": 3,
+              "lastRecordedAt": "2026-03-31T00:13:00.803Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "scope": "warm_loop"
+              }
+            },
+            {
+              "name": "ecobe.authorization.policy.evaluation.count",
+              "kind": "counter",
+              "samples": 500,
+              "sum": 500,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:13:06.581Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "decision_action": "delay",
+                "criticality": "batch",
+                "critical_path": false
+              }
+            },
+            {
+              "name": "ecobe.authorization.action.count",
+              "kind": "counter",
+              "samples": 500,
+              "sum": 500,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:13:06.581Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "action": "delay",
+                "runtime": "http",
+                "transport": "sync_http"
+              }
+            },
+            {
+              "name": "ecobe.authorization.signal.disagreement.pct",
+              "kind": "gauge",
+              "samples": 500,
+              "sum": 0,
+              "lastValue": 0,
+              "lastRecordedAt": "2026-03-31T00:13:06.581Z",
+              "p50": 0,
+              "p95": 0,
+              "attributes": {
+                "action": "delay",
+                "runtime": "http"
+              }
+            },
+            {
+              "name": "ecobe.authorization.artifact_snapshot.latency.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 3,
+              "lastValue": 0,
+              "lastRecordedAt": "2026-03-31T00:13:06.582Z",
+              "p50": 0,
+              "p95": 0,
+              "attributes": {
+                "runtime": "http",
+                "transport": "sync_http"
+              }
+            },
+            {
+              "name": "ecobe.authorization.candidate_evaluation.latency.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 12877,
+              "lastValue": 14,
+              "lastRecordedAt": "2026-03-31T00:13:06.582Z",
+              "p50": 27,
+              "p95": 37,
+              "attributes": {
+                "runtime": "http",
+                "transport": "sync_http"
+              }
+            },
+            {
+              "name": "ecobe.authorization.policy_hook.latency.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 67,
+              "lastValue": 0,
+              "lastRecordedAt": "2026-03-31T00:13:06.582Z",
+              "p50": 0,
+              "p95": 1,
+              "attributes": {
+                "runtime": "http",
+                "transport": "sync_http"
+              }
+            },
+            {
+              "name": "ecobe.authorization.doctrine_assembly.latency.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 336,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:13:06.582Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "runtime": "http",
+                "transport": "sync_http"
+              }
+            },
+            {
+              "name": "ecobe.authorization.trace_assembly.latency.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 24,
+              "lastValue": 0,
+              "lastRecordedAt": "2026-03-31T00:13:06.582Z",
+              "p50": 0,
+              "p95": 0,
+              "attributes": {
+                "runtime": "http",
+                "transport": "sync_http"
+              }
+            },
+            {
+              "name": "ecobe.replay.consistency.count",
+              "kind": "counter",
+              "samples": 298,
+              "sum": 298,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:13:05.856Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "decision_frame_id": "000e0ed0-2e85-4a44-82c0-db1852d7758b"
+              }
+            },
+            {
+              "name": "ecobe.outbox.lag.seconds",
+              "kind": "gauge",
+              "samples": 47,
+              "sum": 357.459,
+              "lastValue": 309.994,
+              "lastRecordedAt": "2026-03-31T00:11:55.182Z",
+              "p50": 0,
+              "p95": 13.764,
+              "attributes": {
+                "pending": 1114,
+                "failed": 0,
+                "dead_letter": 0
+              }
+            },
+            {
+              "name": "ecobe.provider.resolution.latency.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 3677,
+              "lastValue": 0,
+              "lastRecordedAt": "2026-03-31T00:13:06.581Z",
+              "p50": 1,
+              "p95": 18,
+              "attributes": {
+                "region": "us-east-2",
+                "cache_status": "warm",
+                "source": "watttime"
+              }
+            },
+            {
+              "name": "ecobe.routing.cache.hit.count",
+              "kind": "counter",
+              "samples": 500,
+              "sum": 500,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:13:06.581Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "region": "us-east-2",
+                "cache_status": "warm"
+              }
+            },
+            {
+              "name": "ecobe.provider.freshness.seconds",
+              "kind": "gauge",
+              "samples": 500,
+              "sum": 19983,
+              "lastValue": 67,
+              "lastRecordedAt": "2026-03-31T00:13:06.581Z",
+              "p50": 59,
+              "p95": 65,
+              "attributes": {
+                "region": "us-east-2",
+                "source": "WARM_CACHE_WATTTIME_MOER",
+                "signal_mode": "marginal"
+              }
+            },
+            {
+              "name": "ecobe.water.authority.freshness.seconds",
+              "kind": "gauge",
+              "samples": 500,
+              "sum": 6574803,
+              "lastValue": 13154,
+              "lastRecordedAt": "2026-03-31T00:13:06.581Z",
+              "p50": 13150,
+              "p95": 13153,
+              "attributes": {
+                "region": "us-west-2",
+                "authority_mode": "basin",
+                "scenario": "current"
+              }
+            },
+            {
+              "name": "ecobe.water.scenario_planning.count",
+              "kind": "counter",
+              "samples": 500,
+              "sum": 500,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:11:55.647Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "scenario": "2080",
+                "authority_mode": "basin"
+              }
+            },
+            {
+              "name": "ecobe.authorization.decision.count",
+              "kind": "counter",
+              "samples": 500,
+              "sum": 500,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:13:06.737Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "action": "delay",
+                "signal_mode": "marginal",
+                "accounting_method": "marginal",
+                "critical_path": false
+              }
+            },
+            {
+              "name": "ecobe.authorization.decision.latency.ms",
+              "kind": "histogram",
+              "samples": 500,
+              "sum": 21444,
+              "lastValue": 30,
+              "lastRecordedAt": "2026-03-31T00:13:06.737Z",
+              "p50": 43,
+              "p95": 56,
+              "attributes": {
+                "action": "delay",
+                "cache_status": "warm"
+              }
+            },
+            {
+              "name": "ecobe.authorization.fallback.count",
+              "kind": "counter",
+              "samples": 500,
+              "sum": 500,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:13:05.822Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "action": "delay",
+                "runtime": "http"
+              }
+            },
+            {
+              "name": "ecobe.water.guardrail.triggered.count",
+              "kind": "counter",
+              "samples": 500,
+              "sum": 500,
+              "lastValue": 1,
+              "lastRecordedAt": "2026-03-31T00:13:06.581Z",
+              "p50": 1,
+              "p95": 1,
+              "attributes": {
+                "action": "delay",
+                "profile": "drought_sensitive",
+                "runtime": "http"
+              }
+            }
+          ]
+        }
+      },
+      "cacheAfter": {
+        "timestamp": "2026-03-31T00:13:13.715Z",
+        "cache": {
+          "totalKeys": 260,
+          "keyTypes": {
+            "disagreement": 128,
+            "routing-lkg": 4,
+            "routing": 128
+          },
+          "regions": {
+            "ap-northeast-1": 34,
+            "ap-southeast-1": 34,
+            "eu-central-1": 34,
+            "eu-west-1": 34,
+            "us-east-1": 35,
+            "us-east-2": 27,
+            "us-west-1": 27,
+            "us-west-2": 35
+          },
+          "l1": {
+            "routingSignalEntries": 16,
+            "routingLkgEntries": 4
+          },
+          "regionCount": 8,
+          "requiredWarmCoveragePct": 100,
+          "requiredLkgCoveragePct": 33.333,
+          "requiredRegions": [
+            "us-east-1",
+            "us-west-2",
+            "eu-west-1",
+            "eu-central-1",
+            "ap-southeast-1",
+            "ap-northeast-1"
+          ],
+          "healthy": false
+        }
+      },
+      "sampledFrames": [
+        {
+          "decisionFrameId": "b696d150-8fea-4694-8f69-163b00a8473d",
+          "replayTraceId": "b696d150-8fea-4694-8f69-163b00a8473d",
+          "traceHash": "c8e5c35eaaa9e248cb1da062d4f1fe439525bf911b4430cc288ed7f8ebf236b3"
+        },
+        {
+          "decisionFrameId": "9d774348-c3a3-4295-b714-b61de494d50c",
+          "replayTraceId": "9d774348-c3a3-4295-b714-b61de494d50c",
+          "traceHash": "95e27089e3e20a3b456baf5075a5e761632f65cb6d1a2ba861dd280919928d25"
+        },
+        {
+          "decisionFrameId": "95975d9c-8e6c-48a7-8d94-f84fe21cd323",
+          "replayTraceId": "95975d9c-8e6c-48a7-8d94-f84fe21cd323",
+          "traceHash": "448eef2cab3ecafa6d0da981888857f9d6f0ca47b45f402e967f4bbde79ba4bc"
+        },
+        {
+          "decisionFrameId": "ce7714c1-3bfb-472c-99f5-74e83a2756c6",
+          "replayTraceId": "ce7714c1-3bfb-472c-99f5-74e83a2756c6",
+          "traceHash": "d0ae88cadc7e3f759038370db612dd0da6d53fcbf10575e7e5f3d7b7575c747b"
+        },
+        {
+          "decisionFrameId": "78ec0810-a7d0-4ce2-8403-f15bffedfce6",
+          "replayTraceId": "78ec0810-a7d0-4ce2-8403-f15bffedfce6",
+          "traceHash": "588a77e7fd9869c7c8f06160fd55fdff683cd5ba0e668187aaa50ad2430a7279"
+        }
+      ],
+      "replaySamples": [
+        {
+          "decisionFrameId": "b696d150-8fea-4694-8f69-163b00a8473d",
+          "traceOk": true,
+          "replayOk": true,
+          "deterministicMatch": true,
+          "mismatches": []
+        },
+        {
+          "decisionFrameId": "9d774348-c3a3-4295-b714-b61de494d50c",
+          "traceOk": true,
+          "replayOk": true,
+          "deterministicMatch": true,
+          "mismatches": []
+        },
+        {
+          "decisionFrameId": "95975d9c-8e6c-48a7-8d94-f84fe21cd323",
+          "traceOk": true,
+          "replayOk": true,
+          "deterministicMatch": true,
+          "mismatches": []
+        },
+        {
+          "decisionFrameId": "ce7714c1-3bfb-472c-99f5-74e83a2756c6",
+          "traceOk": true,
+          "replayOk": true,
+          "deterministicMatch": true,
+          "mismatches": []
+        },
+        {
+          "decisionFrameId": "78ec0810-a7d0-4ce2-8403-f15bffedfce6",
+          "traceOk": true,
+          "replayOk": true,
+          "deterministicMatch": true,
+          "mismatches": []
+        }
+      ],
+      "releaseSignals": {
+        "fallbackCount": 500,
+        "hotPathProviderLeakCount": 0,
+        "replayMismatchCount": 0,
+        "requiredWarmCoveragePct": 100
+      }
+    }
+  ]
+}

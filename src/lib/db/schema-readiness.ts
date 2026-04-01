@@ -4,11 +4,15 @@ const REQUIRED_TABLES = [
   'CIDecision',
   'IntegrationWebhookSink',
   'DecisionEventOutbox',
+  'DecisionProjectionOutbox',
 ] as const
 
 const REQUIRED_ENUMS = [
   'IntegrationWebhookSinkStatus',
   'DecisionEventOutboxStatus',
+  'DecisionProjectionOutboxStatus',
+  'DecisionProjectionQualityStatus',
+  'CarbonDataQuality',
 ] as const
 
 const REQUIRED_CI_COLUMNS = [
@@ -23,11 +27,23 @@ const REQUIRED_CI_COLUMNS = [
   'waterConfidence',
   'policyTrace',
   'datasetVersions',
+  'baselineRegion',
+  'baselineEnergyKwh',
+  'chosenEnergyKwh',
+  'estimatedKwh',
+  'baselineCo2G',
+  'chosenCo2G',
+  'co2DeltaG',
+  'carbonDataQuality',
+  'lowConfidence',
+  'carbonSavingsRatio',
 ] as const
 
 const REQUIRED_MIGRATIONS = [
   '20260324193000_add_water_control_plane',
   '20260324211500_add_decision_event_outbox',
+  '20260401221000_add_ci_projection_outbox',
+  '20260401232000_add_carbon_data_quality_basis',
 ] as const
 
 type ExistsRow = { exists: boolean }

@@ -1,3 +1,4 @@
+import { env } from '../../config/env'
 import { redis } from '../redis'
 import { GridSignalSnapshot } from './types'
 
@@ -16,6 +17,7 @@ export interface CachedRoutingSignalRecord {
       | 'gb_carbon_intensity'
       | 'dk_carbon'
       | 'fi_carbon'
+      | 'eia_930'
       | 'gridstatus_fuel_mix'
       | 'fallback'
     isForecast: boolean
@@ -37,6 +39,7 @@ export interface CachedRoutingSignalRecord {
   stalenessSec: number | null
   lastLatencyMs: number | null
   degraded: boolean
+  cacheSource?: 'live' | 'warm' | 'redis' | 'lkg' | 'degraded-safe'
 }
 
 export function toRoutingCacheBucket(timestamp: Date | string) {
@@ -49,11 +52,57 @@ export function toRoutingCacheKey(timestamp: Date | string) {
   return toRoutingCacheBucket(timestamp).toISOString()
 }
 
+type L1CacheEntry<T> = {
+  value: T
+  expiresAt: number
+}
+
 export class GridSignalCache {
   private static readonly DEFAULT_TTL = 15 * 60 // 15 minutes
   private static readonly DEFAULT_FEATURE_TTL = 60 * 60 // 1 hour
   private static readonly DEFAULT_LKG_TTL = 6 * 60 * 60 // 6 hours
   private static readonly KEY_PREFIX = 'grid-signal'
+  private static readonly ROUTING_L1_TTL_MS = Math.max(1000, env.GRID_SIGNAL_L1_CACHE_TTL_MS)
+  private static readonly routingSignalL1 = new Map<string, L1CacheEntry<CachedRoutingSignalRecord>>()
+  private static readonly routingLkgL1 = new Map<string, L1CacheEntry<CachedRoutingSignalRecord>>()
+
+  private static buildRoutingRedisKey(
+    region: string,
+    timestamp: string,
+    keyPrefix: string = this.KEY_PREFIX
+  ) {
+    return `${keyPrefix}:routing:${region}:${toRoutingCacheKey(timestamp)}`
+  }
+
+  private static buildRoutingLkgRedisKey(region: string, keyPrefix: string = this.KEY_PREFIX) {
+    return `${keyPrefix}:routing-lkg:${region}`
+  }
+
+  private static readL1<T>(store: Map<string, L1CacheEntry<T>>, key: string): T | null {
+    const entry = store.get(key)
+    if (!entry) return null
+    if (entry.expiresAt <= Date.now()) {
+      store.delete(key)
+      return null
+    }
+    return entry.value
+  }
+
+  private static writeL1<T>(store: Map<string, L1CacheEntry<T>>, key: string, value: T) {
+    store.set(key, {
+      value,
+      expiresAt: Date.now() + this.ROUTING_L1_TTL_MS,
+    })
+  }
+
+  private static pruneL1(store: Map<string, L1CacheEntry<unknown>>) {
+    const now = Date.now()
+    for (const [key, entry] of store.entries()) {
+      if (entry.expiresAt <= now) {
+        store.delete(key)
+      }
+    }
+  }
 
   /**
    * Cache grid signal snapshots
@@ -178,7 +227,8 @@ export class GridSignalCache {
   ): Promise<void> {
     const ttl = options.ttl ?? this.DEFAULT_TTL
     const keyPrefix = options.keyPrefix ?? this.KEY_PREFIX
-    const key = `${keyPrefix}:routing:${region}:${toRoutingCacheKey(timestamp)}`
+    const key = this.buildRoutingRedisKey(region, timestamp, keyPrefix)
+    this.writeL1(this.routingSignalL1, key, record)
     await redis.setex(key, ttl, JSON.stringify(record))
   }
 
@@ -187,13 +237,34 @@ export class GridSignalCache {
     timestamp: string,
     options: CacheOptions = {}
   ): Promise<CachedRoutingSignalRecord | null> {
+    const result = await this.getCachedRoutingSignalWithSource(region, timestamp, options)
+    return result?.record ?? null
+  }
+
+  static async getCachedRoutingSignalWithSource(
+    region: string,
+    timestamp: string,
+    options: CacheOptions = {}
+  ): Promise<{ record: CachedRoutingSignalRecord; source: 'warm' | 'redis' } | null> {
     const keyPrefix = options.keyPrefix ?? this.KEY_PREFIX
-    const key = `${keyPrefix}:routing:${region}:${toRoutingCacheKey(timestamp)}`
+    const key = this.buildRoutingRedisKey(region, timestamp, keyPrefix)
+    const l1 = this.readL1(this.routingSignalL1, key)
+    if (l1) {
+      return {
+        record: l1,
+        source: 'warm',
+      }
+    }
     const cached = await redis.get(key)
     if (!cached) return null
 
     try {
-      return JSON.parse(cached) as CachedRoutingSignalRecord
+      const parsed = JSON.parse(cached) as CachedRoutingSignalRecord
+      this.writeL1(this.routingSignalL1, key, parsed)
+      return {
+        record: parsed,
+        source: 'redis',
+      }
     } catch (error) {
       console.warn(`Failed to parse cached routing signal for ${region} at ${timestamp}:`, error)
       return null
@@ -207,7 +278,8 @@ export class GridSignalCache {
   ): Promise<void> {
     const ttl = options.ttl ?? this.DEFAULT_LKG_TTL
     const keyPrefix = options.keyPrefix ?? this.KEY_PREFIX
-    const key = `${keyPrefix}:routing-lkg:${region}`
+    const key = this.buildRoutingLkgRedisKey(region, keyPrefix)
+    this.writeL1(this.routingLkgL1, key, record)
     await redis.setex(key, ttl, JSON.stringify(record))
   }
 
@@ -215,13 +287,33 @@ export class GridSignalCache {
     region: string,
     options: CacheOptions = {}
   ): Promise<CachedRoutingSignalRecord | null> {
+    const result = await this.getLastKnownGoodRoutingSignalWithSource(region, options)
+    return result?.record ?? null
+  }
+
+  static async getLastKnownGoodRoutingSignalWithSource(
+    region: string,
+    options: CacheOptions = {}
+  ): Promise<{ record: CachedRoutingSignalRecord; source: 'lkg' } | null> {
     const keyPrefix = options.keyPrefix ?? this.KEY_PREFIX
-    const key = `${keyPrefix}:routing-lkg:${region}`
+    const key = this.buildRoutingLkgRedisKey(region, keyPrefix)
+    const l1 = this.readL1(this.routingLkgL1, key)
+    if (l1) {
+      return {
+        record: l1,
+        source: 'lkg',
+      }
+    }
     const cached = await redis.get(key)
     if (!cached) return null
 
     try {
-      return JSON.parse(cached) as CachedRoutingSignalRecord
+      const parsed = JSON.parse(cached) as CachedRoutingSignalRecord
+      this.writeL1(this.routingLkgL1, key, parsed)
+      return {
+        record: parsed,
+        source: 'lkg',
+      }
     } catch (error) {
       console.warn(`Failed to parse last-known-good routing signal for ${region}:`, error)
       return null
@@ -353,7 +445,13 @@ export class GridSignalCache {
     totalKeys: number
     keyTypes: Record<string, number>
     regions: Record<string, number>
+    l1: {
+      routingSignalEntries: number
+      routingLkgEntries: number
+    }
   }> {
+    this.pruneL1(this.routingSignalL1 as unknown as Map<string, L1CacheEntry<unknown>>)
+    this.pruneL1(this.routingLkgL1 as unknown as Map<string, L1CacheEntry<unknown>>)
     const pattern = `${keyPrefix}:*`
     const keys = await redis.keys(pattern)
 
@@ -375,7 +473,11 @@ export class GridSignalCache {
     return {
       totalKeys: keys.length,
       keyTypes,
-      regions
+      regions,
+      l1: {
+        routingSignalEntries: this.routingSignalL1.size,
+        routingLkgEntries: this.routingLkgL1.size,
+      },
     }
   }
 
