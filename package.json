@@ -2,6 +2,7 @@
   "name": "ecobe-engine",
   "version": "1.0.1",
   "description": "Environmental Carbon and Optimization Backend Engine",
+  "private": true,
   "main": "dist/server.js",
   "scripts": {
     "verify:canonical-root": "node scripts/verify-canonical-root.cjs",
@@ -20,6 +21,8 @@
     "water:verify-provenance": "tsx scripts/verify-water-provenance.ts",
     "water:refresh": "tsx scripts/refresh-water-bundle.ts",
     "bench:ci-latency": "npm run verify:canonical-root && tsx scripts/benchmark-ci-latency.ts",
+    "load:ci": "npm run verify:canonical-root && tsx scripts/load-test-ci.ts",
+    "projection:replay:ci": "npm run verify:canonical-root && tsx scripts/replay-ci-projection.ts",
     "db:setup": "npm run prisma:migrate:deploy && npm run prisma:seed",
     "format": "prettier --write \"src/**/*.ts\"",
     "lint": "eslint src --ext .ts",
@@ -32,8 +35,8 @@
     "optimization",
     "emissions"
   ],
-  "author": "",
-  "license": "MIT",
+  "author": "Anthony Millwater",
+  "license": "UNLICENSED",
   "dependencies": {
     "@langchain/community": "0.0.33",
     "@langchain/openai": "0.0.14",

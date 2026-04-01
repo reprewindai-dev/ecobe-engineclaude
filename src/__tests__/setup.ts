@@ -1,7 +1,7 @@
 // Test setup and global configuration
 process.env.NODE_ENV = 'test'
 process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/ecobe_test'
-process.env.REDIS_URL = 'redis://localhost:6379/1'
+process.env.REDIS_URL = 'disabled'
 process.env.PORT = '3001'
 
 // Increase timeout for integration tests

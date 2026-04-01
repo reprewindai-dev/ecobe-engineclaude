@@ -11,6 +11,7 @@ import { GridSignalAudit } from '../lib/grid-signals/grid-signal-audit'
 import { getUsBalancingAuthorities } from '../lib/grid-signals/region-mapping'
 import { setWorkerStatus } from '../routes/system'
 import { prisma } from '../lib/db'
+import { env } from '../config/env'
 
 interface RegionConfig {
   region: string
@@ -39,14 +40,16 @@ const DEFAULT_REGIONS: RegionConfig[] = (() => {
 export class EIAIngestionWorker {
   private isRunning = false
   private ingestionTask?: cron.ScheduledTask
-  private useGridStatus: boolean
+  private useGridStatusCanonical: boolean
 
   constructor() {
-    this.useGridStatus = gridStatus.isAvailable
-    if (this.useGridStatus) {
-      console.log('EIA ingestion: GridStatus.io adapter active (real fuel mix data)')
+    this.useGridStatusCanonical = env.GRIDSTATUS_ENABLED === 'true' && gridStatus.isAvailable
+    if (this.useGridStatusCanonical) {
+      console.log('EIA ingestion: GridStatus.io enabled as canonical source (explicit override)')
+    } else if (env.GRIDSTATUS_ENABLED === 'true' && !gridStatus.isAvailable) {
+      console.warn('EIA ingestion: GridStatus enabled but API key missing, falling back to direct EIA')
     } else {
-      console.log('EIA ingestion: Using direct EIA API (fuel mix via subregion heuristic)')
+      console.log('EIA ingestion: Using direct EIA API as canonical source (GridStatus fallback only)')
     }
   }
 
@@ -107,7 +110,7 @@ export class EIAIngestionWorker {
    */
   private async runIngestion(): Promise<void> {
     const runStart = new Date()
-    console.log(`Starting EIA-930 ingestion at ${runStart.toISOString()} [source: ${this.useGridStatus ? 'GridStatus.io' : 'EIA Direct'}]`)
+    console.log(`Starting EIA-930 ingestion at ${runStart.toISOString()} [canonical: ${this.useGridStatusCanonical ? 'GridStatus.io' : 'EIA Direct'}]`)
 
     try {
       // Get time window for ingestion (last 48 hours)
@@ -162,13 +165,17 @@ export class EIAIngestionWorker {
     rawRecordsStored: number
     featuresCalculated: number
   }> {
-    console.log(`Ingesting EIA-930 data for ${config.region} (${config.balancingAuthority}) [${this.useGridStatus ? 'GridStatus' : 'EIA'}]`)
+    console.log(`Ingesting EIA-930 data for ${config.region} (${config.balancingAuthority}) [${this.useGridStatusCanonical ? 'GridStatus' : 'EIA'}]`)
 
-    if (this.useGridStatus) {
-      return this.ingestFromGridStatus(config, startTime, endTime)
-    } else {
-      return this.ingestFromDirectEia(config, startTime, endTime)
+    if (this.useGridStatusCanonical) {
+      try {
+        return await this.ingestFromGridStatus(config, startTime, endTime)
+      } catch (error) {
+        console.error(`GridStatus ingestion failed for ${config.region}, switching to direct EIA fallback:`, error)
+        return this.ingestFromDirectEia(config, startTime, endTime)
+      }
     }
+    return this.ingestFromDirectEia(config, startTime, endTime)
   }
 
   /**
@@ -529,7 +536,7 @@ export class EIAIngestionWorker {
   } {
     return {
       isRunning: this.isRunning,
-      dataSource: this.useGridStatus ? 'gridstatus' : 'eia_direct',
+      dataSource: this.useGridStatusCanonical ? 'gridstatus' : 'eia_direct',
       regions: DEFAULT_REGIONS.map(r => r.region),
       schedule: (this.ingestionTask as any)?.getOptions?.()?.scheduled || '0 */15 * * * *',
     }

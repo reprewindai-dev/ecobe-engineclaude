@@ -1,6 +1,6 @@
 import crypto from 'crypto'
 import { startOfMonth } from 'date-fns'
-import type { Organization, OrgUsageCounter, OrgPlanTier } from '@prisma/client'
+import { OrgPlanTier, type Organization, type OrgUsageCounter } from '@prisma/client'
 
 import { prisma } from './db'
 
@@ -16,6 +16,25 @@ export class OrganizationError extends Error {
   }
 }
 
+const DEFAULT_PLAN_LIMITS: Record<OrgPlanTier, number> = {
+  FREE: 1000,
+  GROWTH: 50000,
+  ENTERPRISE: 1000000,
+}
+
+function parseAccessExpiry(metadata: unknown) {
+  const record =
+    metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+      ? (metadata as Record<string, unknown>)
+      : null
+
+  const expiry = typeof record?.accessExpiresAt === 'string' ? record.accessExpiresAt : null
+  if (!expiry) return null
+
+  const parsed = new Date(expiry)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
 export function usagePeriod(date: Date = new Date()): Date {
   return startOfMonth(date)
 }
@@ -28,6 +47,15 @@ export async function requireActiveOrganization(orgId: string): Promise<Organiza
   if (org.status !== 'ACTIVE') {
     throw new OrganizationError('ORG_SUSPENDED', 'Organization is not active.')
   }
+
+  const accessExpiry = parseAccessExpiry(org.metadata)
+  if (accessExpiry && accessExpiry.getTime() <= Date.now()) {
+    throw new OrganizationError(
+      'ORG_SUSPENDED',
+      'Organization access expired. Renew billing or contact support to continue.'
+    )
+  }
+
   return org
 }
 
@@ -171,6 +199,7 @@ export async function provisionOrganization(input: {
   const baseSlug = slugify(input.slug ?? input.name)
   const slug = await ensureUniqueSlug(baseSlug)
   const apiKey = generateApiKey()
+  const planTier: OrgPlanTier = input.planTier ?? OrgPlanTier.FREE
 
   return prisma.organization.create({
     data: {
@@ -178,9 +207,9 @@ export async function provisionOrganization(input: {
       slug,
       apiKey,
       billingEmail: input.billingEmail,
-      planTier: input.planTier ?? 'FREE',
+      planTier,
       enforceCreditCoverage: input.enforceCreditCoverage ?? false,
-      monthlyCommandLimit: input.monthlyCommandLimit ?? 1000,
+      monthlyCommandLimit: input.monthlyCommandLimit ?? DEFAULT_PLAN_LIMITS[planTier],
       featureFlags: input.featureFlags ?? {},
       proofRetentionDays: input.proofRetentionDays ?? 30,
     },

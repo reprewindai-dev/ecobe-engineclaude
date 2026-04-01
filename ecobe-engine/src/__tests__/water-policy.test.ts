@@ -15,6 +15,13 @@ const baseSignal: WaterSignal = {
   dataQuality: 'high',
   signalType: 'average_operational',
   referenceTime: new Date().toISOString(),
+  authorityMode: 'basin',
+  scenario: 'current',
+  facilityId: null,
+  supplierSet: ['aqueduct', 'aware'],
+  evidenceRefs: ['water-bundle:2026-03-24T00:00:00.000Z:us-east-1'],
+  telemetryRef: null,
+  artifactGeneratedAt: null,
 }
 
 describe('water policy guardrail', () => {

@@ -14,6 +14,10 @@ import { startLearningLoopWorker } from './workers/learning-loop'
 import { stopLearningLoopWorker } from './workers/learning-loop'
 import { startRuntimeSupervisor, stopRuntimeSupervisor } from './workers/runtime-supervisor'
 import { startDecisionEventDispatcherWorker, stopDecisionEventDispatcherWorker } from './workers/decision-event-dispatcher'
+import {
+  startDecisionProjectionDispatcherWorker,
+  stopDecisionProjectionDispatcherWorker,
+} from './workers/decision-projection-dispatcher'
 import { recoverWaterArtifactsFromLastKnownGood, validateWaterArtifacts } from './lib/water/bundle'
 import { ensureDecisionEventVerifierSink } from './lib/ci/event-verifier-sink'
 
@@ -48,6 +52,7 @@ async function gracefulShutdown(signal: string) {
     stopRuntimeSupervisor()
     stopLearningLoopWorker()
     stopDecisionEventDispatcherWorker()
+    stopDecisionProjectionDispatcherWorker()
     stopRoutingSignalWarmLoop()
 
     console.log('Closing Redis connection...')
@@ -112,6 +117,12 @@ function startBackgroundWorkers() {
     startDecisionEventDispatcherWorker()
   } catch (error) {
     console.error('Decision event dispatcher failed to start:', error)
+  }
+
+  try {
+    startDecisionProjectionDispatcherWorker()
+  } catch (error) {
+    console.error('Decision projection dispatcher failed to start:', error)
   }
 }
 

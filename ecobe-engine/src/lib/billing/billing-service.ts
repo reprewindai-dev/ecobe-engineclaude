@@ -5,10 +5,134 @@ import { env } from '../../config/env'
 import { OrgPlanTier, Organization } from '@prisma/client'
 import { z } from 'zod'
 
+type BillingPeriod = 'monthly' | 'annual'
+type PricingSku =
+  | 'ci_small'
+  | 'ci_mid'
+  | 'ci_large'
+  | 'control_small'
+  | 'control_mid'
+  | 'control_large'
+  | 'enterprise_small'
+  | 'enterprise_mid'
+  | 'enterprise_large'
+  | 'pilot_30d'
+
 // Initialize Stripe
 const stripe = new Stripe(env.STRIPE_SECRET_KEY || '', {
   apiVersion: '2024-12-18.acacia' as any,
 })
+
+const getStripeClient = (): Stripe => {
+  if (!env.STRIPE_SECRET_KEY) {
+    throw new Error('Stripe secret key is not configured')
+  }
+  if (env.NODE_ENV === 'production' && env.STRIPE_SECRET_KEY.startsWith('sk_test_')) {
+    throw new Error('Test Stripe key is not allowed in production')
+  }
+  return stripe
+}
+
+const SEGMENTED_PRICE_BOOK: Record<PricingSku, { monthly: number | null; annual: number | null; stripeMonthly?: string; stripeAnnual?: string }> = {
+  ci_small: {
+    monthly: 400,
+    annual: null,
+    stripeMonthly: env.STRIPE_SMALL_CI_MONTHLY_PRICE_ID,
+  },
+  ci_mid: {
+    monthly: 800,
+    annual: null,
+    stripeMonthly: env.STRIPE_MID_CI_MONTHLY_PRICE_ID,
+  },
+  ci_large: {
+    monthly: 1500,
+    annual: null,
+    stripeMonthly: env.STRIPE_LARGE_CI_MONTHLY_PRICE_ID,
+  },
+  control_small: {
+    monthly: 2000,
+    annual: null,
+    stripeMonthly: env.STRIPE_SMALL_CONTROL_SURFACE_MONTHLY_PRICE_ID,
+  },
+  control_mid: {
+    monthly: 4000,
+    annual: null,
+    stripeMonthly: env.STRIPE_MID_CONTROL_SURFACE_MONTHLY_PRICE_ID,
+  },
+  control_large: {
+    monthly: 7000,
+    annual: null,
+    stripeMonthly: env.STRIPE_LARGE_CONTROL_SURFACE_MONTHLY_PRICE_ID,
+  },
+  enterprise_small: {
+    monthly: null,
+    annual: 60000,
+    stripeAnnual: env.STRIPE_SMALL_ENTERPRISE_ANNUAL_PRICE_ID,
+  },
+  enterprise_mid: {
+    monthly: null,
+    annual: 120000,
+    stripeAnnual: env.STRIPE_MID_ENTERPRISE_ANNUAL_PRICE_ID,
+  },
+  enterprise_large: {
+    monthly: null,
+    annual: 200000,
+    stripeAnnual: env.STRIPE_LARGE_ENTERPRISE_ANNUAL_PRICE_ID,
+  },
+  pilot_30d: {
+    monthly: 250,
+    annual: null,
+    stripeMonthly: env.STRIPE_PILOT_30D_PRICE_ID,
+  },
+}
+
+const normalizePricingSku = (org: Organization): PricingSku => {
+  const rawSku = ((org.metadata as any)?.pricingSku || '').toString().toLowerCase()
+  const candidate = z.enum([
+    'ci_small',
+    'ci_mid',
+    'ci_large',
+    'control_small',
+    'control_mid',
+    'control_large',
+    'enterprise_small',
+    'enterprise_mid',
+    'enterprise_large',
+    'pilot_30d',
+  ]).safeParse(rawSku)
+
+  if (candidate.success) {
+    return candidate.data
+  }
+
+  if (org.planTier === OrgPlanTier.ENTERPRISE) {
+    return 'enterprise_small'
+  }
+  if (org.planTier === OrgPlanTier.GROWTH) {
+    return 'ci_small'
+  }
+  return 'pilot_30d'
+}
+
+const resolvePriceId = (
+  sku: PricingSku,
+  period: BillingPeriod
+): string | null => {
+  const entry = SEGMENTED_PRICE_BOOK[sku]
+  if (!entry) return null
+  return period === 'monthly' ? entry.stripeMonthly || null : entry.stripeAnnual || null
+}
+
+const resolveBaseMonthlyPrice = (
+  sku: PricingSku,
+  period: BillingPeriod
+): number => {
+  const entry = SEGMENTED_PRICE_BOOK[sku]
+  if (!entry) return 0
+  if (period === 'monthly') return entry.monthly ?? 0
+  if (entry.annual !== null) return entry.annual / 12
+  return 0
+}
 
 // Pricing Configuration
 export const PRICING = {
@@ -81,7 +205,7 @@ export class BillingService {
    * Create a Stripe customer for an organization
    */
   static async createStripeCustomer(org: Organization): Promise<string> {
-    const customer = await stripe.customers.create({
+    const customer = await getStripeClient().customers.create({
       email: org.billingEmail || undefined,
       name: org.name,
       metadata: {
@@ -110,7 +234,7 @@ export class BillingService {
   static async createSubscription(
     orgId: string,
     planTier: OrgPlanTier,
-    billingPeriod: 'monthly' | 'annual' = 'monthly'
+    billingPeriod: BillingPeriod = 'monthly'
   ): Promise<Stripe.Subscription> {
     const org = await prisma.organization.findUnique({
       where: { id: orgId },
@@ -126,25 +250,33 @@ export class BillingService {
       customerId = await this.createStripeCustomer(org)
     }
 
+    const pricingSku = normalizePricingSku(org)
+
     // Get the appropriate price ID
-    let priceId: string | null = null
-    if (planTier === OrgPlanTier.GROWTH) {
-      priceId = billingPeriod === 'monthly'
-        ? process.env.STRIPE_PRICE_MONTHLY || null
-        : process.env.STRIPE_PRICE_YEARLY || null
+    let priceId: string | null = resolvePriceId(pricingSku, billingPeriod)
+    if (!priceId && planTier === OrgPlanTier.GROWTH) {
+      // Legacy fallback for old env naming
+      priceId =
+        billingPeriod === 'monthly'
+          ? env.STRIPE_GROWTH_MONTHLY_PRICE_ID || null
+          : env.STRIPE_GROWTH_ANNUAL_PRICE_ID || null
+    }
+    if (!priceId && planTier === OrgPlanTier.ENTERPRISE) {
+      priceId = env.STRIPE_ENTERPRISE_PRICE_ID || null
     }
 
     if (!priceId) {
-      throw new Error('Invalid plan tier or pricing not configured')
+      throw new Error(`Pricing is not configured for sku=${pricingSku} period=${billingPeriod}`)
     }
 
     // Create the subscription
-    const subscription = await stripe.subscriptions.create({
+    const subscription = await getStripeClient().subscriptions.create({
       customer: customerId,
       items: [{ price: priceId }],
       metadata: {
         orgId: org.id,
         planTier,
+        pricingSku,
       },
       trial_period_days: 14, // 14-day trial
     })
@@ -158,6 +290,7 @@ export class BillingService {
           ...(org.metadata as any || {}),
           stripeSubscriptionId: subscription.id,
           billingPeriod,
+          pricingSku,
         },
       },
     })
@@ -183,7 +316,7 @@ export class BillingService {
     }
 
     // Cancel at period end
-    await stripe.subscriptions.update(subscriptionId, {
+    await getStripeClient().subscriptions.update(subscriptionId, {
       cancel_at_period_end: true,
     })
 
@@ -249,10 +382,9 @@ export class BillingService {
     // Calculate estimated total
     let basePrice = 0
     if (org.planTier === OrgPlanTier.GROWTH) {
-      const billingPeriod = (org.metadata as any)?.billingPeriod || 'monthly'
-      basePrice = billingPeriod === 'monthly' 
-        ? PRICING.GROWTH.monthlyPrice 
-        : PRICING.GROWTH.annualPrice / 12
+      const billingPeriod = ((org.metadata as any)?.billingPeriod || 'monthly') as BillingPeriod
+      const pricingSku = normalizePricingSku(org)
+      basePrice = resolveBaseMonthlyPrice(pricingSku, billingPeriod)
     }
 
     const estimatedTotal = basePrice + overageAmount + 
@@ -296,13 +428,12 @@ export class BillingService {
 
     // Base subscription
     if (org.planTier === OrgPlanTier.GROWTH) {
-      const billingPeriod = (org.metadata as any)?.billingPeriod || 'monthly'
-      const basePrice = billingPeriod === 'monthly' 
-        ? PRICING.GROWTH.monthlyPrice 
-        : PRICING.GROWTH.annualPrice / 12
+      const billingPeriod = ((org.metadata as any)?.billingPeriod || 'monthly') as BillingPeriod
+      const pricingSku = normalizePricingSku(org)
+      const basePrice = resolveBaseMonthlyPrice(pricingSku, billingPeriod)
 
       lineItems.push({
-        description: `${org.planTier} Plan - ${billingPeriod}`,
+        description: `${org.planTier} Plan (${pricingSku}) - ${billingPeriod}`,
         quantity: 1,
         unitPrice: basePrice,
         amount: basePrice,
@@ -362,7 +493,7 @@ export class BillingService {
     let event: Stripe.Event
 
     try {
-      event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret)
+      event = getStripeClient().webhooks.constructEvent(rawBody, signature, webhookSecret)
     } catch (err) {
       throw new Error('Invalid webhook signature')
     }
@@ -437,7 +568,7 @@ export class BillingService {
   ): Promise<void> {
     // Update organization billing status
     const customerId = invoice.customer as string
-    const customer = await stripe.customers.retrieve(customerId)
+    const customer = await getStripeClient().customers.retrieve(customerId)
     
     if ('metadata' in customer && customer.metadata.orgId) {
       await prisma.organization.update({
@@ -459,7 +590,7 @@ export class BillingService {
     invoice: Stripe.Invoice
   ): Promise<void> {
     const customerId = invoice.customer as string
-    const customer = await stripe.customers.retrieve(customerId)
+    const customer = await getStripeClient().customers.retrieve(customerId)
     
     if ('metadata' in customer && customer.metadata.orgId) {
       await prisma.organization.update({

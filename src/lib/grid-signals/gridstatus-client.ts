@@ -19,6 +19,9 @@ const GRIDSTATUS_BASE_URL = 'https://api.gridstatus.io/v1/datasets'
 const REQUEST_TIMEOUT = 15000
 
 export class GridStatusClient {
+  private static readonly MIN_REQUEST_INTERVAL_MS = 1100
+  private static nextRequestAt = 0
+  private static requestQueue: Promise<unknown> = Promise.resolve()
   private apiKey?: string
 
   constructor() {
@@ -37,12 +40,33 @@ export class GridStatusClient {
     }
   }
 
-  private async logFailure(message: string, latencyMs?: number) {
+  private async logFailure(message: string, latencyMs?: number, statusCode?: number) {
     try {
-      await recordIntegrationFailure('GRIDSTATUS', message, { latencyMs })
+      await recordIntegrationFailure('GRIDSTATUS', message, { latencyMs, statusCode })
     } catch (error) {
       console.warn('Failed to record GridStatus failure metric:', error)
     }
+  }
+
+  private async runRateLimitedRequest<T>(operation: () => Promise<T>): Promise<T> {
+    const task = GridStatusClient.requestQueue.then(async () => {
+      const waitMs = Math.max(0, GridStatusClient.nextRequestAt - Date.now())
+      if (waitMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, waitMs))
+      }
+
+      GridStatusClient.nextRequestAt = Date.now() + GridStatusClient.MIN_REQUEST_INTERVAL_MS
+      return operation()
+    })
+
+    GridStatusClient.requestQueue = task.catch(() => undefined)
+    return task
+  }
+
+  private getErrorStatusCode(error: unknown): number | undefined {
+    const maybeError = error as { response?: { status?: number } } | undefined
+    const status = maybeError?.response?.status
+    return typeof status === 'number' ? status : undefined
   }
 
   /**
@@ -73,10 +97,12 @@ export class GridStatusClient {
       params.filter_column = 'respondent'
       params.filter_value = balancingAuthority
 
-      const response = await eiaResilience.execute('gridstatus-regional', () =>
-        axios.get<GridStatusRegionalResponse>(
-          `${GRIDSTATUS_BASE_URL}/eia_regional_hourly/query`,
-          { params, timeout: REQUEST_TIMEOUT }
+      const response = await this.runRateLimitedRequest(() =>
+        eiaResilience.execute('gridstatus-regional', () =>
+          axios.get<GridStatusRegionalResponse>(
+            `${GRIDSTATUS_BASE_URL}/eia_regional_hourly/query`,
+            { params, timeout: REQUEST_TIMEOUT }
+          )
         )
       )
 
@@ -125,7 +151,11 @@ export class GridStatusClient {
       return result
     } catch (error: any) {
       console.error(`GridStatus: Failed to fetch regional data for ${balancingAuthority}:`, error.message)
-      await this.logFailure(error.message ?? 'Failed to fetch regional data', Date.now() - startedAt)
+      await this.logFailure(
+        error.message ?? 'Failed to fetch regional data',
+        Date.now() - startedAt,
+        this.getErrorStatusCode(error)
+      )
       return []
     }
   }
@@ -157,16 +187,26 @@ export class GridStatusClient {
       // Fetch BOTH directions: BA as exporter (from_ba) AND as importer (to_ba)
       // InterchangeParser needs both to calculate correct net interchange
       const [fromResponse, toResponse] = await Promise.all([
-        eiaResilience.execute('gridstatus-interchange-from', () =>
-          axios.get<GridStatusInterchangeResponse>(
-            `${GRIDSTATUS_BASE_URL}/eia_ba_interchange_hourly/query`,
-            { params: { ...baseParams, filter_column: 'from_ba', filter_value: balancingAuthority }, timeout: REQUEST_TIMEOUT }
+        this.runRateLimitedRequest(() =>
+          eiaResilience.execute('gridstatus-interchange-from', () =>
+            axios.get<GridStatusInterchangeResponse>(
+              `${GRIDSTATUS_BASE_URL}/eia_ba_interchange_hourly/query`,
+              {
+                params: { ...baseParams, filter_column: 'from_ba', filter_value: balancingAuthority },
+                timeout: REQUEST_TIMEOUT,
+              }
+            )
           )
         ),
-        eiaResilience.execute('gridstatus-interchange-to', () =>
-          axios.get<GridStatusInterchangeResponse>(
-            `${GRIDSTATUS_BASE_URL}/eia_ba_interchange_hourly/query`,
-            { params: { ...baseParams, filter_column: 'to_ba', filter_value: balancingAuthority }, timeout: REQUEST_TIMEOUT }
+        this.runRateLimitedRequest(() =>
+          eiaResilience.execute('gridstatus-interchange-to', () =>
+            axios.get<GridStatusInterchangeResponse>(
+              `${GRIDSTATUS_BASE_URL}/eia_ba_interchange_hourly/query`,
+              {
+                params: { ...baseParams, filter_column: 'to_ba', filter_value: balancingAuthority },
+                timeout: REQUEST_TIMEOUT,
+              }
+            )
           )
         ),
       ])
@@ -199,7 +239,11 @@ export class GridStatusClient {
       }))
     } catch (error: any) {
       console.error(`GridStatus: Failed to fetch interchange data for ${balancingAuthority}:`, error.message)
-      await this.logFailure(error.message ?? 'Failed to fetch interchange data', Date.now() - startedAt)
+      await this.logFailure(
+        error.message ?? 'Failed to fetch interchange data',
+        Date.now() - startedAt,
+        this.getErrorStatusCode(error)
+      )
       return []
     }
   }
@@ -231,10 +275,12 @@ export class GridStatusClient {
       params.filter_column = 'respondent'
       params.filter_value = balancingAuthority
 
-      const response = await eiaResilience.execute('gridstatus-fuelmix', () =>
-        axios.get<GridStatusFuelMixResponse>(
-          `${GRIDSTATUS_BASE_URL}/eia_fuel_mix_hourly/query`,
-          { params, timeout: REQUEST_TIMEOUT }
+      const response = await this.runRateLimitedRequest(() =>
+        eiaResilience.execute('gridstatus-fuelmix', () =>
+          axios.get<GridStatusFuelMixResponse>(
+            `${GRIDSTATUS_BASE_URL}/eia_fuel_mix_hourly/query`,
+            { params, timeout: REQUEST_TIMEOUT }
+          )
         )
       )
 
@@ -242,7 +288,11 @@ export class GridStatusClient {
       return response.data.data || []
     } catch (error: any) {
       console.error(`GridStatus: Failed to fetch fuel mix data for ${balancingAuthority}:`, error.message)
-      await this.logFailure(error.message ?? 'Failed to fetch fuel mix data', Date.now() - startedAt)
+      await this.logFailure(
+        error.message ?? 'Failed to fetch fuel mix data',
+        Date.now() - startedAt,
+        this.getErrorStatusCode(error)
+      )
       return []
     }
   }

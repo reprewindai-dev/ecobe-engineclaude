@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { z } from 'zod'
-import { prisma } from '../lib/db'
+import { persistLegacyCanonicalDecision } from '../lib/ci/legacy-canonical-ingest'
 
 const router = Router()
 
@@ -126,46 +126,54 @@ router.post('/', async (req, res) => {
 
     const referenceTime = value.referenceTime ? new Date(value.referenceTime) : undefined
 
-    const created = await prisma.dashboardRoutingDecision.create({
-      data: {
-        createdAt,
-        workloadName,
-        opName,
-        baselineRegion,
-        chosenRegion,
-        zoneBaseline,
-        zoneChosen,
-        carbonIntensityBaselineGPerKwh,
-        carbonIntensityChosenGPerKwh,
-        estimatedKwh,
-        co2BaselineG,
-        co2ChosenG,
-        reason: value.reason ?? null,
-        latencyEstimateMs,
-        latencyActualMs,
-        fallbackUsed,
-        dataFreshnessSeconds,
-        requestCount,
-        // Grid signal fields
-        balancingAuthority: value.balancingAuthority ?? null,
-        demandRampPct: value.demandRampPct ?? null,
-        carbonSpikeProbability: value.carbonSpikeProbability ?? null,
-        curtailmentProbability: value.curtailmentProbability ?? null,
-        importCarbonLeakageScore: value.importCarbonLeakageScore ?? null,
-        // Provenance fields
-        sourceUsed: value.sourceUsed ?? null,
-        validationSource: value.validationSource ?? null,
-        referenceTime,
-        disagreementFlag: value.disagreementFlag ?? null,
-        disagreementPct: value.disagreementPct ?? null,
-        estimatedFlag: value.estimatedFlag ?? null,
-        syntheticFlag: value.syntheticFlag ?? null,
-        meta: (value.meta ?? {}) as any,
+    const created = await persistLegacyCanonicalDecision({
+      createdAt,
+      workloadName,
+      opName,
+      baselineRegion,
+      chosenRegion,
+      carbonIntensityBaselineGPerKwh,
+      carbonIntensityChosenGPerKwh,
+      estimatedKwh,
+      fallbackUsed,
+      reason: value.reason ?? null,
+      latencyEstimateMs,
+      latencyActualMs,
+      requestCount,
+      sourceUsed: value.sourceUsed ?? null,
+      validationSource: value.validationSource ?? null,
+      disagreementFlag: value.disagreementFlag ?? null,
+      disagreementPct: value.disagreementPct ?? null,
+      estimatedFlag: value.estimatedFlag ?? null,
+      syntheticFlag: value.syntheticFlag ?? null,
+      balancingAuthority: value.balancingAuthority ?? null,
+      demandRampPct: value.demandRampPct ?? null,
+      carbonSpikeProbability: value.carbonSpikeProbability ?? null,
+      curtailmentProbability: value.curtailmentProbability ?? null,
+      importCarbonLeakageScore: value.importCarbonLeakageScore ?? null,
+      dataFreshnessSeconds,
+      referenceTime,
+      metadata: {
+        ...(value.meta && typeof value.meta === 'object' && !Array.isArray(value.meta)
+          ? (value.meta as Record<string, unknown>)
+          : {}),
+        legacyZones: {
+          baseline: zoneBaseline,
+          chosen: zoneChosen,
+        },
+        providedCo2: {
+          baselineG: co2BaselineG,
+          chosenG: co2ChosenG,
+        },
       },
-      select: { id: true },
+      jobType: 'legacy',
     })
 
-    return res.status(201).json({ ok: true, id: created.id })
+    return res.status(201).json({
+      ok: true,
+      id: created.decisionFrameId,
+      canonicalId: created.id,
+    })
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid request', details: error.errors })

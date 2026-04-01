@@ -22,15 +22,56 @@ function getClientIp(request: NextRequest) {
   return 'unknown'
 }
 
+function normalizeHost(value: string) {
+  const candidate = value.trim()
+  if (!candidate) return null
+
+  try {
+    const url = candidate.includes('://') ? new URL(candidate) : new URL(`https://${candidate}`)
+    const hostname = url.hostname.replace(/^www\./i, '').toLowerCase()
+    const port = url.port && !['80', '443'].includes(url.port) ? `:${url.port}` : ''
+    return `${hostname}${port}`
+  } catch {
+    return null
+  }
+}
+
+function parseConfiguredAllowedOrigins() {
+  return (process.env.CONTACT_ALLOWED_ORIGINS ?? '')
+    .split(',')
+    .map((value) => normalizeHost(value))
+    .filter((value): value is string => Boolean(value))
+}
+
+function getAllowedOriginHosts(request: NextRequest) {
+  const allowedHosts = new Set<string>()
+
+  for (const value of [
+    request.nextUrl.host,
+    request.headers.get('host'),
+    request.headers.get('x-forwarded-host'),
+  ]) {
+    if (!value) continue
+    for (const host of value.split(',').map((entry) => normalizeHost(entry))) {
+      if (host) allowedHosts.add(host)
+    }
+  }
+
+  for (const host of parseConfiguredAllowedOrigins()) {
+    allowedHosts.add(host)
+  }
+
+  return allowedHosts
+}
+
 function isAllowedOrigin(request: NextRequest) {
   const origin = request.headers.get('origin')
   if (!origin) return true
 
-  try {
-    return new URL(origin).host === request.nextUrl.host
-  } catch {
-    return false
-  }
+  const originHost = normalizeHost(origin)
+  if (!originHost) return false
+
+  return getAllowedOriginHosts(request).has(originHost)
 }
 
 function buildContactMessage(payload: ContactSubmissionPayload, request: NextRequest) {

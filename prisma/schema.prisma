@@ -127,6 +127,10 @@ model DashboardRoutingDecision {
   id        String   @id @default(cuid())
 
   createdAt DateTime @default(now())
+  projectedAt DateTime @default(now())
+  projectionVersion String @default("ci_projection_v1")
+  sourceCiDecisionId String? @unique
+  sourceDecisionFrameId String?
 
   workloadName String?
   opName       String?
@@ -140,9 +144,15 @@ model DashboardRoutingDecision {
   carbonIntensityBaselineGPerKwh Int?
   carbonIntensityChosenGPerKwh   Int?
 
+  baselineEnergyKwh Float?
+  chosenEnergyKwh   Float?
   estimatedKwh Float?
+  baselineCo2G Float?
+  chosenCo2G   Float?
+  co2DeltaG    Float?
   co2BaselineG Float?
   co2ChosenG   Float?
+  carbonDataQuality CarbonDataQuality @default(INCOMPLETE)
 
   reason String?
 
@@ -168,10 +178,14 @@ model DashboardRoutingDecision {
   disagreementPct Float?
   estimatedFlag Boolean?
   syntheticFlag Boolean?
+  lowConfidence Boolean @default(false)
+  qualityStatus DecisionProjectionQualityStatus @default(SUSPECT)
+  qualityFlags Json @default("[]")
 
   meta Json @default("{}")
 
   @@index([createdAt])
+  @@index([projectedAt])
   @@index([baselineRegion])
   @@index([chosenRegion])
 }
@@ -804,6 +818,26 @@ enum DecisionEventOutboxStatus {
   DEAD_LETTER
 }
 
+enum DecisionProjectionOutboxStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+  DEAD_LETTER
+}
+
+enum DecisionProjectionQualityStatus {
+  CLEAN
+  SUSPECT
+  INVALID
+}
+
+enum CarbonDataQuality {
+  EXACT
+  DERIVED
+  INCOMPLETE
+}
+
 model DecisionEventOutbox {
   id               String                    @id @default(cuid())
   eventType        String
@@ -822,6 +856,24 @@ model DecisionEventOutbox {
 
   @@index([status, nextAttemptAt, createdAt])
   @@index([sinkId, createdAt])
+}
+
+model DecisionProjectionOutbox {
+  id                    String                        @id @default(cuid())
+  sourceCiDecisionId    String                        @unique
+  sourceCiDecision      CIDecision                    @relation(fields: [sourceCiDecisionId], references: [id], onDelete: Cascade)
+  decisionFrameId       String
+  payload               Json
+  status                DecisionProjectionOutboxStatus @default(PENDING)
+  attemptCount          Int                           @default(0)
+  nextAttemptAt         DateTime                      @default(now())
+  lastError             String?
+  processedAt           DateTime?
+  createdAt             DateTime                      @default(now())
+  updatedAt             DateTime                      @updatedAt
+
+  @@index([status, nextAttemptAt, createdAt])
+  @@index([decisionFrameId, createdAt])
 }
 
 model DecisionTraceEnvelope {
@@ -1065,6 +1117,86 @@ model DekesHandoffEvent {
 // CARBON LEDGER — AUDIT-GRADE ACCOUNTING
 // ============================================================================
 
+// ============================================================================
+// DESIGN PARTNER PROGRAM CRM
+// ============================================================================
+
+enum DesignPartnerType {
+  DESIGN @map("design")
+}
+
+enum DesignPartnerStatus {
+  APPLIED    @map("applied")
+  QUALIFIED  @map("qualified")
+  ACCEPTED   @map("accepted")
+  ONBOARDING @map("onboarding")
+  ACTIVE     @map("active")
+  GRADUATING @map("graduating")
+  CONVERTED  @map("converted")
+  DECLINED   @map("declined")
+  CHURNED    @map("churned")
+}
+
+enum DesignPartnerOnboardingStage {
+  FIT_CONFIRMED     @map("fit_confirmed")
+  AGREEMENT_SENT    @map("agreement_sent")
+  AGREEMENT_SIGNED  @map("agreement_signed")
+  KICKOFF_SCHEDULED @map("kickoff_scheduled")
+  TECHNICAL_SETUP   @map("technical_setup")
+  FIRST_VALUE       @map("first_value")
+  ACTIVE_PILOT      @map("active_pilot")
+  GRADUATION_REVIEW @map("graduation_review")
+  CONVERTED_PAID    @map("converted_paid")
+}
+
+model DesignPartner {
+  id     String @id @default(cuid())
+  crmKey String @unique @map("crm_key")
+
+  companyName   String  @map("company_name")
+  companyDomain String? @map("company_domain")
+  teamName      String? @map("team_name")
+  teamType      String? @map("team_type")
+
+  applicantName  String @map("applicant_name")
+  applicantEmail String @map("applicant_email")
+  roleTitle      String @map("role_title")
+
+  mainWorkloadsPlatforms String @map("main_workloads_platforms")
+  goalsSummary           String @map("goals_summary")
+  scopedWorkflow         String @map("scoped_workflow")
+  internalChampion       String @map("internal_champion")
+  commercialApprover     String? @map("commercial_approver")
+
+  commitmentConfirmed       Boolean @default(false) @map("commitment_confirmed")
+  anonymizedProofPermission Boolean @default(false) @map("anonymized_proof_permission")
+
+  partnerType DesignPartnerType @default(DESIGN) @map("partner_type")
+  cohort      String            @default("v1")
+  status      DesignPartnerStatus @default(APPLIED)
+  onboardingStage DesignPartnerOnboardingStage? @map("onboarding_stage")
+  firstValueAt      DateTime?                    @map("first_value_at")
+  convertedToPaidAt DateTime?                    @map("converted_to_paid_at")
+  totalPartnerSourcedArr Int @default(0)         @map("total_partner_sourced_arr")
+
+  notes    String?
+  metadata Json   @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([partnerType, cohort])
+  @@index([status, createdAt])
+  @@index([onboardingStage, updatedAt])
+  @@index([companyDomain])
+  @@index([applicantEmail])
+  @@map("design_partners")
+}
+
+// ============================================================================
+// CARBON LEDGER â€” AUDIT-GRADE ACCOUNTING
+// ============================================================================
+
 model CarbonLedgerEntry {
   id                    String   @id @default(cuid())
   orgId                 String
@@ -1297,12 +1429,21 @@ model CIDecision {
   // Decision details
   decisionFrameId       String   // Links to routing decision frame
   selectedRunner        String   // e.g., "ubuntu-latest"
+  baselineRegion        String?
   selectedRegion        String   // e.g., "us-east-1"
   
   // Carbon metrics
   carbonIntensity        Float    // gCO2/kWh
   baseline              Float    // Baseline carbon intensity
   savings               Float    // Percentage savings vs baseline
+  carbonSavingsRatio    Float?
+  baselineEnergyKwh     Float?
+  chosenEnergyKwh       Float?
+  estimatedKwh          Float?
+  baselineCo2G          Float?
+  chosenCo2G            Float?
+  co2DeltaG             Float?
+  carbonDataQuality     CarbonDataQuality @default(INCOMPLETE)
   
   // Request parameters
   jobType               String   // standard | heavy | light
@@ -1318,6 +1459,7 @@ model CIDecision {
   reasonCode            String?
   signalConfidence      Float?
   fallbackUsed          Boolean  @default(false)
+  lowConfidence         Boolean  @default(false)
 
   // Water-proof metrics
   waterImpactLiters     Float?
@@ -1337,6 +1479,7 @@ model CIDecision {
   metadata              Json     @default("{}")
   
   createdAt             DateTime @default(now())
+  projectionOutbox      DecisionProjectionOutbox[]
 
   @@index([decisionFrameId])
   @@index([selectedRegion, createdAt])

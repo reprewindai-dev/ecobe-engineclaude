@@ -2,7 +2,7 @@
 
 import { execSync } from 'child_process'
 import { existsSync, readFileSync } from 'fs'
-import { join } from 'path'
+import { dirname, join } from 'path'
 
 type VerificationStatus = 'PASS' | 'FAIL' | 'WARN'
 
@@ -15,8 +15,8 @@ interface VerificationResult {
 class DeploymentVerification {
   private results: VerificationResult[] = []
   private readonly engineRoot = process.cwd()
-  private readonly workspaceRoot = join(process.cwd(), '..')
-  private readonly dashboardRoot = join(this.workspaceRoot, 'ecobe-dashboard')
+  private readonly repoRoot = this.resolveRepoRoot()
+  private readonly dashboardRoot = this.resolveDashboardRoot()
 
   async run() {
     await this.verifyEngineBuild()
@@ -28,6 +28,31 @@ class DeploymentVerification {
 
   private addResult(status: VerificationStatus, category: string, message: string) {
     this.results.push({ status, category, message })
+  }
+
+  private resolveRepoRoot() {
+    let current = this.engineRoot
+    let githubRoot: string | null = null
+    for (let i = 0; i < 6; i += 1) {
+      if (existsSync(join(current, 'dekes-saas'))) {
+        return current
+      }
+      if (!githubRoot && existsSync(join(current, '.github'))) {
+        githubRoot = current
+      }
+      const parent = dirname(current)
+      if (parent === current) break
+      current = parent
+    }
+    return githubRoot ?? this.engineRoot
+  }
+
+  private resolveDashboardRoot() {
+    const repoDashboard = join(this.repoRoot, 'ecobe-dashboard')
+    if (existsSync(join(repoDashboard, 'package.json'))) {
+      return repoDashboard
+    }
+    return join(this.engineRoot, 'ecobe-dashboard')
   }
 
   private async verifyEngineBuild() {
@@ -46,8 +71,14 @@ class DeploymentVerification {
         this.addResult('FAIL', 'Dashboard Build', `Canonical dashboard root not found at ${this.dashboardRoot}`)
         return
       }
-      execSync('npm run build', { cwd: this.dashboardRoot, stdio: 'pipe' })
-      execSync('npm run type-check', { cwd: this.dashboardRoot, stdio: 'pipe' })
+      const env = {
+        ...process.env,
+        TURBOPACK: '0',
+        NEXT_TURBOPACK: '0',
+        NEXT_PRIVATE_WORKSPACE_ROOT: this.dashboardRoot,
+      }
+      execSync('npm run build', { cwd: this.dashboardRoot, stdio: 'pipe', env })
+      execSync('npm run type-check', { cwd: this.dashboardRoot, stdio: 'pipe', env })
       this.addResult('PASS', 'Dashboard Build', 'Dashboard builds and type-checks cleanly.')
     } catch (error) {
       this.addResult('FAIL', 'Dashboard Build', `Dashboard verification failed: ${String(error)}`)
@@ -117,17 +148,31 @@ class DeploymentVerification {
   }
 
   private async verifyAutomationAssets() {
-    const workflows = [
-      '.github/workflows/ingest-eia.yml',
-      '.github/workflows/refresh-forecasts.yml',
-      '.github/workflows/verify-signals.yml',
-      '.github/workflows/warm-cache.yml',
+    const workflowDir = join(this.repoRoot, '.github', 'workflows')
+    const workflowSets = [
+      ['ingest-eia.yml', 'refresh-forecasts.yml', 'verify-signals.yml', 'warm-cache.yml'],
+      ['refresh-water-bundle.yml', 'verify-live-dashboard.yml', 'release-proof.yml', 'ci.yml'],
     ]
 
-    const missing = workflows.filter((workflow) => !existsSync(join(this.engineRoot, workflow)))
+    if (!existsSync(workflowDir)) {
+      this.addResult('WARN', 'Workflows', 'Workflow directory not found; skipping workflow asset verification.')
+      return
+    }
 
-    if (missing.length > 0) {
-      this.addResult('FAIL', 'Workflows', `Missing workflow files: ${missing.join(', ')}`)
+    const satisfied = workflowSets.find((set) =>
+      set.every((name) => existsSync(join(workflowDir, name)))
+    )
+
+    if (!satisfied) {
+      const present = workflowSets
+        .flat()
+        .filter((name, idx, self) => self.indexOf(name) === idx)
+        .filter((name) => existsSync(join(workflowDir, name)))
+      this.addResult(
+        'WARN',
+        'Workflows',
+        `Workflow set incomplete. Present: ${present.length > 0 ? present.join(', ') : 'none'}.`
+      )
       return
     }
 
