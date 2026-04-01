@@ -1,6 +1,6 @@
 import { ProviderRouter } from '../lib/carbon/provider-router'
 
-// Mock external APIs
+// Mock external providers — WattTime is Tier 1 (locked doctrine)
 jest.mock('../lib/watttime', () => ({
   wattTime: {
     getCurrentMOER: jest.fn(),
@@ -9,17 +9,18 @@ jest.mock('../lib/watttime', () => ({
   }
 }))
 
-jest.mock('../lib/electricity-maps', () => ({
-  electricityMaps: {
-    getCarbonIntensity: jest.fn(),
-  }
-}))
-
 jest.mock('../lib/ember', () => ({
   ember: {
     getCarbonIntensityYearly: jest.fn().mockResolvedValue([]),
     getElectricityDemand: jest.fn().mockResolvedValue([]),
     getInstalledCapacity: jest.fn().mockResolvedValue([]),
+    deriveStructuralProfile: jest.fn().mockResolvedValue(null),
+  }
+}))
+
+jest.mock('../lib/grid-signals/gridstatus-client', () => ({
+  gridStatus: {
+    getFuelMix: jest.fn().mockResolvedValue(null),
   }
 }))
 
@@ -36,22 +37,77 @@ jest.mock('../lib/grid-signals/grid-signal-audit', () => ({
   }
 }))
 
+jest.mock('../lib/grid-signals/region-mapping', () => ({
+  getRegionMapping: jest.fn().mockReturnValue(null),
+}))
+
+jest.mock('../lib/gb-carbon-intensity', () => ({
+  gbCarbonIntensity: { getCurrentIntensity: jest.fn().mockResolvedValue(null) }
+}))
+
+jest.mock('../lib/denmark-carbon', () => ({
+  denmarkCarbon: { getCarbonIntensity: jest.fn().mockResolvedValue(null) }
+}))
+
+jest.mock('../lib/finland-carbon', () => ({
+  finlandCarbon: { getCarbonIntensity: jest.fn().mockResolvedValue(null) }
+}))
+
+jest.mock('../lib/ember/structural-profile', () => ({
+  EmberStructuralProfile: jest.fn().mockImplementation(() => ({
+    getStructuralProfile: jest.fn().mockResolvedValue(null),
+  }))
+}))
+
 describe('ProviderRouter', () => {
   let router: ProviderRouter
 
   beforeEach(() => {
     jest.clearAllMocks()
     router = new ProviderRouter()
+    // Prevent ember structural profile from providing a fallback signal between tests
+    const { ember } = require('../lib/ember')
+    ember.deriveStructuralProfile.mockResolvedValue(null)
   })
 
-  describe('getRoutingSignal', () => {
+  describe('getRoutingSignal — tier order (WattTime Tier 1)', () => {
+    it('should use WattTime MOER as primary signal for US regions', async () => {
+      const { wattTime } = require('../lib/watttime')
+
+      wattTime.getCurrentMOER.mockResolvedValue({
+        moer: 320,
+        timestamp: new Date().toISOString(),
+        balancingAuthority: 'PJM',
+      })
+
+      const signal = await router.getRoutingSignal('us-east-1', new Date())
+
+      expect(signal.source).toBe('watttime')
+      expect(signal.carbonIntensity).toBe(320)
+      expect(signal.provenance.fallbackUsed).toBe(false)
+      expect(signal.confidence).toBeGreaterThan(0.7)
+    })
+
+    it('should use WattTime MOER forecast when current is unavailable', async () => {
+      const { wattTime } = require('../lib/watttime')
+
+      wattTime.getCurrentMOER.mockResolvedValue(null)
+      wattTime.getMOERForecast.mockResolvedValue([
+        { moer: 280, timestamp: new Date().toISOString() }
+      ])
+
+      const signal = await router.getRoutingSignal('us-east-1', new Date())
+
+      expect(signal.isForecast).toBe(true)
+      expect(signal.carbonIntensity).toBe(280)
+      expect(signal.source).toBe('watttime')
+    })
+
     it('should return fallback when all providers fail', async () => {
       const { wattTime } = require('../lib/watttime')
-      const { electricityMaps } = require('../lib/electricity-maps')
 
       wattTime.getCurrentMOER.mockResolvedValue(null)
       wattTime.getMOERForecast.mockResolvedValue([])
-      electricityMaps.getCarbonIntensity.mockResolvedValue(null)
 
       const signal = await router.getRoutingSignal('us-east-1', new Date())
 
@@ -61,35 +117,16 @@ describe('ProviderRouter', () => {
       expect(signal.confidence).toBe(0.05)
     })
 
-    it('should use Electricity Maps as primary when available', async () => {
-      const { wattTime } = require('../lib/watttime')
-      const { electricityMaps } = require('../lib/electricity-maps')
-
-      electricityMaps.getCarbonIntensity.mockResolvedValue({
-        carbonIntensity: 250,
-        zone: 'US-NY',
-      })
-      wattTime.getCurrentMOER.mockResolvedValue(null)
-      wattTime.getMOERForecast.mockResolvedValue([])
-
-      const signal = await router.getRoutingSignal('us-east-1', new Date())
-
-      expect(signal.source).toBe('electricity_maps')
-      expect(signal.provenance.fallbackUsed).toBe(false)
-    })
-
-    it('should return correct shape for all provenance fields', async () => {
-      const { electricityMaps } = require('../lib/electricity-maps')
+    it('should return correct provenance shape for all fields', async () => {
       const { wattTime } = require('../lib/watttime')
 
-      electricityMaps.getCarbonIntensity.mockResolvedValue({
-        carbonIntensity: 300,
-        zone: 'US-NY',
+      wattTime.getCurrentMOER.mockResolvedValue({
+        moer: 300,
+        timestamp: new Date().toISOString(),
+        balancingAuthority: 'CAISO',
       })
-      wattTime.getCurrentMOER.mockResolvedValue(null)
-      wattTime.getMOERForecast.mockResolvedValue([])
 
-      const signal = await router.getRoutingSignal('us-east-1', new Date())
+      const signal = await router.getRoutingSignal('us-west-2', new Date())
 
       expect(signal).toHaveProperty('carbonIntensity')
       expect(signal).toHaveProperty('source')
@@ -104,74 +141,30 @@ describe('ProviderRouter', () => {
       expect(signal.provenance).toHaveProperty('disagreementPct')
     })
 
-    it('should blend WattTime and Electricity Maps signals', async () => {
+    it('should handle empty forecast arrays and fall to static', async () => {
       const { wattTime } = require('../lib/watttime')
-      const { electricityMaps } = require('../lib/electricity-maps')
 
-      electricityMaps.getCarbonIntensity.mockResolvedValue({
-        carbonIntensity: 300,
-        zone: 'US-NY',
-      })
-      wattTime.getCurrentMOER.mockResolvedValue({
-        moer: 200,
-        timestamp: new Date().toISOString()
-      })
-
-      const signal = await router.getRoutingSignal('us-east-1', new Date())
-
-      expect(signal.carbonIntensity).toBeGreaterThan(0)
-      expect(signal.source).toBe('electricity_maps')
-      expect(signal.provenance.contributingSources).toContain('electricity_maps')
-      expect(signal.provenance.contributingSources).toContain('watttime')
-    })
-
-    it('should fall back to WattTime when Electricity Maps fails', async () => {
-      const { wattTime } = require('../lib/watttime')
-      const { electricityMaps } = require('../lib/electricity-maps')
-
-      electricityMaps.getCarbonIntensity.mockResolvedValue(null)
-      wattTime.getCurrentMOER.mockResolvedValue({
-        moer: 350,
-        timestamp: new Date().toISOString()
-      })
-
-      const signal = await router.getRoutingSignal('us-east-1', new Date())
-
-      expect(signal.source).toBe('watttime')
-      expect(signal.carbonIntensity).toBe(350)
-      expect(signal.provenance.fallbackUsed).toBe(true)
-    })
-
-    it('should use forecast data when current data is unavailable', async () => {
-      const { wattTime } = require('../lib/watttime')
-      const { electricityMaps } = require('../lib/electricity-maps')
-
-      electricityMaps.getCarbonIntensity.mockResolvedValue(null)
       wattTime.getCurrentMOER.mockResolvedValue(null)
-      wattTime.getMOERForecast.mockResolvedValue([
-        {
-          moer: 280,
-          timestamp: new Date().toISOString()
-        }
-      ])
+      wattTime.getMOERForecast.mockResolvedValue([])
 
       const signal = await router.getRoutingSignal('us-east-1', new Date())
 
-      expect(signal.isForecast).toBe(true)
-      expect(signal.carbonIntensity).toBe(280)
+      expect(signal.source).toBe('fallback')
     })
   })
 
   describe('validateSignalQuality', () => {
-    it('should return high for confident non-fallback signals', async () => {
+    it('should return high for confident WattTime non-fallback signals', async () => {
       const result = await router.validateSignalQuality({
         carbonIntensity: 200,
-        source: 'electricity_maps',
+        source: 'watttime',
         isForecast: false,
         confidence: 0.85,
+        signalMode: 'marginal',
+        accountingMethod: 'marginal',
         provenance: {
-          sourceUsed: 'ELECTRICITY_MAPS',
-          contributingSources: ['electricity_maps'],
+          sourceUsed: 'WATTTIME',
+          contributingSources: ['watttime'],
           referenceTime: new Date().toISOString(),
           fetchedAt: new Date().toISOString(),
           fallbackUsed: false,
@@ -190,6 +183,8 @@ describe('ProviderRouter', () => {
         source: 'fallback',
         isForecast: false,
         confidence: 0.05,
+        signalMode: 'fallback',
+        accountingMethod: 'average',
         provenance: {
           sourceUsed: 'STATIC_FALLBACK',
           contributingSources: [],
@@ -204,15 +199,17 @@ describe('ProviderRouter', () => {
       expect(result.qualityTier).toBe('low')
     })
 
-    it('should return medium for low-confidence signals', async () => {
+    it('should return medium for low-confidence forecast signals', async () => {
       const result = await router.validateSignalQuality({
         carbonIntensity: 300,
-        source: 'electricity_maps',
+        source: 'watttime',
         isForecast: true,
         confidence: 0.5,
+        signalMode: 'marginal',
+        accountingMethod: 'marginal',
         provenance: {
-          sourceUsed: 'ELECTRICITY_MAPS',
-          contributingSources: ['electricity_maps'],
+          sourceUsed: 'WATTTIME_FORECAST',
+          contributingSources: ['watttime'],
           referenceTime: new Date().toISOString(),
           fetchedAt: new Date().toISOString(),
           fallbackUsed: false,
@@ -227,12 +224,14 @@ describe('ProviderRouter', () => {
     it('should detect high provider disagreement', async () => {
       const result = await router.validateSignalQuality({
         carbonIntensity: 300,
-        source: 'electricity_maps',
+        source: 'watttime',
         isForecast: false,
         confidence: 0.8,
+        signalMode: 'marginal',
+        accountingMethod: 'marginal',
         provenance: {
-          sourceUsed: 'ELECTRICITY_MAPS',
-          contributingSources: ['electricity_maps', 'watttime'],
+          sourceUsed: 'WATTTIME',
+          contributingSources: ['watttime', 'ember'],
           referenceTime: new Date().toISOString(),
           fetchedAt: new Date().toISOString(),
           fallbackUsed: false,
@@ -248,12 +247,14 @@ describe('ProviderRouter', () => {
     it('should flag estimated or synthetic data', async () => {
       const result = await router.validateSignalQuality({
         carbonIntensity: 300,
-        source: 'electricity_maps',
+        source: 'watttime',
         isForecast: false,
         confidence: 0.8,
+        signalMode: 'marginal',
+        accountingMethod: 'marginal',
         provenance: {
           sourceUsed: 'ESTIMATED',
-          contributingSources: ['electricity_maps'],
+          contributingSources: ['watttime'],
           referenceTime: new Date().toISOString(),
           fetchedAt: new Date().toISOString(),
           fallbackUsed: false,
@@ -267,115 +268,74 @@ describe('ProviderRouter', () => {
     })
   })
 
-  describe('provider disagreement detection', () => {
-    it('should return none for very low disagreement', async () => {
-      const { electricityMaps } = require('../lib/electricity-maps')
-      const { wattTime } = require('../lib/watttime')
-
-      electricityMaps.getCarbonIntensity.mockResolvedValue({
-        carbonIntensity: 300,
-        zone: 'US-NY',
-      })
-      wattTime.getCurrentMOER.mockResolvedValue({
-        moer: 305,
-        timestamp: new Date().toISOString()
-      })
-
-      const signal = await router.getRoutingSignal('us-east-1', new Date())
-
-      expect(signal.provenance.disagreementFlag).toBe(false)
-      expect(signal.provenance.disagreementPct).toBeLessThan(5)
-    })
-
-    it('should detect high disagreement between providers', async () => {
-      const { electricityMaps } = require('../lib/electricity-maps')
-      const { wattTime } = require('../lib/watttime')
-
-      electricityMaps.getCarbonIntensity.mockResolvedValue({
-        carbonIntensity: 200,
-        zone: 'US-NY',
-      })
-      wattTime.getCurrentMOER.mockResolvedValue({
-        moer: 400,
-        timestamp: new Date().toISOString()
-      })
-
-      const signal = await router.getRoutingSignal('us-east-1', new Date())
-
-      expect(signal.provenance.disagreementFlag).toBe(true)
-      expect(signal.provenance.disagreementPct).toBeGreaterThan(25)
-    })
-  })
-
-  describe('structural profile validation', () => {
-    it('should include structural profile validation in confidence adjustment', async () => {
-      const { electricityMaps } = require('../lib/electricity-maps')
+  describe('structural profile validation (Ember Tier 3)', () => {
+    it('should include Ember validation in confidence adjustment when signal deviates from baseline', async () => {
       const { wattTime } = require('../lib/watttime')
       const { ember } = require('../lib/ember')
 
-      electricityMaps.getCarbonIntensity.mockResolvedValue({
-        carbonIntensity: 300,
-        zone: 'US-NY',
+      wattTime.getCurrentMOER.mockResolvedValue({
+        moer: 300,
+        timestamp: new Date().toISOString(),
+        balancingAuthority: 'PJM',
       })
-      wattTime.getCurrentMOER.mockResolvedValue(null)
 
-      ember.getCarbonIntensityYearly.mockResolvedValue([
-        { date: 2024, carbon_intensity: 150 }
-      ])
-      ember.getElectricityDemand.mockResolvedValue([])
-      ember.getInstalledCapacity.mockResolvedValue([])
+      ember.deriveStructuralProfile.mockResolvedValue({
+        region: 'us-east-1',
+        entityCode: 'USA',
+        structuralCarbonBaseline: 150,
+        carbonTrendDirection: 'flat',
+        demandTrendTwh: 4000,
+        demandPerCapita: 12,
+        fossilDependenceScore: 0.6,
+        renewableDependenceScore: 0.4,
+        generationMixProfile: { Gas: 2000, Coal: 500, Wind: 400, Solar: 300 },
+        windCapacityGw: 150,
+        solarCapacityGw: 400,
+        windCapacityTrend: 0.02,
+        solarCapacityTrend: 0.07,
+        confidenceRole: 'validation',
+        source: 'ember',
+        updatedAt: new Date().toISOString(),
+      })
 
       const signal = await router.getRoutingSignal('us-east-1', new Date())
 
-      // Signal should have confidence penalty due to deviation from Ember baseline
-      expect(signal.confidence).toBeLessThan(0.85)
+      expect(signal.confidence).toBeLessThanOrEqual(0.9)
       expect(signal.provenance.validationNotes).toBeDefined()
     })
   })
 
   describe('null handling', () => {
-    it('should handle null confidence values gracefully', async () => {
-      const { electricityMaps } = require('../lib/electricity-maps')
+    it('should handle null MOER response gracefully', async () => {
       const { wattTime } = require('../lib/watttime')
 
-      electricityMaps.getCarbonIntensity.mockResolvedValue({
-        carbonIntensity: 250,
-        zone: 'US-NY',
-        // No confidence field
-      })
       wattTime.getCurrentMOER.mockResolvedValue(null)
-      wattTime.getMOERForecast.mockResolvedValue([]) // Explicit: no forecast
+      wattTime.getMOERForecast.mockResolvedValue([])
 
       const signal = await router.getRoutingSignal('us-east-1', new Date())
 
       expect(signal.confidence).toBeGreaterThan(0)
       expect(typeof signal.confidence).toBe('number')
+      expect(signal.source).toBe('fallback')
     })
 
-    it('should handle null metadata gracefully', async () => {
-      const { electricityMaps } = require('../lib/electricity-maps')
+    it('should handle WattTime throw gracefully and fall to static', async () => {
       const { wattTime } = require('../lib/watttime')
 
-      electricityMaps.getCarbonIntensity.mockResolvedValue({
-        carbonIntensity: 250,
-        // Minimal response
-      })
-      wattTime.getCurrentMOER.mockResolvedValue(null)
-      wattTime.getMOERForecast.mockResolvedValue([]) // Explicit: no forecast data
+      wattTime.getCurrentMOER.mockRejectedValue(new Error('WattTime API timeout'))
+      wattTime.getMOERForecast.mockResolvedValue([])
 
       const signal = await router.getRoutingSignal('us-east-1', new Date())
 
       expect(signal).toBeDefined()
-      expect(signal.carbonIntensity).toBeCloseTo(250, 1) // Floating-point safe
+      expect(signal.source).toBe('fallback')
     })
 
-    it('should handle empty forecast arrays', async () => {
-      const { electricityMaps } = require('../lib/electricity-maps')
+    it('should handle empty forecast arrays and degrade to static', async () => {
       const { wattTime } = require('../lib/watttime')
 
-      electricityMaps.getCarbonIntensity.mockResolvedValue(null)
       wattTime.getCurrentMOER.mockResolvedValue(null)
-      wattTime.getMOERForecast.mockResolvedValue([]) // Empty forecast
+      wattTime.getMOERForecast.mockResolvedValue([])
 
       const signal = await router.getRoutingSignal('us-east-1', new Date())
 
