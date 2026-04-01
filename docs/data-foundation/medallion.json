@@ -1,0 +1,272 @@
+{
+  "system": "CO2 Router",
+  "canonicalRepos": {
+    "dashboard": "C:\\Users\\antho\\.windsurf\\ecobe-engineclaude\\ecobe-dashboard",
+    "engine": "C:\\Users\\antho\\.windsurf\\ecobe-engineclaude\\ecobe-engine"
+  },
+  "layers": [
+    {
+      "name": "bronze",
+      "tables": [
+        {
+          "name": "provider_signal_raw",
+          "sourceModels": ["ProviderSnapshot", "GridSignalSnapshot", "Eia930BalanceRaw", "Eia930InterchangeRaw", "Eia930SubregionRaw"],
+          "purpose": "Immutable landing zone for raw carbon, freshness, and regional signal observations.",
+          "schema": [
+            { "field": "tenant_id", "type": "uuid|null", "description": "Owning tenant when signal is tenant-scoped." },
+            { "field": "provider", "type": "text", "description": "Provider identifier such as watttime, ember, gridstatus." },
+            { "field": "region", "type": "text", "description": "Canonical execution region or balancing authority." },
+            { "field": "observed_at", "type": "timestamptz", "description": "Provider observation timestamp." },
+            { "field": "ingested_at", "type": "timestamptz", "description": "Ingestion timestamp." },
+            { "field": "signal_payload", "type": "jsonb", "description": "Raw provider payload." },
+            { "field": "confidence", "type": "numeric", "description": "Provider confidence when present." },
+            { "field": "freshness_sec", "type": "integer|null", "description": "Staleness at ingest time." },
+            { "field": "source_signature", "type": "text|null", "description": "Provider checksum or request fingerprint." }
+          ],
+          "primaryKey": ["provider", "region", "observed_at"],
+          "partitioning": "Monthly by observed_at; subpartition by provider when volume warrants.",
+          "retention": "400 days hot, archive after 400 days."
+        },
+        {
+          "name": "water_artifact_raw",
+          "sourceModels": ["WaterProviderSnapshot"],
+          "purpose": "Raw water-source artifacts and provenance materials before normalization.",
+          "schema": [
+            { "field": "dataset_name", "type": "text", "description": "Aqueduct, AWARE, WWF, NREL." },
+            { "field": "dataset_version", "type": "text|null", "description": "Source dataset version." },
+            { "field": "manifest_hash", "type": "text|null", "description": "Manifest checksum when available." },
+            { "field": "computed_hash", "type": "text|null", "description": "Computed integrity hash." },
+            { "field": "artifact_path", "type": "text", "description": "Canonical artifact path." },
+            { "field": "metadata", "type": "jsonb", "description": "Raw source metadata." },
+            { "field": "ingested_at", "type": "timestamptz", "description": "Normalization ingest time." }
+          ],
+          "primaryKey": ["dataset_name", "dataset_version", "computed_hash"],
+          "partitioning": "None initially; append-only file-backed mirror plus Postgres index.",
+          "retention": "Retain indefinitely; provenance evidence is audit material."
+        },
+        {
+          "name": "incoming_event_raw",
+          "sourceModels": ["IntegrationEvent"],
+          "purpose": "Raw inbound webhook and signed event payload capture for replayable boundary auditing.",
+          "schema": [
+            { "field": "event_id", "type": "uuid", "description": "Event record identifier." },
+            { "field": "source", "type": "text", "description": "Inbound system or verifier source." },
+            { "field": "received_at", "type": "timestamptz", "description": "Receipt timestamp." },
+            { "field": "headers", "type": "jsonb", "description": "Captured transport headers." },
+            { "field": "payload", "type": "jsonb", "description": "Raw event payload." },
+            { "field": "signature", "type": "text|null", "description": "Captured signature or digest." }
+          ],
+          "primaryKey": ["event_id"],
+          "partitioning": "Monthly by received_at.",
+          "retention": "730 days hot, archive after 730 days."
+        }
+      ]
+    },
+    {
+      "name": "silver",
+      "tables": [
+        {
+          "name": "routing_signal_normalized",
+          "sourceModels": ["GridSignalSnapshot", "ProviderSnapshot"],
+          "purpose": "Normalized region-level signal state used by the runtime router and replay.",
+          "schema": [
+            { "field": "region", "type": "text", "description": "Canonical execution region." },
+            { "field": "minute_bucket", "type": "timestamptz", "description": "Routing cache bucket boundary." },
+            { "field": "carbon_intensity", "type": "numeric", "description": "Chosen routing signal value." },
+            { "field": "signal_mode", "type": "text", "description": "marginal | average | fallback." },
+            { "field": "accounting_method", "type": "text", "description": "marginal | flow-traced | average." },
+            { "field": "confidence", "type": "numeric", "description": "Normalized confidence." },
+            { "field": "provider_source", "type": "text", "description": "Winning provider source." },
+            { "field": "fallback_used", "type": "boolean", "description": "Whether fallback path was used." },
+            { "field": "staleness_sec", "type": "integer|null", "description": "Computed staleness." },
+            { "field": "last_latency_ms", "type": "integer|null", "description": "Provider resolution latency." },
+            { "field": "provenance_payload", "type": "jsonb", "description": "Contributing sources and validation notes." }
+          ],
+          "primaryKey": ["region", "minute_bucket"],
+          "partitioning": "Daily by minute_bucket.",
+          "retention": "90 days hot, archive after 90 days."
+        },
+        {
+          "name": "water_authority_normalized",
+          "sourceModels": ["WaterProviderSnapshot", "WaterPolicyEvidence"],
+          "purpose": "Canonical water authority inputs and evidence envelopes for routing decisions.",
+          "schema": [
+            { "field": "region", "type": "text", "description": "Execution region." },
+            { "field": "scenario", "type": "text", "description": "current | 2030 | 2050 | 2080." },
+            { "field": "authority_mode", "type": "text", "description": "basin | facility_overlay | fallback." },
+            { "field": "stress_index", "type": "numeric", "description": "Normalized water stress signal." },
+            { "field": "scarcity_impact", "type": "numeric", "description": "Water scarcity impact score." },
+            { "field": "confidence", "type": "numeric", "description": "Water authority confidence." },
+            { "field": "supplier_set", "type": "jsonb", "description": "Datasets and suppliers used." },
+            { "field": "evidence_refs", "type": "jsonb", "description": "Evidence references attached to proof." },
+            { "field": "bundle_hash", "type": "text|null", "description": "Water bundle hash." },
+            { "field": "manifest_hash", "type": "text|null", "description": "Water manifest hash." }
+          ],
+          "primaryKey": ["region", "scenario", "authority_mode"],
+          "partitioning": "None initially; low churn dimensional state.",
+          "retention": "Retain latest plus historical versions indefinitely."
+        },
+        {
+          "name": "policy_input_assembly",
+          "sourceModels": ["RoutingCandidate", "WaterPolicyEvidence"],
+          "purpose": "Deterministic policy/evaluator inputs assembled before final decision selection.",
+          "schema": [
+            { "field": "decision_frame_id", "type": "uuid", "description": "Decision frame identifier." },
+            { "field": "request_id", "type": "text", "description": "Caller request identifier." },
+            { "field": "policy_profile", "type": "text", "description": "Selected water/governance profile." },
+            { "field": "criticality", "type": "text", "description": "critical | standard | batch." },
+            { "field": "allow_delay", "type": "boolean", "description": "Delay permission flag." },
+            { "field": "weights", "type": "jsonb", "description": "Explicit governance weights when present." },
+            { "field": "candidate_set", "type": "jsonb", "description": "Normalized candidates passed to governance." },
+            { "field": "provisional_decision", "type": "jsonb", "description": "Decision before governance overrides." },
+            { "field": "bottleneck_score", "type": "numeric|null", "description": "Runtime bottleneck score." },
+            { "field": "assembled_at", "type": "timestamptz", "description": "Assembly time." }
+          ],
+          "primaryKey": ["decision_frame_id"],
+          "partitioning": "Monthly by assembled_at.",
+          "retention": "365 days hot, archive after 365 days."
+        }
+      ]
+    },
+    {
+      "name": "gold",
+      "tables": [
+        {
+          "name": "ci_decision_fact",
+          "sourceModels": ["CIDecision", "RoutingDecision", "WorkloadDecisionOutcome"],
+          "purpose": "Canonical decision fact table for every pre-execution authorization.",
+          "schema": [
+            { "field": "decision_frame_id", "type": "uuid", "description": "Primary runtime decision identifier." },
+            { "field": "tenant_id", "type": "uuid|null", "description": "Owning organization or tenant." },
+            { "field": "request_id", "type": "text", "description": "Caller request identifier." },
+            { "field": "decision", "type": "text", "description": "run_now | reroute | delay | throttle | deny." },
+            { "field": "reason_code", "type": "text", "description": "Primary doctrinal reason code." },
+            { "field": "selected_region", "type": "text", "description": "Winning execution region." },
+            { "field": "baseline_region", "type": "text", "description": "Baseline region for comparison." },
+            { "field": "signal_confidence", "type": "numeric", "description": "Normalized signal confidence." },
+            { "field": "fallback_used", "type": "boolean", "description": "Fallback involvement flag." },
+            { "field": "proof_hash", "type": "text", "description": "Decision proof hash." },
+            { "field": "created_at", "type": "timestamptz", "description": "Decision creation time." }
+          ],
+          "primaryKey": ["decision_frame_id"],
+          "partitioning": "Monthly by created_at.",
+          "retention": "Retain indefinitely; customer and audit record."
+        },
+        {
+          "name": "decision_trace_ledger",
+          "sourceModels": ["DecisionTraceEnvelope"],
+          "purpose": "Append-only replayable trace chain for each decision.",
+          "schema": [
+            { "field": "decision_frame_id", "type": "uuid", "description": "Decision frame identifier." },
+            { "field": "sequence_number", "type": "bigint", "description": "Monotonic trace sequence." },
+            { "field": "trace_hash", "type": "text", "description": "Current canonical trace hash." },
+            { "field": "previous_trace_hash", "type": "text|null", "description": "Previous chain hash." },
+            { "field": "input_signal_hash", "type": "text", "description": "Hash of normalized inputs." },
+            { "field": "payload", "type": "jsonb", "description": "Trace payload with identity, signals, governance, proof, performance." },
+            { "field": "created_at", "type": "timestamptz", "description": "Ledger append time." }
+          ],
+          "primaryKey": ["sequence_number"],
+          "partitioning": "Monthly by created_at.",
+          "retention": "Retain indefinitely; append-only audit ledger."
+        },
+        {
+          "name": "proof_chain_record",
+          "sourceModels": ["CarbonLedgerEntry", "WaterPolicyEvidence"],
+          "purpose": "Proof envelope linking decisions to datasets, provider snapshots, and water evidence.",
+          "schema": [
+            { "field": "decision_frame_id", "type": "uuid", "description": "Decision frame identifier." },
+            { "field": "proof_hash", "type": "text", "description": "Primary proof hash." },
+            { "field": "provider_snapshot_refs", "type": "jsonb", "description": "Provider snapshot references." },
+            { "field": "water_evidence_refs", "type": "jsonb", "description": "Water evidence references." },
+            { "field": "bundle_hash", "type": "text|null", "description": "Water bundle hash." },
+            { "field": "manifest_hash", "type": "text|null", "description": "Water manifest hash." },
+            { "field": "artifact_metadata", "type": "jsonb", "description": "Additional proof metadata." }
+          ],
+          "primaryKey": ["decision_frame_id", "proof_hash"],
+          "partitioning": "None initially.",
+          "retention": "Retain indefinitely."
+        },
+        {
+          "name": "decision_event_outbox_fact",
+          "sourceModels": ["DecisionEventOutbox", "IntegrationWebhookSink", "IntegrationEvent"],
+          "purpose": "Signed outbound event delivery state and delivery receipts.",
+          "schema": [
+            { "field": "outbox_id", "type": "uuid", "description": "Outbox row identifier." },
+            { "field": "decision_frame_id", "type": "uuid", "description": "Associated decision frame." },
+            { "field": "event_type", "type": "text", "description": "Event type such as DecisionEvaluatedV1." },
+            { "field": "sink_id", "type": "uuid|null", "description": "Target webhook sink." },
+            { "field": "delivery_status", "type": "text", "description": "PENDING | PROCESSING | SENT | FAILED | DEAD_LETTER." },
+            { "field": "attempt_count", "type": "integer", "description": "Delivery attempts." },
+            { "field": "next_attempt_at", "type": "timestamptz|null", "description": "Retry schedule." },
+            { "field": "last_error", "type": "text|null", "description": "Last delivery failure summary." },
+            { "field": "signature_digest", "type": "text|null", "description": "Event signature digest." }
+          ],
+          "primaryKey": ["outbox_id"],
+          "partitioning": "Monthly by created_at.",
+          "retention": "730 days hot, archive after 730 days."
+        }
+      ]
+    },
+    {
+      "name": "platinum",
+      "tables": [
+        {
+          "name": "decision_slo_rollup",
+          "sourceModels": ["CIDecision"],
+          "purpose": "Operational SLO aggregates for latency, freshness, replay, and proof posture.",
+          "schema": [
+            { "field": "rollup_window_start", "type": "timestamptz", "description": "Window start." },
+            { "field": "rollup_window_end", "type": "timestamptz", "description": "Window end." },
+            { "field": "sample_count", "type": "integer", "description": "Decision samples in window." },
+            { "field": "p50_total_ms", "type": "numeric", "description": "p50 total latency." },
+            { "field": "p95_total_ms", "type": "numeric", "description": "p95 total latency." },
+            { "field": "p95_compute_ms", "type": "numeric", "description": "p95 compute latency." },
+            { "field": "trace_available_pct", "type": "numeric", "description": "Share of frames with trace." },
+            { "field": "replay_verified_pct", "type": "numeric", "description": "Share of frames with deterministic replay." },
+            { "field": "provider_degraded_pct", "type": "numeric", "description": "Share of degraded provider evaluations." }
+          ],
+          "primaryKey": ["rollup_window_start", "rollup_window_end"],
+          "partitioning": "Daily by rollup_window_start.",
+          "retention": "Retain indefinitely for operational history."
+        },
+        {
+          "name": "tenant_usage_rollup",
+          "sourceModels": ["OrgUsageCounter", "Organization", "CIDecision"],
+          "purpose": "Per-tenant decision volume and governance usage for billing and expansion.",
+          "schema": [
+            { "field": "tenant_id", "type": "uuid", "description": "Owning organization." },
+            { "field": "billing_period", "type": "date", "description": "Month boundary." },
+            { "field": "decision_count", "type": "bigint", "description": "Total decisions in period." },
+            { "field": "run_now_count", "type": "bigint", "description": "Run-now outcomes." },
+            { "field": "delay_count", "type": "bigint", "description": "Delay outcomes." },
+            { "field": "deny_count", "type": "bigint", "description": "Deny outcomes." },
+            { "field": "trace_backed_count", "type": "bigint", "description": "Trace-backed decisions." },
+            { "field": "governed_count", "type": "bigint", "description": "Decisions with active SAIQ governance." },
+            { "field": "billable_units", "type": "numeric", "description": "Billable usage units." }
+          ],
+          "primaryKey": ["tenant_id", "billing_period"],
+          "partitioning": "Monthly by billing_period.",
+          "retention": "Retain indefinitely for finance and customer history."
+        },
+        {
+          "name": "customer_value_analytics",
+          "sourceModels": ["CIDecision", "CarbonCredit"],
+          "purpose": "Customer-facing value outputs for carbon avoided, water shifted, and proof posture.",
+          "schema": [
+            { "field": "tenant_id", "type": "uuid", "description": "Owning organization." },
+            { "field": "window_start", "type": "timestamptz", "description": "Analytics window start." },
+            { "field": "window_end", "type": "timestamptz", "description": "Analytics window end." },
+            { "field": "carbon_avoided_kg", "type": "numeric", "description": "Estimated avoided emissions." },
+            { "field": "water_shifted_liters", "type": "numeric", "description": "Estimated water-shift delta." },
+            { "field": "cost_optimized_usd", "type": "numeric", "description": "Estimated cost optimization." },
+            { "field": "high_confidence_pct", "type": "numeric", "description": "High-confidence decision rate." },
+            { "field": "proof_coverage_pct", "type": "numeric", "description": "Proof-backed coverage rate." }
+          ],
+          "primaryKey": ["tenant_id", "window_start", "window_end"],
+          "partitioning": "Monthly by window_start.",
+          "retention": "Retain indefinitely."
+        }
+      ]
+    }
+  ]
+}

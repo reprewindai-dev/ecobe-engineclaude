@@ -115,12 +115,10 @@ export function DesignPartnerApplicationForm() {
               Submit one real workflow, not a general note.
             </h2>
             <p className="mt-4 text-sm leading-7 text-slate-300">
-              This intake goes straight into the design partner CRM with{' '}
-              <code className="rounded bg-white/5 px-1.5 py-0.5 text-cyan-200">partner_type=design</code>,{' '}
-              <code className="rounded bg-white/5 px-1.5 py-0.5 text-cyan-200">cohort=v1</code>, and an initial{' '}
-              <code className="rounded bg-white/5 px-1.5 py-0.5 text-cyan-200">applied</code> status. The
-              goal is qualification fast, activation fast, and a clean commercial decision by the
-              end of the pilot.
+              This intake is reviewed directly against pilot fit, workflow clarity, operator
+              ownership, and commercial readiness. The goal is fast qualification, fast
+              activation, and a clean decision on a paid continuation path by the end of the
+              pilot.
             </p>
           </div>
           <div className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-emerald-200">
@@ -278,20 +276,10 @@ export function DesignPartnerApplicationForm() {
                 <div className="text-sm font-semibold text-white">
                   Application recorded for {submittedPartner.companyName}.
                 </div>
-                <div className="mt-2 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.22em] text-emerald-100">
-                  <span className="rounded-full border border-emerald-200/20 px-2 py-1">
-                    {submittedPartner.partnerType}
-                  </span>
-                  <span className="rounded-full border border-emerald-200/20 px-2 py-1">
-                    {submittedPartner.cohort}
-                  </span>
-                  <span className="rounded-full border border-emerald-200/20 px-2 py-1">
-                    {submittedPartner.status}
-                  </span>
-                </div>
                 <p className="mt-3 text-sm leading-7 text-emerald-50/90">
-                  The next move is qualification against ICP fit, a real workflow, and a clear
-                  champion. If you need to add context immediately, send it to {designPartnerContactEmail}.
+                  The next move is qualification against fit, one real workflow, and a clear
+                  internal champion. If you need to add context immediately, send it to{' '}
+                  {designPartnerContactEmail}.
                 </p>
               </div>
             </div>
@@ -330,8 +318,8 @@ export function DesignPartnerApplicationForm() {
         </div>
         <div className="space-y-3 border-t border-white/10 pt-4 text-sm text-slate-300">
           <div className="flex items-start justify-between gap-4">
-            <span>Default CRM fields</span>
-            <span className="text-right text-cyan-200">design / v1 / applied</span>
+            <span>Intake posture</span>
+            <span className="text-right text-cyan-200">scoped pilot qualification</span>
           </div>
           <div className="flex items-start justify-between gap-4">
             <span>Fast-screen criteria</span>

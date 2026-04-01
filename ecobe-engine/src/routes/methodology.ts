@@ -17,6 +17,7 @@ type IntegrationMetricRecord = {
   lastSuccessAt: Date | null
   lastFailureAt: Date | null
   lastLatencyMs: number | null
+  latencyP95Ms?: number | null
   alertActive: boolean
 }
 
@@ -40,16 +41,6 @@ const PROVIDERS: ProviderConfig[] = [
     name: 'GB Carbon Intensity',
     source: 'GB_CARBON',
     enabled: true,
-  },
-  {
-    name: 'DK Carbon',
-    source: 'DK_CARBON',
-    enabled: true,
-  },
-  {
-    name: 'FI Carbon',
-    source: 'FI_CARBON',
-    enabled: Boolean(env.FINGRID_API_KEY),
   },
 ]
 
@@ -85,13 +76,18 @@ router.get('/providers', async (_req, res) => {
       const metric = bySource.get(provider.source)
       const status = provider.enabled ? getProviderStatus(metric) : 'offline'
 
-      return {
-        name: provider.name,
-        status,
-        latencyMs: metric?.lastLatencyMs != null ? Math.round(metric.lastLatencyMs) : null,
-        lastSuccessAt: metric?.lastSuccessAt?.toISOString() ?? null,
-        disagreementPct: null,
-      }
+        return {
+          name: provider.name,
+          status,
+          latencyMs:
+            metric?.lastLatencyMs != null
+              ? Math.round(metric.lastLatencyMs)
+              : metric?.latencyP95Ms != null
+                ? Math.round(metric.latencyP95Ms)
+                : null,
+          lastSuccessAt: metric?.lastSuccessAt?.toISOString() ?? null,
+          disagreementPct: null,
+        }
     })
 
     res.json({ providers })

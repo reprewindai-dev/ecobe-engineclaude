@@ -105,14 +105,12 @@ export default function RootLayout({
                       {link.label}
                     </Link>
                   ))}
-                  <a
-                    href="/api/ecobe/ci/health"
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <Link
+                    href="/status"
                     className="rounded-lg px-3 py-1.5 text-sm text-slate-500 transition-all duration-200 hover:bg-slate-800/50 hover:text-slate-300"
                   >
                     Engine Health
-                  </a>
+                  </Link>
                   <div className="ml-2 flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-1">
                     <div className="pulse-glow h-1.5 w-1.5 rounded-full bg-emerald-500" />
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400">

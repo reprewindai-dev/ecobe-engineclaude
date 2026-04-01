@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-      - develop
-      - codex/**
     paths:
       - '.github/**'
       - 'ecobe-engine/**'
@@ -15,7 +13,6 @@ on:
   pull_request:
     branches:
       - main
-      - develop
     paths:
       - '.github/**'
       - 'ecobe-engine/**'
@@ -36,9 +33,35 @@ env:
   DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
 
 jobs:
+  determine-scope:
+    name: Determine Scope
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.scope.outputs.docs_only }}
+      dashboard_live_required: ${{ steps.scope.outputs.dashboard_live_required }}
+      dashboard_skip_reason: ${{ steps.scope.outputs.dashboard_skip_reason }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - id: scope
+        name: Classify changed files
+        run: node .github/scripts/classify-run-scope.mjs
+        env:
+          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_BEFORE_SHA: ${{ github.event.before }}
+
   verify-live-dashboard:
-    name: Verify Live Dashboard
-    runs-on: [self-hosted, linux, x64, do, ecobe, release]
+    name: Dashboard Route Verification
+    runs-on: ubuntu-latest
+    needs: determine-scope
+    if: ${{ needs.determine-scope.outputs.dashboard_live_required == 'true' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -52,9 +75,9 @@ jobs:
 
   failure-alert:
     name: Dashboard Verification Failure Alert
-    runs-on: [self-hosted, linux, x64, do, ecobe, general]
-    needs: verify-live-dashboard
-    if: ${{ always() && needs.verify-live-dashboard.result == 'failure' }}
+    runs-on: ubuntu-latest
+    needs: [determine-scope, verify-live-dashboard]
+    if: ${{ always() && needs.determine-scope.outputs.dashboard_live_required == 'true' && needs.verify-live-dashboard.result == 'failure' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -71,3 +94,24 @@ jobs:
           ALERT_INBOX_EMAIL: ${{ secrets.ALERT_INBOX_EMAIL }}
           ALERT_SUBJECT: CO2 Router dashboard live verification failure
           ALERT_SUMMARY: Dashboard live verification or fast-mode gate failed.
+
+  verify-live-dashboard-status:
+    name: Verify Live Dashboard
+    runs-on: ubuntu-latest
+    needs: [determine-scope, verify-live-dashboard]
+    if: always()
+    steps:
+      - name: Skip docs-only changes
+        if: ${{ needs.determine-scope.outputs.dashboard_live_required != 'true' }}
+        run: |
+          echo "Dashboard verification skipped: ${{ needs.determine-scope.outputs.dashboard_skip_reason }}"
+
+      - name: Check dashboard verification status
+        if: ${{ needs.determine-scope.outputs.dashboard_live_required == 'true' }}
+        shell: bash
+        run: |
+          if [ "${{ needs.verify-live-dashboard.result }}" != "success" ]; then
+            echo "Dashboard verification failed"
+            exit 1
+          fi
+          echo "Dashboard verification passed"

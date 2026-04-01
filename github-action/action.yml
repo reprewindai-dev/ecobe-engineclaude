@@ -1,138 +1,143 @@
 name: 'ECOBE Carbon-Aware Runner'
-description: 'Select optimal GitHub Actions runner based on carbon intensity'
+description: 'Call the ECOBE CI control plane and expose enforceable runner, delay, and concurrency outputs.'
 author: 'ECOBE'
 branding:
-  icon: 'leaf'
+  icon: 'activity'
   color: 'green'
 
 inputs:
   engine-url:
-    description: 'ECOBE Engine URL'
+    description: 'Base URL for the ECOBE engine'
     required: true
   api-key:
-    description: 'ECOBE Engine API Key'
+    description: 'Internal ECOBE API key used for CI preflight'
     required: true
-  preferred-regions:
-    description: 'Preferred runner regions (comma-separated)'
+  workload-id:
+    description: 'Stable workload identifier for audit records'
     required: false
-    default: 'us-east-1,us-west-2,eu-west-1'
+  job-name:
+    description: 'Human-readable workflow job name'
+    required: false
+  org-id:
+    description: 'Optional organization id for policy lookup'
+    required: false
+  candidate-regions:
+    description: 'Candidate execution regions (comma-separated)'
+    required: false
+    default: 'eastus,northeurope,norwayeast'
+  preferred-regions:
+    description: 'Deprecated alias for candidate-regions'
+    required: false
+    default: ''
+  baseline-region:
+    description: 'Explicit baseline region for savings comparison'
+    required: false
+  candidate-runners:
+    description: 'Candidate runner labels (comma-separated)'
+    required: false
+    default: 'ubuntu-latest,windows-latest,macos-latest'
   job-type:
-    description: 'Type of job (affects carbon weighting)'
+    description: 'Job type used for energy estimation'
     required: false
     default: 'standard'
-    options:
-      - standard
-      - heavy
-      - light
-  carbon-weight:
-    description: 'Carbon importance weight (0-1)'
+  duration-minutes:
+    description: 'Estimated job duration in minutes'
     required: false
-    default: '0.7'
+    default: '20'
+  delay-tolerance-minutes:
+    description: 'Maximum allowed deferral window in minutes'
+    required: false
+    default: '0'
+  deadline:
+    description: 'Optional ISO8601 deadline for bounded delay decisions'
+    required: false
+  signal-profile:
+    description: 'Signal profile to use for the decision'
+    required: false
+    default: 'us_official'
+  criticality:
+    description: 'Workload criticality'
+    required: false
+    default: 'standard'
+  matrix-size:
+    description: 'Requested parallel matrix width'
+    required: false
+    default: '1'
+  assurance-mode:
+    description: 'When true, fail closed on low-confidence fallback signals'
+    required: false
+    default: 'false'
+  carbon-weight:
+    description: 'Optional carbon weight override (0-1)'
+    required: false
+  latency-weight:
+    description: 'Optional latency weight override (0-1)'
+    required: false
+  cost-weight:
+    description: 'Optional cost weight override (0-1)'
+    required: false
   timeout-seconds:
     description: 'Timeout for API calls in seconds'
     required: false
     default: '30'
+  fail-on-deny:
+    description: 'Exit non-zero when the control plane denies execution'
+    required: false
+    default: 'true'
+  repo:
+    description: 'Repository slug for audit metadata'
+    required: false
+  workflow:
+    description: 'Workflow name for audit metadata'
+    required: false
+  commit-sha:
+    description: 'Commit SHA for audit metadata'
+    required: false
+  branch:
+    description: 'Branch or ref name for audit metadata'
+    required: false
+  event-name:
+    description: 'GitHub event name for audit metadata'
+    required: false
 
 outputs:
-  selected-runner:
-    description: 'Selected optimal runner'
-    value: ${{ steps.select-runner.outputs.selected-runner }}
-  selected-region:
-    description: 'Selected optimal region'
-    value: ${{ steps.select-runner.outputs.selected-region }}
-  carbon-intensity:
-    description: 'Carbon intensity (gCO2/kWh)'
-    value: ${{ steps.select-runner.outputs.carbon-intensity }}
-  baseline:
-    description: 'Baseline carbon intensity for comparison'
-    value: ${{ steps.select-runner.outputs.baseline }}
-  savings:
-    description: 'Carbon savings percentage'
-    value: ${{ steps.select-runner.outputs.savings }}
-  recommendation:
-    description: 'Routing recommendation details'
-    value: ${{ steps.select-runner.outputs.recommendation }}
+  decision:
+    description: 'Deterministic decision: run_now, reroute, delay, throttle, or deny'
+  reason-code:
+    description: 'Stable machine-readable reason for the decision'
+  approved-region:
+    description: 'Approved execution region'
+  approved-runner-label:
+    description: 'Approved GitHub runner label'
+  delay-seconds:
+    description: 'Delay the workflow by this many seconds before running'
+  max-parallel:
+    description: 'Approved maximum concurrency for the workflow matrix'
+  estimated-savings-percent:
+    description: 'Estimated carbon savings versus the declared baseline region'
   decision-id:
-    description: 'Decision frame ID for audit'
-    value: ${{ steps.select-runner.outputs.decision-id }}
+    description: 'Decision id for audit and replay'
+  baseline-carbon-intensity:
+    description: 'Baseline carbon intensity in gCO2/kWh'
+  selected-carbon-intensity:
+    description: 'Selected carbon intensity in gCO2/kWh'
+  signal-confidence:
+    description: 'Confidence label for the selected decision path'
+  policy-trace:
+    description: 'JSON array describing the policy evaluation trace'
+  recommendation:
+    description: 'Human-readable summary for workflow logs'
+  selected-runner:
+    description: 'Legacy alias for approved-runner-label'
+  selected-region:
+    description: 'Legacy alias for approved-region'
+  carbon-intensity:
+    description: 'Legacy alias for selected-carbon-intensity'
+  baseline:
+    description: 'Legacy alias for baseline-carbon-intensity'
+  savings:
+    description: 'Legacy alias for estimated-savings-percent'
 
 runs:
-  using: 'composite'
-  steps:
-    - name: Select Carbon-Aware Runner
-      id: select-runner
-      shell: bash
-      run: |
-        echo "🌱 Selecting carbon-aware GitHub Actions runner..."
-        
-        # Parse preferred regions
-        IFS=',' read -ra REGIONS <<< "${{ inputs.preferred-regions }}"
-        
-        # Prepare request payload
-        payload=$(cat <<EOF
-        {
-          "preferredRegions": [$(printf '"%s",' "${REGIONS[@]}" | sed 's/,$//')],
-          "carbonWeight": ${{ inputs.carbon-weight }},
-          "jobType": "${{ inputs.job-type }}",
-          "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
-        }
-        EOF
-        )
-        
-        echo "📊 Request payload: $payload"
-        
-        # Call ECOBE Engine CI routing endpoint
-        response=$(curl -s \
-          --max-time ${{ inputs.timeout-seconds }} \
-          -X POST "${{ inputs.engine-url }}/api/v1/ci/route" \
-          -H "Authorization: Bearer ${{ inputs.api-key }}" \
-          -H "Content-Type: application/json" \
-          -d "$payload")
-        
-        if [ $? -ne 0 ]; then
-          echo "❌ Failed to contact ECOBE Engine"
-          echo "Response: $response"
-          exit 1
-        fi
-        
-        echo "📈 ECOBE response: $response"
-        
-        # Parse response and set outputs
-        selected_runner=$(echo "$response" | jq -r '.selectedRunner // "ubuntu-latest"')
-        selected_region=$(echo "$response" | jq -r '.selectedRegion // "us-east-1"')
-        carbon_intensity=$(echo "$response" | jq -r '.carbonIntensity // "0"')
-        baseline=$(echo "$response" | jq -r '.baseline // "0"')
-        savings=$(echo "$response" | jq -r '.savings // "0"')
-        decision_id=$(echo "$response" | jq -r '.decisionFrameId // "unknown"')
-        
-        # Create recommendation summary
-        recommendation=$(echo "$response" | jq -r '.recommendation // "Standard routing applied"')
-        
-        echo "selected-runner=$selected_runner" >> $GITHUB_OUTPUT
-        echo "selected-region=$selected_region" >> $GITHUB_OUTPUT
-        echo "carbon-intensity=$carbon_intensity" >> $GITHUB_OUTPUT
-        echo "baseline=$baseline" >> $GITHUB_OUTPUT
-        echo "savings=$savings" >> $GITHUB_OUTPUT
-        echo "recommendation=$recommendation" >> $GITHUB_OUTPUT
-        echo "decision-id=$decision_id" >> $GITHUB_OUTPUT
-        
-        echo "✅ Carbon-aware runner selection complete"
-        echo "📍 Selected: $selected_runner ($selected_region)"
-        echo "🌍 Carbon: $carbon_intensity gCO2/kWh"
-        echo "💰 Savings: $savings% vs baseline"
-
-    - name: Display Selection Summary
-      shell: bash
-      run: |
-        echo ""
-        echo "🌱 ECOBE Carbon-Aware Runner Selection"
-        echo "=========================================="
-        echo "📍 Runner: ${{ steps.select-runner.outputs.selected-runner }}"
-        echo "🌍 Region: ${{ steps.select-runner.outputs.selected-region }}"
-        echo "⚡ Carbon: ${{ steps.select-runner.outputs.carbon-intensity }} gCO2/kWh"
-        echo "📊 Baseline: ${{ steps.select-runner.outputs.baseline }} gCO2/kWh"
-        echo "💰 Savings: ${{ steps.select-runner.outputs.savings }}%"
-        echo "🎯 Decision ID: ${{ steps.select-runner.outputs.decision-id }}"
-        echo "💡 Recommendation: ${{ steps.select-runner.outputs.recommendation }}"
-        echo "=========================================="
-        echo ""
+  using: 'node20'
+  main: 'main.js'

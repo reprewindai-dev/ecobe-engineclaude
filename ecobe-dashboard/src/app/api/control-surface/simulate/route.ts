@@ -11,6 +11,10 @@ import type {
   SimulationMode,
 } from '@/types/control-surface'
 
+type FullSimulationResponse = CiRouteResponse & {
+  proofEnvelope?: Record<string, unknown> | null
+}
+
 export const dynamic = 'force-dynamic'
 
 const allowedJobTypes = new Set(['standard', 'heavy', 'light'])
@@ -21,6 +25,15 @@ const allowedPolicyProfiles = new Set([
   'eu_data_center_reporting',
   'high_water_sensitivity',
 ])
+const FAST_SIM_CACHE_TTL_MS = 15_000
+const fastSimulationCache = new Map<
+  string,
+  {
+    expiresAt: number
+    serialized: string
+    responseBytes: number
+  }
+>()
 
 function resolveMode(request: Request, payload: Record<string, unknown>): SimulationMode {
   const url = new URL(request.url)
@@ -112,6 +125,10 @@ function toFastSimulationResponse(data: CiRouteResponse): SimulationFastResponse
   }
 }
 
+function buildFastSimulationCacheKey(payload: ReturnType<typeof normalizePayload>) {
+  return JSON.stringify(payload)
+}
+
 export async function POST(request: Request) {
   const startedAt = performance.now()
 
@@ -119,6 +136,66 @@ export async function POST(request: Request) {
     const rawPayload = (await request.json()) as Record<string, unknown>
     const mode = resolveMode(request, rawPayload)
     const payload = normalizePayload(rawPayload)
+    const fastCacheKey = mode === 'fast' ? buildFastSimulationCacheKey(payload) : null
+
+    if (mode === 'fast' && fastCacheKey) {
+      const cached = fastSimulationCache.get(fastCacheKey)
+      if (cached && cached.expiresAt > Date.now()) {
+        const totalMs = performance.now() - startedAt
+
+        recordDashboardMetric(dashboardTelemetryMetricNames.routeDurationMs, 'histogram', totalMs, {
+          route: 'simulate',
+          mode,
+        })
+        recordDashboardMetric(
+          dashboardTelemetryMetricNames.simulationEngineDurationMs,
+          'histogram',
+          0,
+          {
+            route: 'simulate',
+            mode,
+          }
+        )
+        recordDashboardMetric(
+          dashboardTelemetryMetricNames.simulationSerializeDurationMs,
+          'histogram',
+          0,
+          {
+            route: 'simulate',
+            mode,
+          }
+        )
+        recordDashboardMetric(
+          dashboardTelemetryMetricNames.routeResponseBytes,
+          'histogram',
+          cached.responseBytes,
+          {
+            route: 'simulate',
+            mode,
+          }
+        )
+
+        const cachedResponse = new NextResponse(cached.serialized, {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+          },
+        })
+        cachedResponse.headers.set('x-co2router-sim-mode', mode)
+        cachedResponse.headers.set('x-co2router-response-bytes', String(cached.responseBytes))
+        cachedResponse.headers.set(
+          'Server-Timing',
+          `engine;dur=0.0, serialize;dur=0.0, total;dur=${totalMs.toFixed(1)}`
+        )
+
+        return cachedResponse
+      }
+
+      if (cached && cached.expiresAt <= Date.now()) {
+        fastSimulationCache.delete(fastCacheKey)
+      }
+    }
+
     const enginePayload =
       mode === 'fast'
         ? {
@@ -139,12 +216,56 @@ export async function POST(request: Request) {
     })
     const engineMs = performance.now() - engineStartedAt
 
-    const responsePayload = mode === 'full' ? data : toFastSimulationResponse(data)
+    let responsePayload: FullSimulationResponse | SimulationFastResponse = toFastSimulationResponse(data)
+
+    if (mode === 'full') {
+      const fullData = data as FullSimulationResponse
+      let proofEnvelope = fullData.proofEnvelope ?? null
+
+      try {
+        const [traceRecord, replayBundle] = await Promise.all([
+          fetchEngineJson(`/ci/decisions/${encodeURIComponent(data.decisionFrameId)}/trace`, undefined, {
+            internal: true,
+          }),
+          fetchEngineJson(`/ci/decisions/${encodeURIComponent(data.decisionFrameId)}/replay`, undefined, {
+            internal: true,
+          }),
+        ])
+
+        proofEnvelope = {
+          ...(fullData.proofEnvelope ?? {}),
+          detailMode: 'full',
+          detailHydratedAt: new Date().toISOString(),
+          traceRecord,
+          replayBundle,
+        }
+      } catch (error) {
+        proofEnvelope = {
+          ...(fullData.proofEnvelope ?? {}),
+          detailMode: 'full',
+          detailHydrationError:
+            error instanceof Error ? error.message : 'Unable to hydrate full proof details',
+        }
+      }
+
+      responsePayload = {
+        ...fullData,
+        proofEnvelope,
+      }
+    }
     const serializationStartedAt = performance.now()
     const serialized = JSON.stringify(responsePayload)
     const serializationMs = performance.now() - serializationStartedAt
     const totalMs = performance.now() - startedAt
     const responseBytes = Buffer.byteLength(serialized)
+
+    if (mode === 'fast' && fastCacheKey) {
+      fastSimulationCache.set(fastCacheKey, {
+        expiresAt: Date.now() + FAST_SIM_CACHE_TTL_MS,
+        serialized,
+        responseBytes,
+      })
+    }
 
     recordDashboardMetric(dashboardTelemetryMetricNames.routeDurationMs, 'histogram', totalMs, {
       route: 'simulate',

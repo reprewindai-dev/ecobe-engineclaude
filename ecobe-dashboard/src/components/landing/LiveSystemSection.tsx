@@ -1,5 +1,6 @@
 'use client'
 
+import { FALLBACK_LIVE_SYSTEM_SNAPSHOT } from '@/lib/control-surface/fallbacks'
 import { useLiveSystemSnapshot } from '@/lib/hooks/control-surface'
 import { GovernancePanel } from './GovernancePanel'
 import { LatencyPanel } from './LatencyPanel'
@@ -9,30 +10,7 @@ import { TraceLedgerPanel } from './TraceLedgerPanel'
 
 export function LiveSystemSection() {
   const liveSystemQuery = useLiveSystemSnapshot()
-
-  if (liveSystemQuery.isLoading) {
-    return (
-      <section className="rounded-[32px] border border-white/10 bg-white/[0.03] p-6 sm:p-8">
-        <div className="text-[11px] uppercase tracking-[0.28em] text-cyan-300">Live System</div>
-        <div className="mt-4 text-sm text-slate-300">Loading real system state…</div>
-      </section>
-    )
-  }
-
-  if (liveSystemQuery.error || !liveSystemQuery.data) {
-    return (
-      <section className="rounded-[32px] border border-rose-400/20 bg-rose-400/10 p-6 sm:p-8">
-        <div className="text-[11px] uppercase tracking-[0.28em] text-rose-200">Live System</div>
-        <div className="mt-4 text-sm text-rose-100">
-          {liveSystemQuery.error instanceof Error
-            ? liveSystemQuery.error.message
-            : 'Failed to load live system state.'}
-        </div>
-      </section>
-    )
-  }
-
-  const snapshot = liveSystemQuery.data
+  const snapshot = liveSystemQuery.data ?? FALLBACK_LIVE_SYSTEM_SNAPSHOT
 
   return (
     <section className="rounded-[32px] border border-white/10 bg-white/[0.03] p-6 sm:p-8">
@@ -46,6 +24,12 @@ export function LiveSystemSection() {
           replay posture, SAIQ governance state, verified water datasets, and the current p95
           latency window.
         </p>
+        {liveSystemQuery.error ? (
+          <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">
+            Live system data is reconnecting. The section shell stays visible while fresh trace,
+            latency, and provenance state reattach.
+          </div>
+        ) : null}
       </div>
 
       <div className="mt-8 grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">

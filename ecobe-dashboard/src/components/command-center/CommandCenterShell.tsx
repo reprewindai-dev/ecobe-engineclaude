@@ -16,6 +16,7 @@ import {
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { ACTION_META } from '@/components/control-surface/action-styles'
+import { FALLBACK_COMMAND_CENTER_SNAPSHOT } from '@/lib/control-surface/fallbacks'
 import {
   useCommandCenterSnapshot,
   useDecisionTrace,
@@ -35,7 +36,7 @@ import type {
 } from '@/types/control-surface'
 
 function shortHash(value: string | null | undefined, length = 12) {
-  if (!value) return 'Unavailable'
+  if (!value) return 'attaching'
   return value.length <= length ? value : `${value.slice(0, length)}…`
 }
 
@@ -48,7 +49,7 @@ function formatAgo(timestamp: string) {
 }
 
 function formatSecondsCompact(seconds: number | null | undefined) {
-  if (seconds == null || !Number.isFinite(seconds)) return 'Unavailable'
+  if (seconds == null || !Number.isFinite(seconds)) return 'attaching'
   if (seconds < 60) return `${seconds}s`
   if (seconds < 3600) return `${Math.round(seconds / 60)}m`
   if (seconds < 86400) return `${Math.round(seconds / 3600)}h`
@@ -247,6 +248,26 @@ function deriveTraceItems(
   }))
 }
 
+function useDesktopBreakpoint(minWidth = 1280) {
+  const [isDesktop, setIsDesktop] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const mediaQuery = window.matchMedia(`(min-width: ${minWidth}px)`)
+    const update = () => setIsDesktop(mediaQuery.matches)
+
+    update()
+    mediaQuery.addEventListener('change', update)
+
+    return () => {
+      mediaQuery.removeEventListener('change', update)
+    }
+  }, [minWidth])
+
+  return isDesktop
+}
+
 function MetricChip({
   icon: Icon,
   label,
@@ -270,7 +291,7 @@ function MetricChip({
       <Icon className="h-3.5 w-3.5" />
       <span>{label}</span>
       <span className="text-[10px] tracking-[0.24em] text-white/75">
-        {state == null ? 'UNAVAILABLE' : state ? 'LOCKED' : 'OFF'}
+        {state == null ? 'ATTACHING' : state ? 'LOCKED' : 'OFF'}
       </span>
     </div>
   )
@@ -471,11 +492,22 @@ function DecisionPipelineRail({
   selectedDecision: CommandCenterDecisionItem | null
 }) {
   const stages = [
-    { label: 'Signals', value: selectedTrace ? `${selectedTrace.payload.normalizedSignals.candidates.length} candidates` : 'Unavailable' },
-    { label: 'SAIQ', value: governance.source ?? 'Unavailable' },
-    { label: 'Policy', value: governance.enforcementMode ?? 'Unavailable' },
-    { label: 'Decision', value: selectedDecision ? resolveActionMeta(selectedDecision.action).label : 'Unavailable' },
-    { label: 'Proof', value: selectedDecision?.proofHash ? shortHash(selectedDecision.proofHash, 10) : 'Unavailable' },
+    {
+      label: 'Signals',
+      value: selectedTrace
+        ? `${selectedTrace.payload.normalizedSignals.candidates.length} candidates`
+        : 'decision inputs attaching',
+    },
+    { label: 'SAIQ', value: governance.source ?? 'governance source attaching' },
+    { label: 'Policy', value: governance.enforcementMode ?? 'policy mode attaching' },
+    {
+      label: 'Decision',
+      value: selectedDecision ? resolveActionMeta(selectedDecision.action).label : 'selection updates here',
+    },
+    {
+      label: 'Proof',
+      value: selectedDecision?.proofHash ? shortHash(selectedDecision.proofHash, 10) : 'proof envelope attaching',
+    },
   ]
 
   return (
@@ -514,21 +546,21 @@ function DecisionEngineCore({
         <div>
           <div className="text-[11px] uppercase tracking-[0.22em] text-cyan-300">Decision core</div>
           <h2 className="mt-2 text-2xl font-black tracking-[-0.04em] text-white">
-            {selectedDecision ? resolveActionMeta(selectedDecision.action).label : 'Awaiting frame'}
+            {selectedDecision ? resolveActionMeta(selectedDecision.action).label : 'Authority frame ready'}
           </h2>
           <div className="mt-2 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.2em] text-slate-300">
             <span className={clsx('rounded-full border px-3 py-1', meta.badge, meta.border)}>
-              {selectedDecision?.selectedRegion ?? 'No region'}
+              {selectedDecision?.selectedRegion ?? 'routing frame'}
             </span>
             <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1">
-              {selectedDecision?.reasonCode ?? 'No decision selected'}
+              {selectedDecision?.reasonCode ?? 'Decision detail attaches on selection'}
             </span>
           </div>
         </div>
         <div className="grid gap-2 text-right text-xs text-slate-300">
           <div>Proof {shortHash(selectedDecision?.proofHash)}</div>
-          <div>Trace {selectedDecision?.traceAvailable ? 'locked' : 'unavailable'}</div>
-          <div>Replay {selectedReplay ? (selectedReplay.deterministicMatch ? 'verified' : 'mismatch') : 'unavailable'}</div>
+          <div>Trace {selectedDecision?.traceAvailable ? 'locked' : 'on inspect'}</div>
+          <div>Replay {selectedReplay ? (selectedReplay.deterministicMatch ? 'verified' : 'mismatch') : 'on inspect'}</div>
         </div>
       </div>
 
@@ -537,7 +569,7 @@ function DecisionEngineCore({
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Decision frame</div>
-              <div className="mt-2 font-mono text-sm text-white">{selectedDecision?.decisionFrameId ?? 'Unavailable'}</div>
+              <div className="mt-2 font-mono text-sm text-white">{selectedDecision?.decisionFrameId ?? 'frame attaches on selection'}</div>
             </div>
             <div>
               <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Latency</div>
@@ -547,19 +579,19 @@ function DecisionEngineCore({
             </div>
             <div>
               <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Baseline region</div>
-              <div className="mt-2 text-sm text-white">{selectedReplay?.persisted?.baseline.region ?? selectedReplay?.replay.baseline.region ?? 'Unavailable'}</div>
+              <div className="mt-2 text-sm text-white">{selectedReplay?.persisted?.baseline.region ?? selectedReplay?.replay.baseline.region ?? 'baseline attached on replay'}</div>
             </div>
             <div>
               <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Water authority</div>
-              <div className="mt-2 text-sm text-white">{selectedDecision?.waterAuthorityMode ?? 'Unavailable'}</div>
+              <div className="mt-2 text-sm text-white">{selectedDecision?.waterAuthorityMode ?? 'governed on current frame'}</div>
             </div>
             <div>
               <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">SAIQ source</div>
-              <div className="mt-2 text-sm text-white">{governance.source ?? 'Unavailable'}</div>
+              <div className="mt-2 text-sm text-white">{governance.source ?? 'policy authority attaching'}</div>
             </div>
             <div>
               <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Selected score</div>
-              <div className="mt-2 text-sm text-white">{governance.selectedScore != null ? governance.selectedScore.toFixed(3) : 'Unavailable'}</div>
+              <div className="mt-2 text-sm text-white">{governance.selectedScore != null ? governance.selectedScore.toFixed(3) : 'score attaches with live governance'}</div>
             </div>
           </div>
         </div>
@@ -569,7 +601,7 @@ function DecisionEngineCore({
           <div className="mt-2 text-lg font-semibold text-white">{selectedDecision?.reasonCode ?? 'No active decision'}</div>
           <div className="mt-4 space-y-2 text-sm text-slate-300">
             <div>Action: <span className={meta.text}>{meta.label}</span></div>
-            <div>Signal posture: {selectedDecision?.signalMode ?? 'Unavailable'} / accounting {selectedDecision?.accountingMethod ?? 'Unavailable'}</div>
+            <div>Signal posture: {selectedDecision?.signalMode ?? 'live frame'} / accounting {selectedDecision?.accountingMethod ?? 'attached on frame'}</div>
             <div>Water can block: {selectedDecision?.systemState === 'blocked' ? 'yes' : 'not on current frame'}</div>
             <div>Constraints applied: {governance.impact.constraintsApplied}</div>
           </div>
@@ -595,11 +627,11 @@ function SaiqGovernanceEngine({ governance }: { governance: SaiqGovernanceSnapsh
       <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
         <div className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
           <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">State</div>
-          <div className="mt-2 text-sm text-white">Source: {governance.source ?? 'Unavailable'}</div>
+          <div className="mt-2 text-sm text-white">Source: {governance.source ?? 'attached on selected frame'}</div>
           <div className="mt-1 text-sm text-white">
-            Strict: {governance.strict == null ? 'Unavailable' : governance.strict ? 'On' : 'Off'}
+            Strict: {governance.strict == null ? 'attached on selected frame' : governance.strict ? 'On' : 'Off'}
           </div>
-          <div className="mt-1 text-sm text-white">Mode: {governance.enforcementMode ?? 'Unavailable'}</div>
+          <div className="mt-1 text-sm text-white">Mode: {governance.enforcementMode ?? 'attached on selected frame'}</div>
           <div className="mt-3 text-3xl font-black tracking-[-0.05em] text-cyan-200">
             {governance.selectedScore != null ? governance.selectedScore.toFixed(3) : '---'}
           </div>
@@ -609,15 +641,15 @@ function SaiqGovernanceEngine({ governance }: { governance: SaiqGovernanceSnapsh
           <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">SAIQ Weights</div>
           {governance.weights ? (
             <div className="mt-3 grid gap-2 text-sm text-slate-200">
-              <div>Carbon {governance.weights.carbon?.toFixed(2) ?? 'Unavailable'}</div>
-              <div>Water {governance.weights.water?.toFixed(2) ?? 'Unavailable'}</div>
-              <div>Latency {governance.weights.latency?.toFixed(2) ?? 'Unavailable'}</div>
-              <div>Cost {governance.weights.cost?.toFixed(2) ?? 'Unavailable'}</div>
+              <div>Carbon {governance.weights.carbon?.toFixed(2) ?? 'attached on frame'}</div>
+              <div>Water {governance.weights.water?.toFixed(2) ?? 'attached on frame'}</div>
+              <div>Latency {governance.weights.latency?.toFixed(2) ?? 'attached on frame'}</div>
+              <div>Cost {governance.weights.cost?.toFixed(2) ?? 'attached on frame'}</div>
             </div>
           ) : (
             <div className="mt-3 space-y-1 text-sm text-slate-400">
-              <div>Unavailable</div>
-              <div>Not exposed by current live decision payload</div>
+              <div>Weights attach when the selected frame publishes them.</div>
+              <div>Current authority remains visible through source, mode, and score.</div>
             </div>
           )}
         </div>
@@ -629,12 +661,12 @@ function SaiqGovernanceEngine({ governance }: { governance: SaiqGovernanceSnapsh
               {Object.entries(governance.thresholds).map(([key, value]) => (
                 <div key={key} className="flex items-center justify-between gap-3">
                   <span className="text-slate-400">{key}</span>
-                  <span>{value != null ? value.toFixed(2) : 'Unavailable'}</span>
+                  <span>{value != null ? value.toFixed(2) : 'attached on frame'}</span>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="mt-3 text-sm text-slate-400">Unavailable</div>
+            <div className="mt-3 text-sm text-slate-400">Thresholds attach with the selected frame.</div>
           )}
         </div>
 
@@ -645,7 +677,7 @@ function SaiqGovernanceEngine({ governance }: { governance: SaiqGovernanceSnapsh
             <div>Water delta {governance.impact.waterImpactDeltaLiters?.toFixed(2) ?? '--'} L</div>
             <div>Signal confidence {governance.impact.signalConfidence?.toFixed(2) ?? '--'}</div>
             <div>Constraints {governance.impact.constraintsApplied}</div>
-            <div>Cache hit {governance.impact.cacheHit == null ? 'Unavailable' : governance.impact.cacheHit ? 'yes' : 'no'}</div>
+            <div>Cache hit {governance.impact.cacheHit == null ? 'attaching' : governance.impact.cacheHit ? 'yes' : 'no'}</div>
           </div>
         </div>
       </div>
@@ -688,31 +720,38 @@ function SystemHealthPanel({ providers, snapshot }: { providers: ControlSurfaceP
 
       <div className="mt-4 rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
         <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Providers</div>
-        <div className="mt-3 space-y-2">
-          {providers.slice(0, 6).map((provider) => (
-            <div key={provider.id} className="rounded-[16px] border border-white/8 bg-slate-950/60 px-3 py-2">
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-sm font-medium text-white">{provider.label}</div>
-                <span className={clsx('rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.16em]', getStatusTone(provider.status === 'healthy' ? 'active' : provider.status === 'offline' ? 'blocked' : 'marginal'))}>
-                  {provider.statusLabel ?? provider.status}
-                </span>
-              </div>
-              <div className="mt-1 text-xs text-slate-400">
-                {provider.providerType === 'water'
-                  ? `bundle age ${formatSecondsCompact(provider.freshnessSec)} / ttl ${formatSecondsCompact(provider.ttlSec)}`
-                  : `staleness ${formatSecondsCompact(provider.freshnessSec)} / latency ${provider.latencyMs != null ? `${provider.latencyMs}ms` : 'unavailable'}`}
-              </div>
-              {provider.providerType === 'water' ? (
-                <div className="mt-1 text-xs text-slate-500">
-                  provenance {provider.provenanceStatus ?? 'unavailable'}
+        {providers.length ? (
+          <div className="mt-3 space-y-2">
+            {providers.slice(0, 6).map((provider) => (
+              <div key={provider.id} className="rounded-[16px] border border-white/8 bg-slate-950/60 px-3 py-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-medium text-white">{provider.label}</div>
+                  <span className={clsx('rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.16em]', getStatusTone(provider.status === 'healthy' ? 'active' : provider.status === 'offline' ? 'blocked' : 'marginal'))}>
+                    {provider.statusLabel ?? provider.status}
+                  </span>
                 </div>
-              ) : null}
-              {provider.degradedReason ? (
-                <div className="mt-1 text-xs text-amber-200/90">{provider.degradedReason}</div>
-              ) : null}
-            </div>
-          ))}
-        </div>
+                <div className="mt-1 text-xs text-slate-400">
+                  {provider.providerType === 'water'
+                    ? `bundle age ${formatSecondsCompact(provider.freshnessSec)} / ttl ${formatSecondsCompact(provider.ttlSec)}`
+                    : `staleness ${formatSecondsCompact(provider.freshnessSec)} / latency ${provider.latencyMs != null ? `${provider.latencyMs}ms` : 'unavailable'}`}
+                </div>
+                {provider.providerType === 'water' ? (
+                  <div className="mt-1 text-xs text-slate-500">
+                    provenance {provider.provenanceStatus ?? 'unavailable'}
+                  </div>
+                ) : null}
+                {provider.degradedReason ? (
+                  <div className="mt-1 text-xs text-amber-200/90">{provider.degradedReason}</div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-3 rounded-[16px] border border-white/8 bg-slate-950/60 px-3 py-3 text-sm leading-7 text-slate-300">
+            Live provider state is hydrating. The command-center shell stays resolved while the
+            active signal window attaches.
+          </div>
+        )}
       </div>
     </section>
   )
@@ -819,7 +858,7 @@ function RecentDecisionQueue({
       </div>
 
       <div className="mt-4 space-y-2">
-        {items.map((item) => {
+        {items.length ? items.map((item) => {
           const actionMeta = resolveActionMeta(item.action)
           return (
             <button
@@ -838,13 +877,138 @@ function RecentDecisionQueue({
               <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />
             </button>
           )
-        })}
+        }) : (
+          <div className="rounded-[18px] border border-white/10 bg-white/[0.03] px-4 py-4 text-sm leading-7 text-slate-300">
+            The decision queue shell is ready. The first live execution frame will attach here
+            without shifting the rest of the command center.
+          </div>
+        )}
       </div>
     </section>
   )
 }
 
-function InspectDrawer({
+function DetailSection({
+  title,
+  description,
+  children,
+}: {
+  title: string
+  description?: string
+  children: ReactNode
+}) {
+  return (
+    <section className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
+      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{title}</div>
+      {description ? <div className="mt-1 text-xs text-slate-500">{description}</div> : null}
+      <div className="mt-3">{children}</div>
+    </section>
+  )
+}
+
+function DecisionDetailPanel({
+  selectedDecision,
+  selectedTrace,
+  selectedReplay,
+  governance,
+  proofHash,
+  providerRefs,
+  evidenceRefs,
+  mobile,
+}: {
+  selectedDecision: CommandCenterDecisionItem | null
+  selectedTrace: DecisionTraceRawRecord | null
+  selectedReplay: LiveSystemReplayResponse | null
+  governance: SaiqGovernanceSnapshot
+  proofHash: string | null
+  providerRefs: string[]
+  evidenceRefs: string[]
+  mobile?: boolean
+}) {
+  return (
+    <section className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(4,10,24,0.98),rgba(2,8,23,0.94))] p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.2em] text-cyan-300">Selected decision detail</div>
+          <div className="mt-1 text-lg font-semibold text-white">Persistent authority, trace, replay, and proof.</div>
+          <div className="mt-2 text-sm text-slate-400">
+            The selected outcome stays anchored here while you move through the decision queue.
+          </div>
+        </div>
+        {mobile ? null : (
+          <div className="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-cyan-200">
+            Anchored panel
+          </div>
+        )}
+      </div>
+
+      <div className="mt-5">
+        <DecisionEngineCore
+          selectedDecision={selectedDecision}
+          selectedTrace={selectedTrace}
+          selectedReplay={selectedReplay}
+          governance={governance}
+        />
+      </div>
+
+      <div className="mt-5 space-y-4">
+        <DetailSection title="Trace ledger" description="Deterministic lineage for the selected execution frame.">
+          {selectedTrace ? (
+            <div className="grid gap-2 text-sm text-white">
+              <div>Trace hash {selectedTrace.traceHash}</div>
+              <div>Input hash {selectedTrace.inputSignalHash}</div>
+              <div>Sequence {selectedTrace.sequenceNumber}</div>
+              <div>Created {selectedTrace.createdAt}</div>
+              <div>Source {selectedTrace.payload.governance.source}</div>
+              <div>Constraints {selectedTrace.payload.governance.constraintsApplied.join(', ') || 'none'}</div>
+            </div>
+          ) : (
+            <div className="text-sm text-slate-300">Trace unavailable for the selected frame.</div>
+          )}
+        </DetailSection>
+
+        <DetailSection title="Replay state" description="Stored outcome versus deterministic replay result.">
+          {selectedReplay ? (
+            <div className="grid gap-2 text-sm text-white">
+              <div>Deterministic match {selectedReplay.deterministicMatch ? 'yes' : 'no'}</div>
+              <div>Trace backed {selectedReplay.traceBacked ? 'yes' : 'no'}</div>
+              <div>Legacy {selectedReplay.legacy ? 'yes' : 'no'}</div>
+              <div>Mismatches {selectedReplay.mismatches.length ? selectedReplay.mismatches.join(', ') : 'none'}</div>
+              <div>Action {selectedReplay.persisted?.decision ?? 'Unavailable'} / {selectedReplay.replay.decision}</div>
+              <div>Region {selectedReplay.persisted?.selectedRegion ?? 'Unavailable'} / {selectedReplay.replay.selectedRegion}</div>
+              <div>Reason {selectedReplay.persisted?.reasonCode ?? 'Unavailable'} / {selectedReplay.replay.reasonCode}</div>
+            </div>
+          ) : (
+            <div className="text-sm text-slate-300">Replay unavailable for the selected frame.</div>
+          )}
+        </DetailSection>
+
+        <DetailSection title="Proof references" description="Proof record, provider snapshots, and water evidence for the selected frame.">
+          <div className="space-y-4 text-sm text-white">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Proof reference</div>
+              <div className="mt-2 font-mono">{proofHash ?? 'Unavailable'}</div>
+            </div>
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Provider snapshot refs</div>
+              <div className="mt-2 space-y-2">
+                {providerRefs.length ? providerRefs.map((ref) => <div key={ref}>{ref}</div>) : <div>Unavailable</div>}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Water evidence refs</div>
+              <div className="mt-2 space-y-2">
+                {evidenceRefs.length ? evidenceRefs.map((ref) => <div key={ref}>{ref}</div>) : <div>Unavailable</div>}
+              </div>
+            </div>
+          </div>
+        </DetailSection>
+      </div>
+    </section>
+  )
+}
+
+function DecisionDetailSheet({
   open,
   title,
   onClose,
@@ -858,12 +1022,19 @@ function InspectDrawer({
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/72 backdrop-blur-sm">
-      <div className="h-full w-full max-w-2xl overflow-y-auto border-l border-white/10 bg-[linear-gradient(180deg,rgba(4,10,24,0.98),rgba(2,8,23,0.98))] p-6">
+    <div className="fixed inset-0 z-50 bg-slate-950/88 backdrop-blur-sm xl:hidden">
+      <div className="h-full w-full overflow-y-auto bg-[linear-gradient(180deg,rgba(4,10,24,0.98),rgba(2,8,23,0.98))] p-5">
         <div className="flex items-center justify-between gap-4">
-          <h3 className="text-xl font-semibold text-white">{title}</h3>
-          <button type="button" onClick={onClose} className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs uppercase tracking-[0.18em] text-slate-300">
-            Close
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.18em] text-cyan-300">Mobile detail sheet</div>
+            <h3 className="mt-1 text-xl font-semibold text-white">{title}</h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs uppercase tracking-[0.18em] text-slate-300"
+          >
+            Back
           </button>
         </div>
         <div className="mt-6">{children}</div>
@@ -874,9 +1045,10 @@ function InspectDrawer({
 
 export function CommandCenterShell() {
   const snapshotQuery = useCommandCenterSnapshot()
-  const snapshot = snapshotQuery.data
+  const snapshot = snapshotQuery.data ?? FALLBACK_COMMAND_CENTER_SNAPSHOT
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null)
-  const [drawer, setDrawer] = useState<{ type: 'trace' | 'replay' | 'proof'; decisionFrameId: string } | null>(null)
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
+  const isDesktop = useDesktopBreakpoint()
 
   useEffect(() => {
     if (!snapshot) return
@@ -909,178 +1081,121 @@ export function CommandCenterShell() {
       ? snapshot?.decisionCore.selectedReplay ?? null
       : ((selectedReplayQuery.data as LiveSystemReplayResponse | null) ?? null)
 
-  const governance = useMemo(() => {
-    if (!snapshot) return null
-    return deriveGovernance(snapshot, selectedTrace, selectedReplay)
-  }, [selectedReplay, selectedTrace, snapshot])
+  const governance = useMemo(
+    () => deriveGovernance(snapshot, selectedTrace, selectedReplay),
+    [selectedReplay, selectedTrace, snapshot]
+  )
 
-  const worldModel = useMemo(() => {
-    if (!snapshot) return null
-    return deriveWorldModel(snapshot.decisionCore.recentDecisions, selectedTrace, selectedReplay)
-  }, [selectedReplay, selectedTrace, snapshot])
+  const worldModel = useMemo(
+    () => deriveWorldModel(snapshot.decisionCore.recentDecisions, selectedTrace, selectedReplay),
+    [selectedReplay, selectedTrace, snapshot]
+  )
 
-  const traceItems = useMemo(() => {
-    if (!snapshot) return []
-    return deriveTraceItems(snapshot.decisionCore.recentDecisions, selectedFrameId, selectedReplay)
-  }, [selectedFrameId, selectedReplay, snapshot])
+  useEffect(() => {
+    if (isDesktop) {
+      setMobileDetailOpen(false)
+      return
+    }
 
-  if (snapshotQuery.isLoading) {
-    return (
-      <div className="rounded-[32px] border border-white/10 bg-white/[0.03] p-8 text-sm text-slate-300">
-        Loading command center...
-      </div>
-    )
-  }
+    if (!mobileDetailOpen) return
 
-  if (snapshotQuery.error || !snapshot || !governance || !worldModel) {
-    return (
-      <div className="rounded-[32px] border border-rose-400/20 bg-rose-400/10 p-8 text-sm text-rose-200">
-        {snapshotQuery.error instanceof Error ? snapshotQuery.error.message : 'Failed to load the command center'}
-      </div>
-    )
-  }
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    return () => {
+      document.body.style.overflow = previousOverflow
+    }
+  }, [isDesktop, mobileDetailOpen])
 
   const activeProofHash = selectedTrace?.payload.proof.proofHash ?? selectedDecision?.proofHash ?? null
   const activeEvidenceRefs = selectedTrace?.payload.proof.evidenceRefs ?? []
   const activeProviderRefs = selectedTrace?.payload.proof.providerSnapshotRefs ?? []
 
+  const handleSelectDecision = (decisionFrameId: string) => {
+    setSelectedFrameId(decisionFrameId)
+    if (!isDesktop) {
+      setMobileDetailOpen(true)
+    }
+  }
+
   return (
     <>
       <div className="space-y-5">
+        {snapshotQuery.error ? (
+          <section className="rounded-[24px] border border-amber-300/20 bg-amber-300/10 px-5 py-4 text-sm text-amber-100">
+            Live command-center data is reconnecting. The control surface shell stays resolved so
+            operators can orient immediately while decision, proof, and replay data reattach.
+          </section>
+        ) : null}
+
         <GlobalCommandHeader snapshot={snapshot} selectedTrace={selectedTrace} selectedReplay={selectedReplay} />
 
-        <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1.55fr)_360px]">
+        <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1.25fr)_420px]">
           <div className="space-y-5">
             <SaiqGovernanceEngine governance={governance} />
             <SystemHealthPanel providers={snapshot.health.providers} snapshot={snapshot.health} />
           </div>
 
           <div className="space-y-5">
-            <div className="relative">
-              <WorldExecutionGrid model={worldModel} selectedFrameId={selectedFrameId} onSelectFrame={setSelectedFrameId} />
-              <div className="pointer-events-none absolute inset-x-4 top-24 z-10 sm:inset-x-8 sm:top-28">
-                <DecisionEngineCore
-                  selectedDecision={selectedDecision}
-                  selectedTrace={selectedTrace}
-                  selectedReplay={selectedReplay}
-                  governance={governance}
-                />
-              </div>
+            <WorldExecutionGrid model={worldModel} selectedFrameId={selectedFrameId} onSelectFrame={handleSelectDecision} />
+            <RecentDecisionQueue
+              items={snapshot.decisionCore.recentDecisions}
+              selectedFrameId={selectedFrameId}
+              onSelect={handleSelectDecision}
+            />
+            <div className="xl:hidden">
+              <section className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(4,10,24,0.96),rgba(3,9,20,0.92))] p-5">
+                <div className="flex items-center gap-3">
+                  <GitBranch className="h-5 w-5 text-cyan-300" />
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Selected frame status</div>
+                    <div className="mt-1 text-lg font-semibold text-white">Open a decision to inspect proof, trace, and replay.</div>
+                  </div>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2 text-[10px] uppercase tracking-[0.18em] text-slate-300">
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1">
+                    {selectedDecision?.decisionFrameId ?? 'No frame selected'}
+                  </span>
+                  <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-1">
+                    {selectedReplay ? (selectedReplay.deterministicMatch ? 'Replay verified' : 'Replay mismatch') : 'Replay on open'}
+                  </span>
+                </div>
+              </section>
             </div>
           </div>
 
-          <div className="space-y-5">
-            <TraceEventStream
-              items={traceItems}
-              selectedFrameId={selectedFrameId}
-              onSelect={setSelectedFrameId}
-              onInspect={(decisionFrameId) => {
-                setSelectedFrameId(decisionFrameId)
-                setDrawer({ type: 'trace', decisionFrameId })
-              }}
-              onReplay={(decisionFrameId) => {
-                setSelectedFrameId(decisionFrameId)
-                setDrawer({ type: 'replay', decisionFrameId })
-              }}
-              onProof={(decisionFrameId) => {
-                setSelectedFrameId(decisionFrameId)
-                setDrawer({ type: 'proof', decisionFrameId })
-              }}
-            />
-            <RecentDecisionQueue items={snapshot.decisionCore.recentDecisions} selectedFrameId={selectedFrameId} onSelect={setSelectedFrameId} />
+          <div className="hidden xl:block">
+            <div className="sticky top-6">
+              <DecisionDetailPanel
+                selectedDecision={selectedDecision}
+                selectedTrace={selectedTrace}
+                selectedReplay={selectedReplay}
+                governance={governance}
+                proofHash={activeProofHash}
+                providerRefs={activeProviderRefs}
+                evidenceRefs={activeEvidenceRefs}
+              />
+            </div>
           </div>
         </div>
       </div>
 
-      <InspectDrawer open={drawer?.type === 'trace'} title="Trace inspection" onClose={() => setDrawer(null)}>
-        {selectedTrace ? (
-          <div className="space-y-5">
-            <div className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Ledger</div>
-              <div className="mt-3 grid gap-2 text-sm text-white">
-                <div>Trace hash {selectedTrace.traceHash}</div>
-                <div>Input hash {selectedTrace.inputSignalHash}</div>
-                <div>Sequence {selectedTrace.sequenceNumber}</div>
-                <div>Created {selectedTrace.createdAt}</div>
-              </div>
-            </div>
-            <div className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Governance</div>
-              <div className="mt-3 grid gap-2 text-sm text-white">
-                <div>Source {selectedTrace.payload.governance.source}</div>
-                <div>Strict {selectedTrace.payload.governance.strict ? 'yes' : 'no'}</div>
-                <div>Constraints {selectedTrace.payload.governance.constraintsApplied.join(', ') || 'none'}</div>
-              </div>
-            </div>
-            <div className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Resolved candidates</div>
-              <div className="mt-3 space-y-2">
-                {selectedTrace.payload.normalizedSignals.candidates.map((candidate) => (
-                  <div key={candidate.region} className="rounded-[16px] border border-white/8 bg-slate-950/60 p-3 text-sm text-slate-200">
-                    <div className="flex items-center justify-between gap-3">
-                      <span>{candidate.region}</span>
-                      <span>{candidate.score.toFixed(3)}</span>
-                    </div>
-                    <div className="mt-1 text-xs text-slate-400">
-                      water stress {candidate.waterStressIndex.toFixed(2)} / cache {candidate.cacheStatus}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="text-sm text-slate-300">Trace unavailable for the selected frame.</div>
-        )}
-      </InspectDrawer>
-
-      <InspectDrawer open={drawer?.type === 'replay'} title="Replay inspection" onClose={() => setDrawer(null)}>
-        {selectedReplay ? (
-          <div className="space-y-5">
-            <div className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Replay state</div>
-              <div className="mt-3 grid gap-2 text-sm text-white">
-                <div>Deterministic match {selectedReplay.deterministicMatch ? 'yes' : 'no'}</div>
-                <div>Trace backed {selectedReplay.traceBacked ? 'yes' : 'no'}</div>
-                <div>Legacy {selectedReplay.legacy ? 'yes' : 'no'}</div>
-                <div>Mismatches {selectedReplay.mismatches.length ? selectedReplay.mismatches.join(', ') : 'none'}</div>
-              </div>
-            </div>
-            <div className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Stored vs replayed</div>
-              <div className="mt-3 grid gap-2 text-sm text-white">
-                <div>Action {selectedReplay.persisted?.decision ?? 'Unavailable'} / {selectedReplay.replay.decision}</div>
-                <div>Region {selectedReplay.persisted?.selectedRegion ?? 'Unavailable'} / {selectedReplay.replay.selectedRegion}</div>
-                <div>Reason {selectedReplay.persisted?.reasonCode ?? 'Unavailable'} / {selectedReplay.replay.reasonCode}</div>
-                <div>Proof {shortHash(selectedReplay.persisted?.proofHash)} / {shortHash(selectedReplay.replay.proofHash)}</div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="text-sm text-slate-300">Replay unavailable for the selected frame.</div>
-        )}
-      </InspectDrawer>
-
-      <InspectDrawer open={drawer?.type === 'proof'} title="Proof inspection" onClose={() => setDrawer(null)}>
-        <div className="space-y-5">
-          <div className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Proof reference</div>
-            <div className="mt-3 font-mono text-sm text-white">{activeProofHash ?? 'Unavailable'}</div>
-          </div>
-          <div className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Provider snapshot refs</div>
-            <div className="mt-3 space-y-2 text-sm text-white">
-              {activeProviderRefs.length ? activeProviderRefs.map((ref) => <div key={ref}>{ref}</div>) : <div>Unavailable</div>}
-            </div>
-          </div>
-          <div className="rounded-[22px] border border-white/10 bg-white/[0.03] p-4">
-            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Water evidence refs</div>
-            <div className="mt-3 space-y-2 text-sm text-white">
-              {activeEvidenceRefs.length ? activeEvidenceRefs.map((ref) => <div key={ref}>{ref}</div>) : <div>Unavailable</div>}
-            </div>
-          </div>
-        </div>
-      </InspectDrawer>
+      <DecisionDetailSheet
+        open={mobileDetailOpen}
+        title={selectedDecision ? `${resolveActionMeta(selectedDecision.action).label} detail` : 'Decision detail'}
+        onClose={() => setMobileDetailOpen(false)}
+      >
+        <DecisionDetailPanel
+          selectedDecision={selectedDecision}
+          selectedTrace={selectedTrace}
+          selectedReplay={selectedReplay}
+          governance={governance}
+          proofHash={activeProofHash}
+          providerRefs={activeProviderRefs}
+          evidenceRefs={activeEvidenceRefs}
+          mobile
+        />
+      </DecisionDetailSheet>
     </>
   )
 }
