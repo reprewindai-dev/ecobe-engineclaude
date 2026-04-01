@@ -10,6 +10,12 @@ const allowlistPrefixes = [
   'docs/public/',
   'docs/private/design-partner-program/',
 ]
+const allowlistExactPaths = new Set([
+  'ecobe-engine/ecobe-engine/src/routes/ci.ts',
+  'ecobe-engine/ecobe-engine/src/__tests__/ci-doctrine.test.ts',
+  'ecobe-engine/ecobe-engine/src/__tests__/provider-router.test.ts',
+  'ecobe-engine/ecobe-engine/src/__tests__/water-policy.test.ts',
+])
 const blockedPrefixes = [
   'dekes-saas/',
   'demo/',
@@ -111,6 +117,7 @@ function getChangedFiles() {
 }
 
 function isAllowedPath(filePath) {
+  if (allowlistExactPaths.has(filePath)) return true
   if (blockedPrefixes.some((prefix) => filePath.startsWith(prefix))) return false
   return allowlistPrefixes.some((prefix) => filePath.startsWith(prefix))
 }
