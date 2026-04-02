@@ -66,7 +66,54 @@ export interface DecisionExplanation {
   hierarchy: readonly DeterministicConflictLayer[]
   whyAction: string
   whyTarget: string
+  dominantConstraint: string
+  policyPrecedence: string[]
   rejectedAlternatives: CandidateExplanation[]
+  counterfactualCondition: string
+  uncertaintySummary: string
+}
+
+export type WorkloadClass =
+  | 'batch'
+  | 'interactive'
+  | 'critical'
+  | 'regulated'
+  | 'emergency'
+
+export interface DecisionTrust {
+  signalFreshness: {
+    carbonFreshnessSec: number | null
+    waterFreshnessSec: number | null
+    freshnessSummary: string
+  }
+  providerTrust: {
+    carbonProvider: string
+    carbonProviderHealth: MSSHealthState
+    waterAuthorityHealth: MSSHealthState
+    providerTrustTier: 'high' | 'medium' | 'guarded'
+  }
+  disagreement: {
+    present: boolean
+    pct: number
+    summary: string
+  }
+  estimatedFields: {
+    present: boolean
+    fields: string[]
+  }
+  replayability: {
+    status: 'replayable' | 'degraded' | 'local_only'
+    summary: string
+  }
+  fallbackMode: {
+    engaged: boolean
+    summary: string
+  }
+  degradedState: {
+    degraded: boolean
+    reasons: string[]
+    summary: string
+  }
 }
 
 export function resolveBaselineCandidate<T extends { region: string }>(
@@ -187,6 +234,7 @@ export function buildDecisionExplanation(input: {
   baseline: CandidateLike
   candidates: CandidateLike[]
   profile: WaterPolicyProfile
+  workloadClass: WorkloadClass
 }): DecisionExplanation {
   const rejectedAlternatives = input.candidates
     .filter((candidate) => candidate.region !== input.selected.region)
@@ -229,11 +277,194 @@ export function buildDecisionExplanation(input: {
       ? `${input.selected.region} remained the default and selected target because no allowed alternative beat it on deterministic score.`
       : `${input.selected.region} beat baseline ${input.baseline.region} after policy, water, latency/SLA, carbon, and cost were evaluated in fixed order.`
 
+  const dominantConstraint =
+    input.reasonCode.includes('POLICY') || input.reasonCode.includes('DENY')
+      ? 'policy_hard_override'
+      : input.reasonCode.includes('WATER') || input.reasonCode.includes('DROUGHT')
+        ? 'water_guardrail'
+        : input.reasonCode.includes('THROTTLE') || input.reasonCode.includes('CRITICAL')
+          ? 'latency_sla_protection'
+          : input.reasonCode.includes('REROUTE')
+            ? 'carbon_optimization_within_allowed_envelope'
+            : 'cost_tie_breaker'
+
+  const counterfactualCondition =
+    input.decision === 'run_now'
+      ? `The action would change only if policy, water, or SLA posture weakened enough to block ${input.selected.region}.`
+      : input.decision === 'reroute'
+        ? `The engine would have stayed on ${input.baseline.region} if it remained admissible and beat ${input.selected.region} on deterministic score.`
+        : input.decision === 'delay'
+          ? `The job can run once a candidate clears policy and water guardrails inside the allowed delay window for ${input.workloadClass} workloads.`
+          : input.decision === 'throttle'
+            ? `The throttle would relax once the workload regains an admissible low-pressure path without breaching protected constraints.`
+            : `The denial would lift only after the request satisfies policy, water, and runtime posture together.`
+
+  const uncertaintySummaryParts: string[] = []
+  if (input.selected.carbonFallbackUsed) {
+    uncertaintySummaryParts.push('carbon signal is on fallback posture')
+  }
+  if (input.selected.waterSignal.fallbackUsed || input.selected.waterAuthority.authorityMode === 'fallback') {
+    uncertaintySummaryParts.push('water authority is degraded or on fallback')
+  }
+  if (input.selected.carbonDisagreementFlag) {
+    uncertaintySummaryParts.push(
+      `provider disagreement is present at ${input.selected.carbonDisagreementPct.toFixed(1)}%`
+    )
+  }
+  if (uncertaintySummaryParts.length === 0) {
+    uncertaintySummaryParts.push('no material trust degradation was present on the selected path')
+  }
+
   return {
     hierarchy: DETERMINISTIC_CONFLICT_HIERARCHY,
     whyAction: `${actionMap[input.decision]} Reason code: ${input.reasonCode}.`,
     whyTarget,
+    dominantConstraint,
+    policyPrecedence: [...DETERMINISTIC_CONFLICT_HIERARCHY],
     rejectedAlternatives,
+    counterfactualCondition,
+    uncertaintySummary: uncertaintySummaryParts.join('; '),
+  }
+}
+
+export function normalizeWorkloadClass(input: {
+  workloadClass?: string | null
+  criticality: 'critical' | 'standard' | 'batch'
+  jobType: 'standard' | 'heavy' | 'light'
+  metadata?: Record<string, unknown> | undefined
+}): WorkloadClass {
+  const explicit = input.workloadClass?.trim().toLowerCase()
+  if (
+    explicit === 'batch' ||
+    explicit === 'interactive' ||
+    explicit === 'critical' ||
+    explicit === 'regulated' ||
+    explicit === 'emergency'
+  ) {
+    return explicit
+  }
+
+  const metadataClass =
+    typeof input.metadata?.['workloadClass'] === 'string'
+      ? String(input.metadata.workloadClass).trim().toLowerCase()
+      : null
+
+  if (
+    metadataClass === 'batch' ||
+    metadataClass === 'interactive' ||
+    metadataClass === 'critical' ||
+    metadataClass === 'regulated' ||
+    metadataClass === 'emergency'
+  ) {
+    return metadataClass
+  }
+
+  if (input.criticality === 'critical' && input.jobType === 'heavy') return 'emergency'
+  if (input.criticality === 'critical') return 'critical'
+  if (input.criticality === 'batch') return 'batch'
+  if (input.jobType === 'light') return 'interactive'
+  return 'interactive'
+}
+
+function toTrustTier(input: {
+  assurance: AssuranceStatus
+  mss: MSSState
+  fallbackUsed: boolean
+}): 'high' | 'medium' | 'guarded' {
+  if (input.fallbackUsed || input.assurance.status === 'degraded') return 'guarded'
+  if (
+    input.mss.carbonProviderHealth !== 'HEALTHY' ||
+    input.mss.waterAuthorityHealth !== 'HEALTHY' ||
+    input.mss.disagreement.flag
+  ) {
+    return 'medium'
+  }
+  return 'high'
+}
+
+export function buildDecisionTrust(input: {
+  selected: CandidateLike
+  assurance: AssuranceStatus
+  mss: MSSState
+  fallbackUsed: boolean
+  idempotencyReplayed?: boolean
+  persisted?: boolean
+  workloadClass: WorkloadClass
+}): DecisionTrust {
+  const estimatedFields = [
+    input.selected.carbonFallbackUsed ? 'carbon_intensity' : null,
+    input.selected.waterSignal.fallbackUsed ? 'water_signal' : null,
+    input.selected.waterAuthority.authorityMode === 'fallback' ? 'water_authority' : null,
+    input.selected.carbonDisagreementFlag ? 'carbon_disagreement_penalty' : null,
+  ].filter((value): value is string => Boolean(value))
+
+  const degradedReasons = [
+    input.fallbackUsed ? 'fallback_mode_engaged' : null,
+    input.assurance.status === 'degraded' ? 'assurance_degraded' : null,
+    input.mss.carbonProviderHealth !== 'HEALTHY' ? 'carbon_provider_not_healthy' : null,
+    input.mss.waterAuthorityHealth !== 'HEALTHY' ? 'water_authority_not_healthy' : null,
+    input.mss.disagreement.flag ? 'provider_disagreement_present' : null,
+    input.workloadClass === 'regulated' && input.fallbackUsed ? 'regulated_workload_cannot_silently_degrade' : null,
+  ].filter((value): value is string => Boolean(value))
+
+  const freshnessSummary = [
+    input.mss.carbonFreshnessSec != null
+      ? `carbon freshness ${input.mss.carbonFreshnessSec}s`
+      : 'carbon freshness unavailable',
+    input.mss.waterFreshnessSec != null
+      ? `water freshness ${input.mss.waterFreshnessSec}s`
+      : 'water freshness unavailable',
+  ].join('; ')
+
+  return {
+    signalFreshness: {
+      carbonFreshnessSec: input.mss.carbonFreshnessSec,
+      waterFreshnessSec: input.mss.waterFreshnessSec,
+      freshnessSummary,
+    },
+    providerTrust: {
+      carbonProvider: input.mss.carbonProvider,
+      carbonProviderHealth: input.mss.carbonProviderHealth,
+      waterAuthorityHealth: input.mss.waterAuthorityHealth,
+      providerTrustTier: toTrustTier({
+        assurance: input.assurance,
+        mss: input.mss,
+        fallbackUsed: input.fallbackUsed,
+      }),
+    },
+    disagreement: {
+      present: input.mss.disagreement.flag,
+      pct: input.mss.disagreement.pct,
+      summary: input.mss.disagreement.flag
+        ? `Provider disagreement detected at ${input.mss.disagreement.pct.toFixed(1)}%.`
+        : 'No material provider disagreement detected.',
+    },
+    estimatedFields: {
+      present: estimatedFields.length > 0,
+      fields: estimatedFields,
+    },
+    replayability: {
+      status: input.persisted ? 'replayable' : input.idempotencyReplayed ? 'degraded' : 'local_only',
+      summary: input.persisted
+        ? 'Decision frame is persisted with replay-ready metadata.'
+        : input.idempotencyReplayed
+          ? 'Decision response was replayed from idempotency cache and may not include a persisted trace frame.'
+          : 'Decision is local-only until persistence succeeds.',
+    },
+    fallbackMode: {
+      engaged: input.fallbackUsed,
+      summary: input.fallbackUsed
+        ? 'Fallback or degraded-safe signal mode influenced the selected decision path.'
+        : 'No fallback posture was required on the selected path.',
+    },
+    degradedState: {
+      degraded: degradedReasons.length > 0,
+      reasons: degradedReasons,
+      summary:
+        degradedReasons.length > 0
+          ? `Trust posture is degraded: ${degradedReasons.join(', ')}.`
+          : 'Trust posture is healthy for the selected decision path.',
+    },
   }
 }
 

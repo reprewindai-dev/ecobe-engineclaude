@@ -14,6 +14,7 @@ import type {
   WaterManifestDataset,
   WaterSignal,
 } from '../water/types'
+import type { DecisionExplanation, DecisionTrust, WorkloadClass } from './doctrine'
 
 export interface ResolvedCandidateOverride {
   region: string
@@ -107,6 +108,7 @@ export interface TraceEnvelopeSeed {
     baselineRegion: string
     action: string
     reasonCode: string
+    workloadClass: WorkloadClass
     operatingMode: string
     rerouteFrom: string | null
     precedenceOverrideApplied: boolean
@@ -116,6 +118,24 @@ export interface TraceEnvelopeSeed {
       notBefore: string | null
       reason: string
     }
+  }
+  explanation: Pick<
+    DecisionExplanation,
+    | 'whyAction'
+    | 'whyTarget'
+    | 'dominantConstraint'
+    | 'policyPrecedence'
+    | 'rejectedAlternatives'
+    | 'counterfactualCondition'
+    | 'uncertaintySummary'
+  >
+  trust: {
+    providerTrustTier: DecisionTrust['providerTrust']['providerTrustTier']
+    replayabilityStatus: DecisionTrust['replayability']['status']
+    fallbackEngaged: boolean
+    degraded: boolean
+    degradedReasons: string[]
+    estimatedFields: string[]
   }
   governance: {
     label: 'SAIQ'
@@ -259,7 +279,11 @@ export function buildCuratedTraceEnvelopeView(record: TraceEnvelopeRecord) {
     action: record.payload.decisionPath.action,
     reasonCode: record.payload.decisionPath.reasonCode,
     selectedRegion: record.payload.decisionPath.selectedRegion,
+    workloadClass: record.payload.decisionPath.workloadClass,
     operatingMode: record.payload.decisionPath.operatingMode,
+    dominantConstraint: record.payload.explanation.dominantConstraint,
+    providerTrustTier: record.payload.trust.providerTrustTier,
+    replayabilityStatus: record.payload.trust.replayabilityStatus,
     proofHash: record.payload.proof.proofHash,
     signalFrameId: record.payload.signalFrame.signalFrameId,
     sourceClass: record.payload.signalFrame.sourceClass,

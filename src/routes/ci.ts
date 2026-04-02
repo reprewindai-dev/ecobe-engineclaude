@@ -32,15 +32,24 @@ import {
 import {
   buildAssuranceStatus,
   buildDecisionExplanation,
+  buildDecisionTrust,
   buildMssState,
   DECISION_DOCTRINE_VERSION,
   DETERMINISTIC_CONFLICT_HIERARCHY,
+  normalizeWorkloadClass,
   resolveBaselineCandidate,
+  type WorkloadClass,
 } from '../lib/ci/doctrine'
 import {
   buildDecisionEvaluatedEvent,
   enqueueDecisionEvaluatedEvents,
 } from '../lib/ci/decision-events'
+import {
+  buildDecisionProofPacket,
+  buildReplayProofPacket,
+  renderDecisionProofPacketPdf,
+  type ReplayInspectionPacket,
+} from '../lib/ci/proof-packets'
 import {
   buildDecisionProjectionPayloadFromPersistedDecision,
   computeCo2Grams,
@@ -132,6 +141,7 @@ export const requestSchema = z.object({
   waterWeight: z.number().min(0).max(1).default(0.3),
   latencyWeight: z.number().min(0).max(1).default(0.1),
   costWeight: z.number().min(0).max(1).default(0.1),
+  workloadClass: z.enum(['batch', 'interactive', 'critical', 'regulated', 'emergency']).optional(),
   jobType: z.enum(['standard', 'heavy', 'light']).default('standard'),
   criticality: z.enum(['critical', 'standard', 'batch']).default('standard'),
   waterPolicyProfile: z
@@ -617,6 +627,7 @@ function buildCiResponse(input: {
   requestId: string
   transport: CanonicalTransportMetadata
   doctrineVersion: string
+  workloadClass: WorkloadClass
   operatingMode: OperatingMode
   decisionFrameId: string
   decision: WaterDecisionAction
@@ -635,6 +646,7 @@ function buildCiResponse(input: {
   assurance: ReturnType<typeof buildAssuranceStatus>
   mss: ReturnType<typeof buildMssState>
   decisionExplanation: ReturnType<typeof buildDecisionExplanation>
+  decisionTrust: ReturnType<typeof buildDecisionTrust>
 }) {
   const selectedReductionPct =
     input.baseline.carbonIntensity > 0
@@ -737,6 +749,7 @@ function buildCiResponse(input: {
     decision: input.decision,
     decisionMode: input.data.decisionMode as WaterDecisionMode,
     doctrineVersion: input.doctrineVersion,
+    workloadClass: input.workloadClass,
     operatingMode: input.operatingMode,
     reasonCode: input.reasonCode,
     decisionFrameId: input.decisionFrameId,
@@ -755,6 +768,7 @@ function buildCiResponse(input: {
     assurance: input.assurance,
     mss: input.mss,
     decisionExplanation: input.decisionExplanation,
+    decisionTrust: input.decisionTrust,
     policyTrace: {
       ...input.policyTrace,
       capabilityId: 'ci.route.authorization',
@@ -813,6 +827,7 @@ function buildCiResponse(input: {
     },
     workflowOutputs: {
       decision: input.decision,
+      workloadClass: input.workloadClass,
       reasonCode: input.reasonCode,
       selectedRegion: input.selected.region,
       selectedRunner: input.selected.runner,
@@ -939,6 +954,12 @@ export async function createDecision(
   const requestId = resolveRequestId(normalizedRequest)
   const transport = resolveTransport(normalizedRequest)
   const energyKwh = estimateEnergyKwh(normalizedRequest.jobType, normalizedRequest.estimatedEnergyKwh)
+  const workloadClass = normalizeWorkloadClass({
+    workloadClass: normalizedRequest.workloadClass,
+    criticality: normalizedRequest.criticality,
+    jobType: normalizedRequest.jobType,
+    metadata: normalizedRequest.metadata,
+  })
   const candidateEvaluationStarted = Date.now()
   const candidateEvaluations = await evaluateCandidates(
     normalizedRequest,
@@ -1278,6 +1299,18 @@ export async function createDecision(
     baseline,
     candidates: candidateEvaluations,
     profile: normalizedRequest.waterPolicyProfile as WaterPolicyProfile,
+    workloadClass,
+  })
+  const decisionTrust = buildDecisionTrust({
+    selected,
+    assurance,
+    mss,
+    fallbackUsed:
+      selected.waterSignal.fallbackUsed ||
+      selected.carbonFallbackUsed ||
+      selected.waterAuthority.authorityMode === 'fallback',
+    persisted: true,
+    workloadClass,
   })
   recordTelemetryMetric(telemetryMetricNames.policyEvaluationCount, 'counter', 1, {
     decision_action: decision,
@@ -1374,6 +1407,7 @@ export async function createDecision(
     requestId,
     transport,
     doctrineVersion: DECISION_DOCTRINE_VERSION,
+    workloadClass,
     operatingMode,
     decisionFrameId,
     decision,
@@ -1395,6 +1429,7 @@ export async function createDecision(
     assurance,
     mss,
     decisionExplanation,
+    decisionTrust,
   })
   const doctrineAssemblyMs = Date.now() - doctrineAssemblyStarted
   const traceAssemblyStarted = Date.now()
@@ -1523,6 +1558,7 @@ export async function createDecision(
       baselineRegion: baseline.region,
       action: decision,
       reasonCode,
+      workloadClass,
       operatingMode,
       rerouteFrom: rerouteFrom?.region ?? null,
       precedenceOverrideApplied,
@@ -1532,6 +1568,23 @@ export async function createDecision(
         notBefore: delayWindow.notBefore,
         reason: delayWindow.reason,
       },
+    },
+    explanation: {
+      whyAction: decisionExplanation.whyAction,
+      whyTarget: decisionExplanation.whyTarget,
+      dominantConstraint: decisionExplanation.dominantConstraint,
+      policyPrecedence: decisionExplanation.policyPrecedence,
+      rejectedAlternatives: decisionExplanation.rejectedAlternatives,
+      counterfactualCondition: decisionExplanation.counterfactualCondition,
+      uncertaintySummary: decisionExplanation.uncertaintySummary,
+    },
+    trust: {
+      providerTrustTier: decisionTrust.providerTrust.providerTrustTier,
+      replayabilityStatus: decisionTrust.replayability.status,
+      fallbackEngaged: decisionTrust.fallbackMode.engaged,
+      degraded: decisionTrust.degradedState.degraded,
+      degradedReasons: decisionTrust.degradedState.reasons,
+      estimatedFields: decisionTrust.estimatedFields.fields,
     },
     governance: {
       label: 'SAIQ',
@@ -1702,6 +1755,66 @@ async function getDecisionTraceRecord(decisionFrameId: string) {
   })
 
   return normalizeTraceRow(trace)
+}
+
+async function buildReplayInspection(decisionFrameId: string): Promise<ReplayInspectionPacket> {
+  const decision = await prisma.cIDecision.findFirst({
+    where: { decisionFrameId },
+    orderBy: { createdAt: 'desc' },
+  })
+
+  if (!decision) {
+    throw Object.assign(new Error('Decision not found'), { code: 'DECISION_NOT_FOUND' })
+  }
+
+  const metadata = (decision.metadata ?? {}) as any
+  const requestPayload = metadata.request
+  if (!requestPayload) {
+    throw Object.assign(new Error('Decision does not contain replay payload'), {
+      code: 'REPLAY_PAYLOAD_MISSING',
+    })
+  }
+
+  const traceRecord = await getDecisionTraceRecord(decision.decisionFrameId)
+  const replayTimestamp =
+    traceRecord?.payload.identity.createdAt ??
+    (typeof requestPayload.timestamp === 'string'
+      ? requestPayload.timestamp
+      : typeof metadata.response?.proofRecord?.timestamp === 'string'
+        ? metadata.response.proofRecord.timestamp
+        : decision.createdAt.toISOString())
+
+  const replayResult = await createDecision(requestSchema.parse(requestPayload), {
+    decisionFrameId: decision.decisionFrameId,
+    nowIso: replayTimestamp,
+    resolvedCandidateOverrides: traceRecord?.payload.inputSignals.resolvedCandidates,
+  })
+  const replayResultForVerification = traceRecord
+    ? {
+        ...replayResult,
+        response: pinReplayProofHash(
+          replayResult.response,
+          traceRecord.payload.proof.proofHash
+        ) as typeof replayResult.response,
+      }
+    : replayResult
+  const replayResponse = await finalizeCiDecisionResponse(replayResultForVerification)
+  const mismatches = [
+    (metadata.response?.decision ?? null) === replayResponse.decision ? null : 'decision',
+    (metadata.response?.selectedRegion ?? null) === replayResponse.selectedRegion ? null : 'selectedRegion',
+    (metadata.response?.reasonCode ?? null) === replayResponse.reasonCode ? null : 'reasonCode',
+    (metadata.response?.proofHash ?? null) === replayResponse.proofHash ? null : 'proofHash',
+  ].filter((value): value is string => Boolean(value))
+
+  return {
+    decisionFrameId: decision.decisionFrameId,
+    replayedAt: new Date().toISOString(),
+    deterministicMatch: mismatches.length === 0,
+    traceBacked: Boolean(traceRecord),
+    mismatches,
+    persistedResponse: metadata.response ?? null,
+    replayedResponse: replayResponse as unknown as Record<string, unknown>,
+  }
 }
 
 export async function finalizeCiDecisionResponse(
@@ -2130,6 +2243,18 @@ async function routeDecisionHandler(req: Request, res: Response) {
       Array.isArray(req.body?.preferredRegions) ? req.body.preferredRegions : ['us-east-1']
     )
     const fallbackDecisionFrameId = `fallback-${Date.now()}`
+    const fallbackWorkloadClass = normalizeWorkloadClass({
+      workloadClass: typeof req.body?.workloadClass === 'string' ? req.body.workloadClass : undefined,
+      criticality:
+        req.body?.criticality === 'critical' || req.body?.criticality === 'batch'
+          ? req.body.criticality
+          : 'standard',
+      jobType:
+        req.body?.jobType === 'heavy' || req.body?.jobType === 'light'
+          ? req.body.jobType
+          : 'standard',
+      metadata: req.body?.metadata,
+    })
     const totalMs = Date.now() - requestStarted
     const transport = (() => {
       try {
@@ -2180,6 +2305,7 @@ async function routeDecisionHandler(req: Request, res: Response) {
       decision: 'deny',
       decisionMode: 'runtime_authorization',
       doctrineVersion: DECISION_DOCTRINE_VERSION,
+      workloadClass: fallbackWorkloadClass,
       operatingMode: 'CRISIS',
       reasonCode: 'FALLBACK_INPUT_OR_RUNTIME_ERROR',
       decisionFrameId: fallbackDecisionFrameId,
@@ -2276,7 +2402,48 @@ async function routeDecisionHandler(req: Request, res: Response) {
         hierarchy: [...DETERMINISTIC_CONFLICT_HIERARCHY],
         whyAction: 'The request failed validation or runtime evaluation, so the engine denied execution through the conservative fallback path.',
         whyTarget: `The fallback region ${fallbackRegion} was selected because no validated runtime decision could be produced.`,
+        dominantConstraint: 'policy_hard_override',
+        policyPrecedence: [...DETERMINISTIC_CONFLICT_HIERARCHY],
         rejectedAlternatives: [],
+        counterfactualCondition:
+          'A valid request, healthy signals, and an admissible policy path are required before execution can be authorized.',
+        uncertaintySummary:
+          'Fallback-only decision; no validated live decision frame was produced on the request path.',
+      },
+      decisionTrust: {
+        signalFreshness: {
+          carbonFreshnessSec: null,
+          waterFreshnessSec: null,
+          freshnessSummary: 'Signal freshness unavailable on conservative fallback path.',
+        },
+        providerTrust: {
+          carbonProvider: 'STATIC_FALLBACK',
+          carbonProviderHealth: 'FAILED',
+          waterAuthorityHealth: 'FAILED',
+          providerTrustTier: 'guarded',
+        },
+        disagreement: {
+          present: false,
+          pct: 0,
+          summary: 'No live provider comparison was available on fallback path.',
+        },
+        estimatedFields: {
+          present: true,
+          fields: ['carbon_intensity', 'water_signal', 'water_authority'],
+        },
+        replayability: {
+          status: 'local_only',
+          summary: 'Fallback response is local-only until a canonical persisted frame exists.',
+        },
+        fallbackMode: {
+          engaged: true,
+          summary: 'Conservative fallback mode denied execution.',
+        },
+        degradedState: {
+          degraded: true,
+          reasons: ['request_validation_or_runtime_failure', 'fallback_mode_engaged'],
+          summary: 'Trust posture is degraded because the request failed before a validated live decision could be persisted.',
+        },
       },
       policyTrace: {
         capabilityId: 'ci.route.authorization',
@@ -2387,6 +2554,7 @@ async function routeDecisionHandler(req: Request, res: Response) {
       },
       workflowOutputs: {
         decision: 'deny',
+        workloadClass: fallbackWorkloadClass,
         reasonCode: 'FALLBACK_INPUT_OR_RUNTIME_ERROR',
         selectedRegion: fallbackRegion,
         selectedRunner: RUNNER_REGIONS[fallbackRegion]?.[0] ?? 'ubuntu-latest',
@@ -2957,6 +3125,77 @@ router.get('/decisions/:decisionFrameId/trace/raw', internalServiceGuard, async 
 
 router.get('/decisions/:decisionFrameId/replay', internalServiceGuard, async (req, res) => {
   try {
+    const replayInspection = await buildReplayInspection(req.params.decisionFrameId)
+
+    if (replayInspection.mismatches.length === 0) {
+      recordTelemetryMetric(telemetryMetricNames.replayConsistencyCount, 'counter', 1, {
+        decision_frame_id: replayInspection.decisionFrameId,
+      })
+    } else {
+      recordTelemetryMetric(telemetryMetricNames.replayMismatchCount, 'counter', 1, {
+        decision_frame_id: replayInspection.decisionFrameId,
+        mismatches: replayInspection.mismatches.join(','),
+      })
+    }
+
+    return res.json({
+      decisionFrameId: replayInspection.decisionFrameId,
+      storedResponse: replayInspection.persistedResponse,
+      replayedResponse: replayInspection.replayedResponse,
+      persisted: replayInspection.persistedResponse,
+      replay: replayInspection.replayedResponse,
+      consistent: replayInspection.deterministicMatch,
+      deterministicMatch: replayInspection.deterministicMatch,
+      traceBacked: replayInspection.traceBacked,
+      legacy: !replayInspection.traceBacked,
+      mismatches: replayInspection.mismatches,
+      replayedAt: replayInspection.replayedAt,
+    })
+  } catch (error) {
+    const code = (error as any)?.code
+    if (code === 'DECISION_NOT_FOUND') {
+      return res.status(404).json({
+        error: 'Decision not found',
+        code,
+      })
+    }
+    if (code === 'REPLAY_PAYLOAD_MISSING') {
+      return res.status(422).json({
+        error: 'Decision does not contain replay payload',
+        code,
+      })
+    }
+    return res.status(500).json({
+      error: 'Replay failed',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    })
+  }
+})
+
+router.get('/decisions/:decisionFrameId/replay-packet.json', internalServiceGuard, async (req, res) => {
+  try {
+    const replayInspection = await buildReplayInspection(req.params.decisionFrameId)
+    return res.json(buildReplayProofPacket(replayInspection))
+  } catch (error) {
+    const code = (error as any)?.code
+    if (code === 'DECISION_NOT_FOUND') {
+      return res.status(404).json({ error: 'Decision not found', code })
+    }
+    if (code === 'REPLAY_PAYLOAD_MISSING') {
+      return res.status(422).json({
+        error: 'Decision does not contain replay payload',
+        code,
+      })
+    }
+    return res.status(500).json({
+      error: 'Failed to build replay packet',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    })
+  }
+})
+
+router.get('/decisions/:decisionFrameId/proof-packet.json', internalServiceGuard, async (req, res) => {
+  try {
     const decision = await prisma.cIDecision.findFirst({
       where: { decisionFrameId: req.params.decisionFrameId },
       orderBy: { createdAt: 'desc' },
@@ -2969,73 +3208,63 @@ router.get('/decisions/:decisionFrameId/replay', internalServiceGuard, async (re
     }
 
     const metadata = (decision.metadata ?? {}) as any
-    const requestPayload = metadata.request
-    if (!requestPayload) {
-      return res.status(422).json({
-        error: 'Decision does not contain replay payload',
-        code: 'REPLAY_PAYLOAD_MISSING',
-      })
-    }
-
     const traceRecord = await getDecisionTraceRecord(decision.decisionFrameId)
+    const replayInspection =
+      metadata.request && metadata.response
+        ? await buildReplayInspection(decision.decisionFrameId)
+        : null
 
-    const replayTimestamp =
-      traceRecord?.payload.identity.createdAt ??
-      (typeof requestPayload.timestamp === 'string'
-        ? requestPayload.timestamp
-        : typeof metadata.response?.proofRecord?.timestamp === 'string'
-          ? metadata.response.proofRecord.timestamp
-          : decision.createdAt.toISOString())
-
-    const replayResult = await createDecision(requestSchema.parse(requestPayload), {
-      decisionFrameId: decision.decisionFrameId,
-      nowIso: replayTimestamp,
-      resolvedCandidateOverrides: traceRecord?.payload.inputSignals.resolvedCandidates,
-    })
-    const replayResultForVerification = traceRecord
-      ? {
-          ...replayResult,
-          response: pinReplayProofHash(
-            replayResult.response,
-            traceRecord.payload.proof.proofHash
-          ) as typeof replayResult.response,
-        }
-      : replayResult
-    const replayResponse = await finalizeCiDecisionResponse(replayResultForVerification)
-    const mismatches = [
-      (metadata.response?.decision ?? null) === replayResponse.decision ? null : 'decision',
-      (metadata.response?.selectedRegion ?? null) === replayResponse.selectedRegion ? null : 'selectedRegion',
-      (metadata.response?.reasonCode ?? null) === replayResponse.reasonCode ? null : 'reasonCode',
-      (metadata.response?.proofHash ?? null) === replayResponse.proofHash ? null : 'proofHash',
-    ].filter((value): value is string => Boolean(value))
-
-    if (mismatches.length === 0) {
-      recordTelemetryMetric(telemetryMetricNames.replayConsistencyCount, 'counter', 1, {
-        decision_frame_id: decision.decisionFrameId,
+    return res.json(
+      buildDecisionProofPacket({
+        storedResponse: (metadata.response ?? {}) as Record<string, unknown>,
+        traceRecord,
+        replay: replayInspection,
       })
-    } else {
-      recordTelemetryMetric(telemetryMetricNames.replayMismatchCount, 'counter', 1, {
-        decision_frame_id: decision.decisionFrameId,
-        mismatches: mismatches.join(','),
-      })
-    }
-
-    return res.json({
-      decisionFrameId: decision.decisionFrameId,
-      storedResponse: metadata.response ?? null,
-      replayedResponse: replayResponse,
-      persisted: metadata.response ?? null,
-      replay: replayResponse,
-      consistent: mismatches.length === 0,
-      deterministicMatch: mismatches.length === 0,
-      traceBacked: Boolean(traceRecord),
-      legacy: !traceRecord,
-      mismatches,
-      replayedAt: new Date().toISOString(),
-    })
+    )
   } catch (error) {
     return res.status(500).json({
-      error: 'Replay failed',
+      error: 'Failed to build decision proof packet',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    })
+  }
+})
+
+router.get('/decisions/:decisionFrameId/proof-packet.pdf', internalServiceGuard, async (req, res) => {
+  try {
+    const decision = await prisma.cIDecision.findFirst({
+      where: { decisionFrameId: req.params.decisionFrameId },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (!decision) {
+      return res.status(404).json({
+        error: 'Decision not found',
+        code: 'DECISION_NOT_FOUND',
+      })
+    }
+
+    const metadata = (decision.metadata ?? {}) as any
+    const traceRecord = await getDecisionTraceRecord(decision.decisionFrameId)
+    const replayInspection =
+      metadata.request && metadata.response
+        ? await buildReplayInspection(decision.decisionFrameId)
+        : null
+
+    const packet = buildDecisionProofPacket({
+      storedResponse: (metadata.response ?? {}) as Record<string, unknown>,
+      traceRecord,
+      replay: replayInspection,
+    })
+    const pdf = await renderDecisionProofPacketPdf(packet)
+
+    res.setHeader('content-type', 'application/pdf')
+    res.setHeader(
+      'content-disposition',
+      `attachment; filename=\"co2router-proof-${decision.decisionFrameId}.pdf\"`
+    )
+    return res.send(pdf)
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Failed to build decision proof PDF',
       message: error instanceof Error ? error.message : 'Unknown error',
     })
   }
