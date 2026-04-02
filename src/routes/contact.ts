@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { prisma } from '../lib/db'
 import { redis } from '../lib/redis'
 import {
+  getContactCategoryInbox,
   getContactMailConfig,
   getFounderAlertMailConfig,
   getPublicReplyFromAddress,
@@ -222,7 +223,7 @@ router.post('/contact', async (req, res) => {
         const contactConfig = getContactMailConfig()
         const intakeResult = await sendResendEmail({
           from: contactConfig.from,
-          to: contactConfig.inbox,
+          to: getContactCategoryInbox(payload.category),
           subject,
           text: body.text,
           html: body.html,
@@ -232,6 +233,9 @@ router.post('/contact', async (req, res) => {
         if (intakeResult.success) {
           deliveryStatus = 'delivered'
           intakeMessageId = intakeResult.id ?? null
+          if (intakeResult.usedFallbackFrom) {
+            deliveryIssues.push(`fallback_sender_used:${intakeResult.usedFallbackFrom}`)
+          }
         } else {
           deliveryIssues.push(`intake_delivery_failed:${intakeResult.error ?? 'unknown'}`)
         }
@@ -261,6 +265,13 @@ router.post('/contact', async (req, res) => {
         deliveryIssues.push(
           `acknowledgement_failed:${acknowledgementResult.error ?? 'unknown'}`
         )
+      } else if (
+        'usedFallbackFrom' in acknowledgementResult &&
+        acknowledgementResult.usedFallbackFrom
+      ) {
+        deliveryIssues.push(
+          `acknowledgement_fallback_sender:${acknowledgementResult.usedFallbackFrom}`
+        )
       }
 
       if (hasFounderAlertMailConfig() && payload.category !== 'support') {
@@ -279,6 +290,8 @@ router.post('/contact', async (req, res) => {
 
         if (!founderResult.success) {
           deliveryIssues.push(`founder_alert_failed:${founderResult.error ?? 'unknown'}`)
+        } else if ('usedFallbackFrom' in founderResult && founderResult.usedFallbackFrom) {
+          deliveryIssues.push(`founder_alert_fallback_sender:${founderResult.usedFallbackFrom}`)
         }
       }
     }

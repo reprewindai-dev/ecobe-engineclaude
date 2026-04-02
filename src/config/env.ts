@@ -162,7 +162,11 @@ const envSchema = z.object({
   RESEND_FROM_CONTACT: z.string().optional(),
   RESEND_FROM_HELLO: z.string().optional(),
   RESEND_FROM_ALERTS: z.string().optional(),
+  RESEND_FALLBACK_FROM: z.string().optional(),
   CONTACT_INBOX_EMAIL: z.string().optional(),
+  CONTACT_SALES_EMAIL: z.string().optional(),
+  CONTACT_SUPPORT_EMAIL: z.string().optional(),
+  CONTACT_SECURITY_EMAIL: z.string().optional(),
   FOUNDER_ALERT_EMAIL: z.string().optional(),
 })
 
