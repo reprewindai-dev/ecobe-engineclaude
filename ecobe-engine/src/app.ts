@@ -35,6 +35,7 @@ import waterRoutes from './routes/water'
 import eventsRoutes from './routes/events'
 import adaptersRoutes from './routes/adapters'
 import designPartnerRoutes from './routes/design-partners'
+import contactRoutes from './routes/contact'
 import internalPolicyRoutes from './routes/internal-policy'
 import { recordTelemetryMetric, telemetryMetricNames } from './lib/observability/telemetry'
 import { validateWaterArtifacts } from './lib/water/bundle'
@@ -311,6 +312,7 @@ function attachApiRoutes(app: express.Express) {
   app.use('/api/v1/intelligence/grid', gridIntelligenceRoutes)
   app.use('/api/v1/integrations', integrationsRoutes)
   app.use('/api/v1/system', systemRoutes)
+  app.use('/api/v1', contactRoutes)
   // DEKES SaaS integration endpoints (prospects, tenants, demos, handoffs, route, workloads)
   app.use('/api/v1', dekesHandoffRoutes)
   // Carbon Ledger — audit-grade accounting + reporting

@@ -10,6 +10,14 @@ import { z } from 'zod'
 
 import { env } from '../config/env'
 import { prisma } from '../lib/db'
+import {
+  getContactMailConfig,
+  getFounderAlertMailConfig,
+  getPublicReplyFromAddress,
+  hasContactMailConfig,
+  hasFounderAlertMailConfig,
+  sendResendEmail,
+} from '../lib/mail/resend'
 import { redis } from '../lib/redis'
 
 const router = Router()
@@ -288,6 +296,183 @@ function serializeDesignPartner(partner: {
   }
 }
 
+function buildDesignPartnerNotificationBody(partner: {
+  companyName: string
+  companyDomain: string | null
+  teamName: string | null
+  teamType: string | null
+  applicantName: string
+  applicantEmail: string
+  roleTitle: string
+  mainWorkloadsPlatforms: string
+  goalsSummary: string
+  scopedWorkflow: string
+  internalChampion: string
+  commercialApprover: string | null
+}) {
+  const lines = [
+    `Company: ${partner.companyName}`,
+    `Domain: ${partner.companyDomain ?? 'Unavailable'}`,
+    `Team: ${partner.teamName ?? 'Unavailable'}`,
+    `Team type: ${partner.teamType ?? 'Unavailable'}`,
+    `Applicant: ${partner.applicantName}`,
+    `Applicant email: ${partner.applicantEmail}`,
+    `Role: ${partner.roleTitle}`,
+    `Champion: ${partner.internalChampion}`,
+    `Commercial approver: ${partner.commercialApprover ?? 'Unavailable'}`,
+    '',
+    'Main workloads / platforms:',
+    partner.mainWorkloadsPlatforms,
+    '',
+    'Goals summary:',
+    partner.goalsSummary,
+    '',
+    'Scoped workflow:',
+    partner.scopedWorkflow,
+  ]
+
+  return {
+    text: lines.join('\n'),
+    html: `
+      <div style="font-family:Arial,sans-serif;background:#020617;color:#e2e8f0;padding:24px">
+        <h1 style="font-size:18px;margin:0 0 16px;color:#f8fafc">CO2 Router Design Partner Application</h1>
+        <p><strong>Company:</strong> ${partner.companyName}</p>
+        <p><strong>Domain:</strong> ${partner.companyDomain ?? 'Unavailable'}</p>
+        <p><strong>Team:</strong> ${partner.teamName ?? 'Unavailable'}</p>
+        <p><strong>Team type:</strong> ${partner.teamType ?? 'Unavailable'}</p>
+        <p><strong>Applicant:</strong> ${partner.applicantName}</p>
+        <p><strong>Email:</strong> ${partner.applicantEmail}</p>
+        <p><strong>Role:</strong> ${partner.roleTitle}</p>
+        <p><strong>Champion:</strong> ${partner.internalChampion}</p>
+        <p><strong>Commercial approver:</strong> ${partner.commercialApprover ?? 'Unavailable'}</p>
+        <hr style="border-color:rgba(148,163,184,0.25);margin:20px 0" />
+        <p><strong>Main workloads / platforms</strong></p>
+        <p style="white-space:pre-wrap;line-height:1.6">${partner.mainWorkloadsPlatforms}</p>
+        <p><strong>Goals summary</strong></p>
+        <p style="white-space:pre-wrap;line-height:1.6">${partner.goalsSummary}</p>
+        <p><strong>Scoped workflow</strong></p>
+        <p style="white-space:pre-wrap;line-height:1.6">${partner.scopedWorkflow}</p>
+      </div>
+    `,
+  }
+}
+
+type DeliveryStatus = 'delivered' | 'degraded' | 'failed_persist'
+
+async function sendDesignPartnerNotifications(input: {
+  partner: {
+    companyName: string
+    companyDomain: string | null
+    teamName: string | null
+    teamType: string | null
+    applicantName: string
+    applicantEmail: string
+    roleTitle: string
+    mainWorkloadsPlatforms: string
+    goalsSummary: string
+    scopedWorkflow: string
+    internalChampion: string
+    commercialApprover: string | null
+    cohort: string
+    status: DesignPartnerStatus
+  }
+  existing: boolean
+}): Promise<{ deliveryStatus: DeliveryStatus; deliveryIssues: string[] }> {
+  const subjectPrefix = input.existing ? 'Application Updated' : 'Application Created'
+  const body = buildDesignPartnerNotificationBody(input.partner)
+  const deliveryIssues: string[] = []
+
+  if (!hasContactMailConfig()) {
+    return {
+      deliveryStatus: 'degraded',
+      deliveryIssues: ['mail_config_missing'],
+    }
+  }
+
+  const contactConfig = getContactMailConfig()
+  const intakeResult = await sendResendEmail({
+    from: contactConfig.from,
+    to: contactConfig.inbox,
+    subject: `[CO2 Router Design Partner] ${subjectPrefix} - ${input.partner.companyName}`,
+    text: body.text,
+    html: body.html,
+    replyTo: input.partner.applicantEmail,
+  }).catch((error) => ({
+    success: false,
+    error: error instanceof Error ? error.message : 'unknown',
+  }))
+
+  if (!intakeResult.success) {
+    return {
+      deliveryStatus: 'degraded',
+      deliveryIssues: [`intake_delivery_failed:${intakeResult.error ?? 'unknown'}`],
+    }
+  }
+
+  const followUps: Array<Promise<{ success: boolean; error?: string }>> = [
+    sendResendEmail({
+      from: getPublicReplyFromAddress(),
+      to: input.partner.applicantEmail,
+      subject: 'CO2 Router design partner application received',
+      text: [
+        `Hi ${input.partner.applicantName},`,
+        '',
+        'Your design partner application has been recorded and routed to the CO2 Router operating inbox.',
+        'The team will review ICP fit, the scoped workflow, and the commercial path before responding.',
+        '',
+        `Company: ${input.partner.companyName}`,
+        `Cohort: ${input.partner.cohort}`,
+        `Status: ${statusFromPrisma[input.partner.status]}`,
+      ].join('\n'),
+      html: `
+        <div style="font-family:Arial,sans-serif;background:#020617;color:#e2e8f0;padding:24px">
+          <h1 style="font-size:18px;margin:0 0 16px;color:#f8fafc">Design partner application received</h1>
+          <p>Hi ${input.partner.applicantName},</p>
+          <p>Your design partner application has been recorded and routed to the CO2 Router operating inbox.</p>
+          <p><strong>Company:</strong> ${input.partner.companyName}</p>
+          <p><strong>Cohort:</strong> ${input.partner.cohort}</p>
+          <p><strong>Status:</strong> ${statusFromPrisma[input.partner.status]}</p>
+        </div>
+      `,
+    }),
+  ]
+
+  if (hasFounderAlertMailConfig()) {
+    const founderAlert = getFounderAlertMailConfig()
+    followUps.push(
+      sendResendEmail({
+        from: founderAlert.from,
+        to: founderAlert.inbox,
+        subject: `[CO2 Router Priority Intake] Design Partner - ${input.partner.companyName}`,
+        text: body.text,
+        html: body.html,
+        replyTo: input.partner.applicantEmail,
+      })
+    )
+  }
+
+  const followUpResults = await Promise.allSettled(followUps)
+  for (const [index, result] of followUpResults.entries()) {
+    if (result.status === 'fulfilled') {
+      if (!result.value.success) {
+        deliveryIssues.push(
+          `${index === 0 ? 'acknowledgement_failed' : 'founder_alert_failed'}:${result.value.error ?? 'unknown'}`
+        )
+      }
+      continue
+    }
+
+    deliveryIssues.push(
+      `${index === 0 ? 'acknowledgement_failed' : 'founder_alert_failed'}:${result.reason instanceof Error ? result.reason.message : 'unknown'}`
+    )
+  }
+
+  return {
+    deliveryStatus: 'delivered',
+    deliveryIssues,
+  }
+}
+
 router.post('/design-partners/applications', async (req, res) => {
   try {
     const rateLimit = await enforcePublicRateLimit(req)
@@ -389,10 +574,59 @@ router.post('/design-partners/applications', async (req, res) => {
       })
       .catch(() => undefined)
 
+    const notificationResult = await sendDesignPartnerNotifications({
+      partner: {
+        companyName: partner.companyName,
+        companyDomain: partner.companyDomain,
+        teamName: partner.teamName,
+        teamType: partner.teamType,
+        applicantName: partner.applicantName,
+        applicantEmail: partner.applicantEmail,
+        roleTitle: partner.roleTitle,
+        mainWorkloadsPlatforms: partner.mainWorkloadsPlatforms,
+        goalsSummary: partner.goalsSummary,
+        scopedWorkflow: partner.scopedWorkflow,
+        internalChampion: partner.internalChampion,
+        commercialApprover: partner.commercialApprover,
+        cohort: partner.cohort,
+        status: partner.status as DesignPartnerStatus,
+      },
+      existing: Boolean(existing),
+    })
+
+    await prisma.integrationEvent
+      .create({
+        data: {
+          source: 'DESIGN_PARTNER_PROGRAM',
+          eventType:
+            notificationResult.deliveryStatus === 'delivered'
+              ? 'APPLICATION_DELIVERED'
+              : 'APPLICATION_DELIVERY_DEGRADED',
+          success: notificationResult.deliveryStatus === 'delivered',
+          errorCode:
+            notificationResult.deliveryStatus === 'delivered'
+              ? undefined
+              : 'APPLICATION_DELIVERY_DEGRADED',
+          message: JSON.stringify({
+            partnerId: partner.id,
+            companyName: partner.companyName,
+            applicantEmail: partner.applicantEmail,
+            deliveryStatus: notificationResult.deliveryStatus,
+            deliveryIssues: notificationResult.deliveryIssues,
+          }),
+        },
+      })
+      .catch(() => undefined)
+
     return res.status(existing ? 200 : 201).json({
       success: true,
       partner: serializeDesignPartner(partner),
       remainingRequestsThisWindow: rateLimit.remaining,
+      deliveryStatus: notificationResult.deliveryStatus,
+      deliveryIssues:
+        notificationResult.deliveryIssues.length > 0
+          ? notificationResult.deliveryIssues
+          : undefined,
     })
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -406,12 +640,26 @@ router.post('/design-partners/applications', async (req, res) => {
     }
 
     console.error('Design partner application error:', error)
+    await prisma.integrationEvent
+      .create({
+        data: {
+          source: 'DESIGN_PARTNER_PROGRAM',
+          eventType: 'APPLICATION_DELIVERY_FAILED',
+          success: false,
+          errorCode: 'APPLICATION_DELIVERY_FAILED',
+          message: JSON.stringify({
+            error: error instanceof Error ? error.message : 'Unknown error',
+          }),
+        },
+      })
+      .catch(() => undefined)
     return res.status(500).json({
       success: false,
       error: {
         code: 'SERVER_ERROR',
         message: 'Failed to record design partner application',
       },
+      deliveryStatus: 'failed_persist' satisfies DeliveryStatus,
     })
   }
 })

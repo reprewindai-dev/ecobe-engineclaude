@@ -43,10 +43,10 @@ export class EIAIngestionWorker {
   private useGridStatusCanonical: boolean
 
   constructor() {
-    this.useGridStatusCanonical = env.GRIDSTATUS_ENABLED === 'true' && gridStatus.isAvailable
+    this.useGridStatusCanonical = env.GRIDSTATUS_ENABLED && gridStatus.isAvailable
     if (this.useGridStatusCanonical) {
       console.log('EIA ingestion: GridStatus.io enabled as canonical source (explicit override)')
-    } else if (env.GRIDSTATUS_ENABLED === 'true' && !gridStatus.isAvailable) {
+    } else if (env.GRIDSTATUS_ENABLED && !gridStatus.isAvailable) {
       console.warn('EIA ingestion: GridStatus enabled but API key missing, falling back to direct EIA')
     } else {
       console.log('EIA ingestion: Using direct EIA API as canonical source (GridStatus fallback only)')
