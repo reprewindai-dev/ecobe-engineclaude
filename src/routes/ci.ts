@@ -32,15 +32,32 @@ import {
 import {
   buildAssuranceStatus,
   buildDecisionExplanation,
+  buildDecisionTrust,
   buildMssState,
   DECISION_DOCTRINE_VERSION,
   DETERMINISTIC_CONFLICT_HIERARCHY,
+  normalizeWorkloadClass,
   resolveBaselineCandidate,
+  type WorkloadClass,
 } from '../lib/ci/doctrine'
 import {
   buildDecisionEvaluatedEvent,
   enqueueDecisionEvaluatedEvents,
 } from '../lib/ci/decision-events'
+import {
+  buildDecisionProofPacket,
+  buildReplayProofPacket,
+  renderDecisionProofPacketPdf,
+  type ReplayInspectionPacket,
+} from '../lib/ci/proof-packets'
+import {
+  buildDecisionProjectionPayloadFromPersistedDecision,
+  computeCo2Grams,
+  computeCarbonSavingsRatio,
+  enqueueDecisionProjection,
+  LOW_CONFIDENCE_THRESHOLD,
+} from '../lib/ci/decision-projection'
+import { buildGovernanceFrame, buildSignalFrame } from '../lib/ci/frames'
 import { applyOperatingModePolicy, resolveOperatingMode, type OperatingMode } from '../lib/ci/operating-mode'
 import {
   buildCuratedTraceEnvelopeView,
@@ -124,6 +141,7 @@ export const requestSchema = z.object({
   waterWeight: z.number().min(0).max(1).default(0.3),
   latencyWeight: z.number().min(0).max(1).default(0.1),
   costWeight: z.number().min(0).max(1).default(0.1),
+  workloadClass: z.enum(['batch', 'interactive', 'critical', 'regulated', 'emergency']).optional(),
   jobType: z.enum(['standard', 'heavy', 'light']).default('standard'),
   criticality: z.enum(['critical', 'standard', 'batch']).default('standard'),
   waterPolicyProfile: z
@@ -176,6 +194,21 @@ const sloState = {
     totalP95Ms: 100,
     computeP95Ms: 50,
   },
+}
+
+const SLO_PERSISTED_WINDOW_LIMIT = 250
+const SLO_ACTIVE_WINDOW_MINUTES = Math.max(
+  5,
+  Number(process.env.CI_SLO_ACTIVE_WINDOW_MINUTES ?? 30)
+)
+
+type PersistedLatencyWindow = {
+  totalMs: number[]
+  computeMs: number[]
+  sampleCount: number
+  windowStart: string | null
+  windowEnd: string | null
+  selection: 'latest_active_window' | 'recent_history'
 }
 
 function resolveRequestId(data: RoutingRequest) {
@@ -250,6 +283,23 @@ function verifySignedDecisionRequest(req: Request, res: Response) {
   return true
 }
 
+function extractInternalToken(req: Request) {
+  const authorization = req.header('authorization')
+  if (authorization?.startsWith('Bearer ')) {
+    return authorization.slice('Bearer '.length).trim()
+  }
+
+  return req.header('x-ecobe-internal-key')?.trim() ?? null
+}
+
+function isInternalFastSimulationRequest(req: Request, data: RoutingRequest) {
+  if (data.decisionMode !== 'scenario_planning') return false
+  if (req.header('x-co2router-response-tier') !== 'fast') return false
+  if (!env.ECOBE_INTERNAL_API_KEY) return false
+
+  return extractInternalToken(req) === env.ECOBE_INTERNAL_API_KEY
+}
+
 function assuranceToProofPosture(status: 'operational' | 'assurance_ready' | 'degraded') {
   if (status === 'assurance_ready') return 'assurance_ready' as const
   if (status === 'degraded') return 'degraded' as const
@@ -301,31 +351,70 @@ function isFiniteLatency(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
 }
 
-async function getPersistedLatencyWindow(limit = 250) {
+async function getPersistedLatencyWindow(limit = SLO_PERSISTED_WINDOW_LIMIT): Promise<PersistedLatencyWindow> {
   const recentDecisions = await prisma.cIDecision.findMany({
     orderBy: { createdAt: 'desc' },
     take: limit,
     select: {
+      createdAt: true,
       metadata: true,
     },
   })
 
-  const totalMs: number[] = []
-  const computeMs: number[] = []
+  const latencySamples: Array<{
+    createdAt: Date
+    totalMs: number | null
+    computeMs: number | null
+  }> = []
 
   for (const decision of recentDecisions) {
     const latency = (decision.metadata as any)?.response?.latencyMs
-    if (isFiniteLatency(latency?.total)) {
-      totalMs.push(latency.total)
-    }
-    if (isFiniteLatency(latency?.compute)) {
-      computeMs.push(latency.compute)
+    const totalMs = isFiniteLatency(latency?.total) ? latency.total : null
+    const computeMs = isFiniteLatency(latency?.compute) ? latency.compute : null
+    if (totalMs !== null || computeMs !== null) {
+      latencySamples.push({
+        createdAt: decision.createdAt,
+        totalMs,
+        computeMs,
+      })
     }
   }
 
+  if (latencySamples.length === 0) {
+    return {
+      totalMs: [],
+      computeMs: [],
+      sampleCount: 0,
+      windowStart: null,
+      windowEnd: null,
+      selection: 'recent_history',
+    }
+  }
+
+  const newestSampleAt = latencySamples[0].createdAt
+  const activeWindowStart = new Date(
+    newestSampleAt.getTime() - SLO_ACTIVE_WINDOW_MINUTES * 60 * 1000
+  )
+  const activeWindowSamples = latencySamples.filter(
+    (sample) => sample.createdAt >= activeWindowStart
+  )
+  const selectedSamples =
+    activeWindowSamples.length > 0 ? activeWindowSamples : latencySamples
+
   return {
-    totalMs: totalMs.reverse(),
-    computeMs: computeMs.reverse(),
+    totalMs: selectedSamples
+      .map((sample) => sample.totalMs)
+      .filter((value): value is number => value !== null)
+      .reverse(),
+    computeMs: selectedSamples
+      .map((sample) => sample.computeMs)
+      .filter((value): value is number => value !== null)
+      .reverse(),
+    sampleCount: selectedSamples.length,
+    windowStart: selectedSamples[selectedSamples.length - 1]?.createdAt.toISOString() ?? null,
+    windowEnd: selectedSamples[0]?.createdAt.toISOString() ?? null,
+    selection:
+      activeWindowSamples.length > 0 ? 'latest_active_window' : 'recent_history',
   }
 }
 
@@ -390,20 +479,33 @@ async function evaluateCandidates(
   const candidates = await Promise.all(
     data.preferredRegions.map(async (region) => {
       const providerResolutionStarted = Date.now()
-      const cachedSignalRecord = await providerRouter.getCachedRoutingSignalRecord(region, cacheBucket)
-      const useWarmCache = Boolean(cachedSignalRecord && !cachedSignalRecord.degraded)
-      const signalRecord = useWarmCache
-        ? cachedSignalRecord!
-        : await providerRouter.getRoutingSignalRecord(region, at)
+      const signalRecord = await providerRouter.getHotPathRoutingSignalRecord(region, at)
       const signal = signalRecord.signal
+      const cacheStatus = signalRecord.cacheSource ?? 'degraded-safe'
       const providerResolutionMs = Date.now() - providerResolutionStarted
       recordTelemetryMetric(telemetryMetricNames.providerResolutionLatencyMs, 'histogram', providerResolutionMs, {
         region,
-        cache_status: signal.provenance.fallbackUsed ? 'fallback' : useWarmCache ? 'warm' : 'live',
+        cache_status: cacheStatus,
         source: signal.source,
       })
+      recordTelemetryMetric(
+        cacheStatus === 'live'
+          ? telemetryMetricNames.routingCacheMissCount
+          : telemetryMetricNames.routingCacheHitCount,
+        'counter',
+        1,
+        {
+          region,
+          cache_status: cacheStatus,
+        }
+      )
+      if (cacheStatus === 'live') {
+        recordTelemetryMetric(telemetryMetricNames.routingHotPathProviderLeakCount, 'counter', 1, {
+          region,
+        })
+      }
 
-      if (!useWarmCache) {
+      if (cacheStatus !== 'warm' && cacheStatus !== 'redis') {
         providerRouter.cacheRoutingSignal(region, signalRecord, cacheBucket).catch((error) => {
           console.warn('Failed to cache routing signal', { region, error })
         })
@@ -504,7 +606,7 @@ async function evaluateCandidates(
         guardrailReasons: guardrailCheck.trace.reasonCodes,
         providerSnapshotRef,
         waterAuthority,
-        cacheStatus: signal.provenance.fallbackUsed ? 'fallback' : useWarmCache ? 'warm' : 'live',
+        cacheStatus,
         providerResolutionMs,
         carbonFreshnessSec: freshnessSec,
         waterFreshnessSec,
@@ -525,6 +627,7 @@ function buildCiResponse(input: {
   requestId: string
   transport: CanonicalTransportMetadata
   doctrineVersion: string
+  workloadClass: WorkloadClass
   operatingMode: OperatingMode
   decisionFrameId: string
   decision: WaterDecisionAction
@@ -543,6 +646,7 @@ function buildCiResponse(input: {
   assurance: ReturnType<typeof buildAssuranceStatus>
   mss: ReturnType<typeof buildMssState>
   decisionExplanation: ReturnType<typeof buildDecisionExplanation>
+  decisionTrust: ReturnType<typeof buildDecisionTrust>
 }) {
   const selectedReductionPct =
     input.baseline.carbonIntensity > 0
@@ -645,6 +749,7 @@ function buildCiResponse(input: {
     decision: input.decision,
     decisionMode: input.data.decisionMode as WaterDecisionMode,
     doctrineVersion: input.doctrineVersion,
+    workloadClass: input.workloadClass,
     operatingMode: input.operatingMode,
     reasonCode: input.reasonCode,
     decisionFrameId: input.decisionFrameId,
@@ -663,6 +768,7 @@ function buildCiResponse(input: {
     assurance: input.assurance,
     mss: input.mss,
     decisionExplanation: input.decisionExplanation,
+    decisionTrust: input.decisionTrust,
     policyTrace: {
       ...input.policyTrace,
       capabilityId: 'ci.route.authorization',
@@ -721,6 +827,7 @@ function buildCiResponse(input: {
     },
     workflowOutputs: {
       decision: input.decision,
+      workloadClass: input.workloadClass,
       reasonCode: input.reasonCode,
       selectedRegion: input.selected.region,
       selectedRunner: input.selected.runner,
@@ -847,6 +954,12 @@ export async function createDecision(
   const requestId = resolveRequestId(normalizedRequest)
   const transport = resolveTransport(normalizedRequest)
   const energyKwh = estimateEnergyKwh(normalizedRequest.jobType, normalizedRequest.estimatedEnergyKwh)
+  const workloadClass = normalizeWorkloadClass({
+    workloadClass: normalizedRequest.workloadClass,
+    criticality: normalizedRequest.criticality,
+    jobType: normalizedRequest.jobType,
+    metadata: normalizedRequest.metadata,
+  })
   const candidateEvaluationStarted = Date.now()
   const candidateEvaluations = await evaluateCandidates(
     normalizedRequest,
@@ -1186,6 +1299,18 @@ export async function createDecision(
     baseline,
     candidates: candidateEvaluations,
     profile: normalizedRequest.waterPolicyProfile as WaterPolicyProfile,
+    workloadClass,
+  })
+  const decisionTrust = buildDecisionTrust({
+    selected,
+    assurance,
+    mss,
+    fallbackUsed:
+      selected.waterSignal.fallbackUsed ||
+      selected.carbonFallbackUsed ||
+      selected.waterAuthority.authorityMode === 'fallback',
+    persisted: true,
+    workloadClass,
   })
   recordTelemetryMetric(telemetryMetricNames.policyEvaluationCount, 'counter', 1, {
     decision_action: decision,
@@ -1282,6 +1407,7 @@ export async function createDecision(
     requestId,
     transport,
     doctrineVersion: DECISION_DOCTRINE_VERSION,
+    workloadClass,
     operatingMode,
     decisionFrameId,
     decision,
@@ -1303,6 +1429,7 @@ export async function createDecision(
     assurance,
     mss,
     decisionExplanation,
+    decisionTrust,
   })
   const doctrineAssemblyMs = Date.now() - doctrineAssemblyStarted
   const traceAssemblyStarted = Date.now()
@@ -1323,6 +1450,59 @@ export async function createDecision(
           .map(([key, value]) => [key, value ?? null] as const)
       )
     : null
+  const traceConstraintsApplied = Array.from(
+    new Set([
+      ...sekedApplied.reasonCodes,
+      ...externalApplied.reasonCodes,
+    ])
+  )
+  const policyReferenceCandidates = [
+    sekedPolicy.policyReference,
+    externalPolicy.policyReference,
+  ].filter((reference): reference is string => Boolean(reference))
+  const signalFrame = buildSignalFrame({
+    decisionFrameId,
+    selectedRegion: selected.region,
+    selectedRunner: selected.runner,
+    signalConfidence,
+    candidate: selected,
+    bottleneckScore: null,
+    policyReferenceCandidates,
+  })
+  const governanceFrame = buildGovernanceFrame({
+    decisionFrameId,
+    source: governanceSource,
+    strict: Boolean(sekedPolicy.strict || externalPolicy.strict),
+    zone: governanceMetadata?.zone ?? 'green',
+    score: governanceMetadata?.score ?? 0,
+    weights: governanceMetadata?.weights
+      ? {
+          carbon: governanceMetadata.weights.carbon ?? null,
+          water: governanceMetadata.weights.water ?? null,
+          latency: governanceMetadata.weights.latency ?? null,
+          cost: governanceMetadata.weights.cost ?? null,
+        }
+      : {
+          carbon: null,
+          water: null,
+          latency: null,
+          cost: null,
+        },
+    thresholds: governanceThresholds ?? {},
+    constraintsApplied: traceConstraintsApplied,
+    triggers: {
+      red: (governanceMetadata?.zone ?? null) === 'red' ? traceConstraintsApplied : [],
+      amber: (governanceMetadata?.zone ?? null) === 'amber' ? traceConstraintsApplied : [],
+    },
+    policyReference: policyReferenceCandidates[0] ?? null,
+    policyReferences: policyReferenceCandidates,
+    fallbackUsed:
+      selected.waterSignal.fallbackUsed ||
+      selected.carbonFallbackUsed ||
+      selected.waterAuthority.authorityMode === 'fallback',
+    precedenceOverrideApplied,
+    lease: null,
+  })
   const traceSeed: TraceEnvelopeSeed = {
     identity: {
       traceId: `trace:${decisionFrameId}`,
@@ -1357,8 +1537,10 @@ export async function createDecision(
           candidate.carbonFallbackUsed ||
           candidate.waterSignal.fallbackUsed ||
           candidate.waterAuthority.authorityMode === 'fallback',
-      })),
+        })),
     },
+    signalFrame,
+    governanceFrame,
     decisionPath: {
       evaluatedRegions: candidateEvaluations.map((candidate) => candidate.region),
       rejectedRegions: candidateEvaluations
@@ -1376,6 +1558,7 @@ export async function createDecision(
       baselineRegion: baseline.region,
       action: decision,
       reasonCode,
+      workloadClass,
       operatingMode,
       rerouteFrom: rerouteFrom?.region ?? null,
       precedenceOverrideApplied,
@@ -1385,6 +1568,23 @@ export async function createDecision(
         notBefore: delayWindow.notBefore,
         reason: delayWindow.reason,
       },
+    },
+    explanation: {
+      whyAction: decisionExplanation.whyAction,
+      whyTarget: decisionExplanation.whyTarget,
+      dominantConstraint: decisionExplanation.dominantConstraint,
+      policyPrecedence: decisionExplanation.policyPrecedence,
+      rejectedAlternatives: decisionExplanation.rejectedAlternatives,
+      counterfactualCondition: decisionExplanation.counterfactualCondition,
+      uncertaintySummary: decisionExplanation.uncertaintySummary,
+    },
+    trust: {
+      providerTrustTier: decisionTrust.providerTrust.providerTrustTier,
+      replayabilityStatus: decisionTrust.replayability.status,
+      fallbackEngaged: decisionTrust.fallbackMode.engaged,
+      degraded: decisionTrust.degradedState.degraded,
+      degradedReasons: decisionTrust.degradedState.reasons,
+      estimatedFields: decisionTrust.estimatedFields.fields,
     },
     governance: {
       label: 'SAIQ',
@@ -1401,15 +1601,8 @@ export async function createDecision(
           }
         : null,
       thresholds: governanceThresholds,
-      constraintsApplied: Array.from(
-        new Set([
-          ...sekedApplied.reasonCodes,
-          ...externalApplied.reasonCodes,
-        ])
-      ),
-      policyReferences: [sekedPolicy.policyReference, externalPolicy.policyReference].filter(
-        (reference): reference is string => Boolean(reference)
-      ),
+      constraintsApplied: traceConstraintsApplied,
+      policyReferences: policyReferenceCandidates,
       seked: {
         enabled: sekedPolicy.enabled,
         strict: sekedPolicy.strict,
@@ -1564,6 +1757,66 @@ async function getDecisionTraceRecord(decisionFrameId: string) {
   return normalizeTraceRow(trace)
 }
 
+async function buildReplayInspection(decisionFrameId: string): Promise<ReplayInspectionPacket> {
+  const decision = await prisma.cIDecision.findFirst({
+    where: { decisionFrameId },
+    orderBy: { createdAt: 'desc' },
+  })
+
+  if (!decision) {
+    throw Object.assign(new Error('Decision not found'), { code: 'DECISION_NOT_FOUND' })
+  }
+
+  const metadata = (decision.metadata ?? {}) as any
+  const requestPayload = metadata.request
+  if (!requestPayload) {
+    throw Object.assign(new Error('Decision does not contain replay payload'), {
+      code: 'REPLAY_PAYLOAD_MISSING',
+    })
+  }
+
+  const traceRecord = await getDecisionTraceRecord(decision.decisionFrameId)
+  const replayTimestamp =
+    traceRecord?.payload.identity.createdAt ??
+    (typeof requestPayload.timestamp === 'string'
+      ? requestPayload.timestamp
+      : typeof metadata.response?.proofRecord?.timestamp === 'string'
+        ? metadata.response.proofRecord.timestamp
+        : decision.createdAt.toISOString())
+
+  const replayResult = await createDecision(requestSchema.parse(requestPayload), {
+    decisionFrameId: decision.decisionFrameId,
+    nowIso: replayTimestamp,
+    resolvedCandidateOverrides: traceRecord?.payload.inputSignals.resolvedCandidates,
+  })
+  const replayResultForVerification = traceRecord
+    ? {
+        ...replayResult,
+        response: pinReplayProofHash(
+          replayResult.response,
+          traceRecord.payload.proof.proofHash
+        ) as typeof replayResult.response,
+      }
+    : replayResult
+  const replayResponse = await finalizeCiDecisionResponse(replayResultForVerification)
+  const mismatches = [
+    (metadata.response?.decision ?? null) === replayResponse.decision ? null : 'decision',
+    (metadata.response?.selectedRegion ?? null) === replayResponse.selectedRegion ? null : 'selectedRegion',
+    (metadata.response?.reasonCode ?? null) === replayResponse.reasonCode ? null : 'reasonCode',
+    (metadata.response?.proofHash ?? null) === replayResponse.proofHash ? null : 'proofHash',
+  ].filter((value): value is string => Boolean(value))
+
+  return {
+    decisionFrameId: decision.decisionFrameId,
+    replayedAt: new Date().toISOString(),
+    deterministicMatch: mismatches.length === 0,
+    traceBacked: Boolean(traceRecord),
+    mismatches,
+    persistedResponse: metadata.response ?? null,
+    replayedResponse: replayResponse as unknown as Record<string, unknown>,
+  }
+}
+
 export async function finalizeCiDecisionResponse(
   result: Awaited<ReturnType<typeof createDecision>>,
   latencyMs?: { total: number; compute: number },
@@ -1654,20 +1907,58 @@ export async function persistCiDecisionResult(
       computeMs: latencyMs?.compute ?? null,
       stageTimings: result.persistable.stageTimings,
       providerTimings: buildTraceProviderTimings(result.persistable.candidateEvaluations),
-      cacheHit: result.persistable.candidateEvaluations.some(
-        (candidate) => candidate.cacheStatus === 'warm'
+      cacheHit: result.persistable.candidateEvaluations.some((candidate) =>
+        ['warm', 'redis', 'lkg', 'degraded-safe'].includes(candidate.cacheStatus)
       ),
     })
     const traceHashes = buildTraceHashes(traceEnvelope, previousTrace?.traceHash ?? null)
+    const baselineRegion =
+      result.persistable.baseline.region ??
+      result.persistable.request.preferredRegions?.[0] ??
+      result.persistable.selected.region
+    const estimatedKwh = result.persistable.energyKwh ?? null
+    const lowConfidence =
+      typeof result.persistable.signalConfidence === 'number'
+        ? result.persistable.signalConfidence < LOW_CONFIDENCE_THRESHOLD
+        : false
+    const carbonSavingsRatio = computeCarbonSavingsRatio(
+      result.persistable.baseline.carbonIntensity,
+      result.persistable.selected.carbonIntensity
+    )
+    const baselineEnergyKwh = estimatedKwh
+    const chosenEnergyKwh = estimatedKwh
+    const baselineCo2G = computeCo2Grams(
+      result.persistable.baseline.carbonIntensity,
+      baselineEnergyKwh
+    )
+    const chosenCo2G = computeCo2Grams(
+      result.persistable.selected.carbonIntensity,
+      chosenEnergyKwh
+    )
+    const co2DeltaG =
+      baselineCo2G !== null && chosenCo2G !== null
+        ? Number((baselineCo2G - chosenCo2G).toFixed(6))
+        : null
+    const carbonDataQuality =
+      baselineEnergyKwh !== null && chosenEnergyKwh !== null ? 'EXACT' : 'INCOMPLETE'
 
     const persisted = await tx.cIDecision.create({
       data: {
         decisionFrameId: result.persistable.decisionFrameId,
         selectedRunner: result.persistable.selected.runner,
+        baselineRegion,
         selectedRegion: result.persistable.selected.region,
         carbonIntensity: result.persistable.selected.carbonIntensity,
         baseline: result.persistable.baseline.carbonIntensity,
         savings: validatedResponse.savings.carbonReductionPct,
+        carbonSavingsRatio,
+        baselineEnergyKwh,
+        chosenEnergyKwh,
+        estimatedKwh,
+        baselineCo2G,
+        chosenCo2G,
+        co2DeltaG,
+        carbonDataQuality,
         jobType: result.persistable.request.jobType,
         preferredRegions: result.persistable.request.preferredRegions,
         carbonWeight: result.persistable.request.carbonWeight,
@@ -1677,6 +1968,7 @@ export async function persistCiDecisionResult(
         reasonCode: validatedResponse.reasonCode,
         signalConfidence: result.persistable.signalConfidence,
         fallbackUsed: validatedResponse.fallbackUsed,
+        lowConfidence,
         waterImpactLiters: validatedResponse.water.selectedLiters,
         waterBaselineLiters: validatedResponse.water.baselineLiters,
         waterScarcityImpact: validatedResponse.water.selectedScarcityImpact,
@@ -1712,6 +2004,10 @@ export async function persistCiDecisionResult(
         createdAt: new Date(),
       },
     })
+    await enqueueDecisionProjection(
+      tx,
+      buildDecisionProjectionPayloadFromPersistedDecision(persisted)
+    )
 
     await tx.decisionTraceEnvelope.create({
       data: {
@@ -1874,34 +2170,48 @@ async function routeDecisionHandler(req: Request, res: Response) {
     const computeStarted = Date.now()
     const result = await createDecision(data)
     const computeMs = Date.now() - computeStarted
-    const totalMs = Date.now() - requestStarted
-    let validatedResponse = await finalizeCiDecisionResponse(result, {
-      total: totalMs,
-      compute: computeMs,
-    })
+    const isFastSimulationRequest = isInternalFastSimulationRequest(req, result.persistable.request)
+    let validatedResponse
 
-    try {
-      validatedResponse = await persistCiDecisionResult(
-        result,
-        {
-          total: totalMs,
+    if (isFastSimulationRequest) {
+      const totalMs = Date.now() - requestStarted
+      validatedResponse = await finalizeCiDecisionResponse(result, {
+        total: totalMs,
+        compute: computeMs,
+      })
+      res.setHeader('x-co2router-simulation-persisted', 'false')
+    } else {
+      try {
+        validatedResponse = await persistCiDecisionResult(
+          result,
+          {
+            total: Date.now() - requestStarted,
+            compute: computeMs,
+          },
+          {
+            idempotencyReplayed: false,
+          }
+        )
+        res.setHeader('x-co2router-simulation-persisted', 'true')
+      } catch (dbError) {
+        console.warn('Failed to persist CI decision:', dbError)
+        validatedResponse = await finalizeCiDecisionResponse(result, {
+          total: Date.now() - requestStarted,
           compute: computeMs,
-        },
-        {
-          idempotencyReplayed: false,
+        })
+        if (result.persistable.request.decisionMode === 'runtime_authorization') {
+          throw dbError
         }
-      )
-    } catch (dbError) {
-      console.warn('Failed to persist CI decision:', dbError)
-      if (result.persistable.request.decisionMode === 'runtime_authorization') {
-        throw dbError
+        validatedResponse.policyTrace.reasonCodes.push('DB_PERSIST_FAILED_LOCAL_RESPONSE_ONLY')
+        res.setHeader('x-co2router-simulation-persisted', 'false')
       }
-      validatedResponse.policyTrace.reasonCodes.push('DB_PERSIST_FAILED_LOCAL_RESPONSE_ONLY')
     }
+
+    const recordedTotalMs = validatedResponse.latencyMs?.total ?? (Date.now() - requestStarted)
 
     logSlowDecision({
       computeMs,
-      totalMs,
+      totalMs: recordedTotalMs,
       decisionFrameId: result.response.decisionFrameId,
       selectedRegion: result.response.selectedRegion,
       reasonCode: result.response.reasonCode,
@@ -1913,24 +2223,38 @@ async function routeDecisionHandler(req: Request, res: Response) {
       await writeIdempotentResponse(idempotencyCacheKey, validatedResponse)
     }
 
-    recordLatency(totalMs, computeMs)
+    recordLatency(recordedTotalMs, computeMs)
     recordTelemetryMetric(telemetryMetricNames.authorizationDecisionCount, 'counter', 1, {
       action: validatedResponse.decision,
       signal_mode: validatedResponse.signalMode,
       accounting_method: validatedResponse.accountingMethod,
       critical_path: Boolean(req.body?.criticalPath),
     })
-    recordTelemetryMetric(telemetryMetricNames.authorizationDecisionLatencyMs, 'histogram', totalMs, {
+    recordTelemetryMetric(telemetryMetricNames.authorizationDecisionLatencyMs, 'histogram', recordedTotalMs, {
       action: validatedResponse.decision,
       cache_status: validatedResponse.latencyMs?.cacheStatus ?? 'live',
     })
-    await applyDecisionTraceHeaders(res, validatedResponse.decisionFrameId)
+    if (!isFastSimulationRequest) {
+      await applyDecisionTraceHeaders(res, validatedResponse.decisionFrameId)
+    }
     return res.json(validatedResponse)
   } catch (error) {
     const fallbackRegion = getFallbackRegion(
       Array.isArray(req.body?.preferredRegions) ? req.body.preferredRegions : ['us-east-1']
     )
     const fallbackDecisionFrameId = `fallback-${Date.now()}`
+    const fallbackWorkloadClass = normalizeWorkloadClass({
+      workloadClass: typeof req.body?.workloadClass === 'string' ? req.body.workloadClass : undefined,
+      criticality:
+        req.body?.criticality === 'critical' || req.body?.criticality === 'batch'
+          ? req.body.criticality
+          : 'standard',
+      jobType:
+        req.body?.jobType === 'heavy' || req.body?.jobType === 'light'
+          ? req.body.jobType
+          : 'standard',
+      metadata: req.body?.metadata,
+    })
     const totalMs = Date.now() - requestStarted
     const transport = (() => {
       try {
@@ -1981,6 +2305,7 @@ async function routeDecisionHandler(req: Request, res: Response) {
       decision: 'deny',
       decisionMode: 'runtime_authorization',
       doctrineVersion: DECISION_DOCTRINE_VERSION,
+      workloadClass: fallbackWorkloadClass,
       operatingMode: 'CRISIS',
       reasonCode: 'FALLBACK_INPUT_OR_RUNTIME_ERROR',
       decisionFrameId: fallbackDecisionFrameId,
@@ -2077,7 +2402,48 @@ async function routeDecisionHandler(req: Request, res: Response) {
         hierarchy: [...DETERMINISTIC_CONFLICT_HIERARCHY],
         whyAction: 'The request failed validation or runtime evaluation, so the engine denied execution through the conservative fallback path.',
         whyTarget: `The fallback region ${fallbackRegion} was selected because no validated runtime decision could be produced.`,
+        dominantConstraint: 'policy_hard_override',
+        policyPrecedence: [...DETERMINISTIC_CONFLICT_HIERARCHY],
         rejectedAlternatives: [],
+        counterfactualCondition:
+          'A valid request, healthy signals, and an admissible policy path are required before execution can be authorized.',
+        uncertaintySummary:
+          'Fallback-only decision; no validated live decision frame was produced on the request path.',
+      },
+      decisionTrust: {
+        signalFreshness: {
+          carbonFreshnessSec: null,
+          waterFreshnessSec: null,
+          freshnessSummary: 'Signal freshness unavailable on conservative fallback path.',
+        },
+        providerTrust: {
+          carbonProvider: 'STATIC_FALLBACK',
+          carbonProviderHealth: 'FAILED',
+          waterAuthorityHealth: 'FAILED',
+          providerTrustTier: 'guarded',
+        },
+        disagreement: {
+          present: false,
+          pct: 0,
+          summary: 'No live provider comparison was available on fallback path.',
+        },
+        estimatedFields: {
+          present: true,
+          fields: ['carbon_intensity', 'water_signal', 'water_authority'],
+        },
+        replayability: {
+          status: 'local_only',
+          summary: 'Fallback response is local-only until a canonical persisted frame exists.',
+        },
+        fallbackMode: {
+          engaged: true,
+          summary: 'Conservative fallback mode denied execution.',
+        },
+        degradedState: {
+          degraded: true,
+          reasons: ['request_validation_or_runtime_failure', 'fallback_mode_engaged'],
+          summary: 'Trust posture is degraded because the request failed before a validated live decision could be persisted.',
+        },
       },
       policyTrace: {
         capabilityId: 'ci.route.authorization',
@@ -2188,6 +2554,7 @@ async function routeDecisionHandler(req: Request, res: Response) {
       },
       workflowOutputs: {
         decision: 'deny',
+        workloadClass: fallbackWorkloadClass,
         reasonCode: 'FALLBACK_INPUT_OR_RUNTIME_ERROR',
         selectedRegion: fallbackRegion,
         selectedRunner: RUNNER_REGIONS[fallbackRegion]?.[0] ?? 'ubuntu-latest',
@@ -2493,14 +2860,15 @@ router.get('/slo', async (_req, res) => {
   let totalSamples = sloState.totalMs
   let computeSamples = sloState.computeMs
   let sampleSource: 'memory' | 'persisted' | 'none' = 'memory'
+  let persistedWindow: PersistedLatencyWindow | null = null
 
   if (totalSamples.length === 0 || computeSamples.length === 0) {
-    const persisted = await getPersistedLatencyWindow()
-    if (totalSamples.length === 0 && persisted.totalMs.length > 0) {
-      totalSamples = persisted.totalMs
+    persistedWindow = await getPersistedLatencyWindow()
+    if (totalSamples.length === 0 && persistedWindow.totalMs.length > 0) {
+      totalSamples = persistedWindow.totalMs
     }
-    if (computeSamples.length === 0 && persisted.computeMs.length > 0) {
-      computeSamples = persisted.computeMs
+    if (computeSamples.length === 0 && persistedWindow.computeMs.length > 0) {
+      computeSamples = persistedWindow.computeMs
     }
     sampleSource =
       totalSamples.length > 0 || computeSamples.length > 0
@@ -2516,9 +2884,25 @@ router.get('/slo', async (_req, res) => {
   const p99Compute = percentile(computeSamples, 99)
   const currentTotal = totalSamples[totalSamples.length - 1] ?? 0
   const currentCompute = computeSamples[computeSamples.length - 1] ?? 0
+  const samples =
+    sampleSource === 'persisted'
+      ? (persistedWindow?.sampleCount ?? Math.max(totalSamples.length, computeSamples.length))
+      : Math.max(totalSamples.length, computeSamples.length)
   res.json({
-    samples: totalSamples.length,
+    samples,
     sampleSource,
+    selection:
+      sampleSource === 'persisted'
+        ? persistedWindow?.selection ?? 'recent_history'
+        : sampleSource === 'memory'
+          ? 'memory_window'
+          : 'none',
+    window: {
+      startedAt: sampleSource === 'persisted' ? persistedWindow?.windowStart ?? null : null,
+      endedAt: sampleSource === 'persisted' ? persistedWindow?.windowEnd ?? null : null,
+      activeWindowMinutes:
+        sampleSource === 'persisted' ? SLO_ACTIVE_WINDOW_MINUTES : null,
+    },
     p50: {
       totalMs: Number(p50Total.toFixed(3)),
       computeMs: Number(p50Compute.toFixed(3)),
@@ -2741,6 +3125,77 @@ router.get('/decisions/:decisionFrameId/trace/raw', internalServiceGuard, async 
 
 router.get('/decisions/:decisionFrameId/replay', internalServiceGuard, async (req, res) => {
   try {
+    const replayInspection = await buildReplayInspection(req.params.decisionFrameId)
+
+    if (replayInspection.mismatches.length === 0) {
+      recordTelemetryMetric(telemetryMetricNames.replayConsistencyCount, 'counter', 1, {
+        decision_frame_id: replayInspection.decisionFrameId,
+      })
+    } else {
+      recordTelemetryMetric(telemetryMetricNames.replayMismatchCount, 'counter', 1, {
+        decision_frame_id: replayInspection.decisionFrameId,
+        mismatches: replayInspection.mismatches.join(','),
+      })
+    }
+
+    return res.json({
+      decisionFrameId: replayInspection.decisionFrameId,
+      storedResponse: replayInspection.persistedResponse,
+      replayedResponse: replayInspection.replayedResponse,
+      persisted: replayInspection.persistedResponse,
+      replay: replayInspection.replayedResponse,
+      consistent: replayInspection.deterministicMatch,
+      deterministicMatch: replayInspection.deterministicMatch,
+      traceBacked: replayInspection.traceBacked,
+      legacy: !replayInspection.traceBacked,
+      mismatches: replayInspection.mismatches,
+      replayedAt: replayInspection.replayedAt,
+    })
+  } catch (error) {
+    const code = (error as any)?.code
+    if (code === 'DECISION_NOT_FOUND') {
+      return res.status(404).json({
+        error: 'Decision not found',
+        code,
+      })
+    }
+    if (code === 'REPLAY_PAYLOAD_MISSING') {
+      return res.status(422).json({
+        error: 'Decision does not contain replay payload',
+        code,
+      })
+    }
+    return res.status(500).json({
+      error: 'Replay failed',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    })
+  }
+})
+
+router.get('/decisions/:decisionFrameId/replay-packet.json', internalServiceGuard, async (req, res) => {
+  try {
+    const replayInspection = await buildReplayInspection(req.params.decisionFrameId)
+    return res.json(buildReplayProofPacket(replayInspection))
+  } catch (error) {
+    const code = (error as any)?.code
+    if (code === 'DECISION_NOT_FOUND') {
+      return res.status(404).json({ error: 'Decision not found', code })
+    }
+    if (code === 'REPLAY_PAYLOAD_MISSING') {
+      return res.status(422).json({
+        error: 'Decision does not contain replay payload',
+        code,
+      })
+    }
+    return res.status(500).json({
+      error: 'Failed to build replay packet',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    })
+  }
+})
+
+router.get('/decisions/:decisionFrameId/proof-packet.json', internalServiceGuard, async (req, res) => {
+  try {
     const decision = await prisma.cIDecision.findFirst({
       where: { decisionFrameId: req.params.decisionFrameId },
       orderBy: { createdAt: 'desc' },
@@ -2753,73 +3208,63 @@ router.get('/decisions/:decisionFrameId/replay', internalServiceGuard, async (re
     }
 
     const metadata = (decision.metadata ?? {}) as any
-    const requestPayload = metadata.request
-    if (!requestPayload) {
-      return res.status(422).json({
-        error: 'Decision does not contain replay payload',
-        code: 'REPLAY_PAYLOAD_MISSING',
-      })
-    }
-
     const traceRecord = await getDecisionTraceRecord(decision.decisionFrameId)
+    const replayInspection =
+      metadata.request && metadata.response
+        ? await buildReplayInspection(decision.decisionFrameId)
+        : null
 
-    const replayTimestamp =
-      traceRecord?.payload.identity.createdAt ??
-      (typeof requestPayload.timestamp === 'string'
-        ? requestPayload.timestamp
-        : typeof metadata.response?.proofRecord?.timestamp === 'string'
-          ? metadata.response.proofRecord.timestamp
-          : decision.createdAt.toISOString())
-
-    const replayResult = await createDecision(requestSchema.parse(requestPayload), {
-      decisionFrameId: decision.decisionFrameId,
-      nowIso: replayTimestamp,
-      resolvedCandidateOverrides: traceRecord?.payload.inputSignals.resolvedCandidates,
-    })
-    const replayResultForVerification = traceRecord
-      ? {
-          ...replayResult,
-          response: pinReplayProofHash(
-            replayResult.response,
-            traceRecord.payload.proof.proofHash
-          ) as typeof replayResult.response,
-        }
-      : replayResult
-    const replayResponse = await finalizeCiDecisionResponse(replayResultForVerification)
-    const mismatches = [
-      (metadata.response?.decision ?? null) === replayResponse.decision ? null : 'decision',
-      (metadata.response?.selectedRegion ?? null) === replayResponse.selectedRegion ? null : 'selectedRegion',
-      (metadata.response?.reasonCode ?? null) === replayResponse.reasonCode ? null : 'reasonCode',
-      (metadata.response?.proofHash ?? null) === replayResponse.proofHash ? null : 'proofHash',
-    ].filter((value): value is string => Boolean(value))
-
-    if (mismatches.length === 0) {
-      recordTelemetryMetric(telemetryMetricNames.replayConsistencyCount, 'counter', 1, {
-        decision_frame_id: decision.decisionFrameId,
+    return res.json(
+      buildDecisionProofPacket({
+        storedResponse: (metadata.response ?? {}) as Record<string, unknown>,
+        traceRecord,
+        replay: replayInspection,
       })
-    } else {
-      recordTelemetryMetric(telemetryMetricNames.replayMismatchCount, 'counter', 1, {
-        decision_frame_id: decision.decisionFrameId,
-        mismatches: mismatches.join(','),
-      })
-    }
-
-    return res.json({
-      decisionFrameId: decision.decisionFrameId,
-      storedResponse: metadata.response ?? null,
-      replayedResponse: replayResponse,
-      persisted: metadata.response ?? null,
-      replay: replayResponse,
-      consistent: mismatches.length === 0,
-      deterministicMatch: mismatches.length === 0,
-      traceBacked: Boolean(traceRecord),
-      legacy: !traceRecord,
-      mismatches,
-      replayedAt: new Date().toISOString(),
-    })
+    )
   } catch (error) {
     return res.status(500).json({
-      error: 'Replay failed',
+      error: 'Failed to build decision proof packet',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    })
+  }
+})
+
+router.get('/decisions/:decisionFrameId/proof-packet.pdf', internalServiceGuard, async (req, res) => {
+  try {
+    const decision = await prisma.cIDecision.findFirst({
+      where: { decisionFrameId: req.params.decisionFrameId },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (!decision) {
+      return res.status(404).json({
+        error: 'Decision not found',
+        code: 'DECISION_NOT_FOUND',
+      })
+    }
+
+    const metadata = (decision.metadata ?? {}) as any
+    const traceRecord = await getDecisionTraceRecord(decision.decisionFrameId)
+    const replayInspection =
+      metadata.request && metadata.response
+        ? await buildReplayInspection(decision.decisionFrameId)
+        : null
+
+    const packet = buildDecisionProofPacket({
+      storedResponse: (metadata.response ?? {}) as Record<string, unknown>,
+      traceRecord,
+      replay: replayInspection,
+    })
+    const pdf = await renderDecisionProofPacketPdf(packet)
+
+    res.setHeader('content-type', 'application/pdf')
+    res.setHeader(
+      'content-disposition',
+      `attachment; filename=\"co2router-proof-${decision.decisionFrameId}.pdf\"`
+    )
+    return res.send(pdf)
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Failed to build decision proof PDF',
       message: error instanceof Error ? error.message : 'Unknown error',
     })
   }

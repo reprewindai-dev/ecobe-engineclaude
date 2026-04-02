@@ -2,6 +2,7 @@
   "name": "ecobe-engine",
   "version": "1.0.1",
   "description": "Environmental Carbon and Optimization Backend Engine",
+  "private": true,
   "main": "dist/server.js",
   "scripts": {
     "verify:canonical-root": "node scripts/verify-canonical-root.cjs",
@@ -20,6 +21,8 @@
     "water:verify-provenance": "tsx scripts/verify-water-provenance.ts",
     "water:refresh": "tsx scripts/refresh-water-bundle.ts",
     "bench:ci-latency": "npm run verify:canonical-root && tsx scripts/benchmark-ci-latency.ts",
+    "load:ci": "npm run verify:canonical-root && tsx scripts/load-test-ci.ts",
+    "projection:replay:ci": "npm run verify:canonical-root && tsx scripts/replay-ci-projection.ts",
     "db:setup": "npm run prisma:migrate:deploy && npm run prisma:seed",
     "format": "prettier --write \"src/**/*.ts\"",
     "lint": "eslint src --ext .ts",
@@ -32,8 +35,8 @@
     "optimization",
     "emissions"
   ],
-  "author": "",
-  "license": "MIT",
+  "author": "Anthony Millwater",
+  "license": "UNLICENSED",
   "dependencies": {
     "@langchain/community": "0.0.33",
     "@langchain/openai": "0.0.14",
@@ -44,6 +47,7 @@
     "@types/axios": "^0.9.36",
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/pdfkit": "^0.17.5",
     "@upstash/qstash": "^2.9.0",
     "@upstash/redis": "^1.36.3",
     "@upstash/vector": "1.1.1",
@@ -58,6 +62,7 @@
     "langchain": "0.3.0",
     "node-cron": "^4.2.1",
     "openai": "^4.28.0",
+    "pdfkit": "^0.18.0",
     "redis": "^4.6.0",
     "stripe": "^20.4.0",
     "zod": "^3.25.76"

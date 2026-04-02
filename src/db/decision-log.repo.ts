@@ -1,38 +1,40 @@
 import { prisma } from '../lib/db'
+import { persistLegacyCanonicalDecision } from '../lib/ci/legacy-canonical-ingest'
 import type { RoutingDecision } from '../services/router.service'
 
 /**
  * Save a routing decision to the database
  */
 export async function saveDecision(decision: RoutingDecision): Promise<void> {
-  await prisma.dashboardRoutingDecision.create({
-    data: {
-      workloadName: decision.workload_id,
-      opName: 'routing-decision',
-      baselineRegion: decision.candidate_regions[0] || 'unknown',
-      chosenRegion: decision.chosen_region,
-      zoneBaseline: decision.candidate_regions[0] || 'unknown',
-      zoneChosen: decision.chosen_region,
-      carbonIntensityBaselineGPerKwh: decision.worst_value,
-      carbonIntensityChosenGPerKwh: decision.winner_value,
-      estimatedKwh: 1.0, // Temporary static value
-      co2BaselineG: decision.worst_value,
-      co2ChosenG: decision.winner_value,
-      reason: `Routing decision via ${decision.winner_source}`,
-      fallbackUsed: decision.degraded,
-      sourceUsed: decision.winner_source,
-      meta: {
-        decision_id: decision.decision_id,
-        workload_id: decision.workload_id,
-        candidate_regions: decision.candidate_regions,
-        winner_source: decision.winner_source,
-        winner_value: decision.winner_value,
-        worst_value: decision.worst_value,
-        carbon_delta: decision.carbon_delta,
-        degraded: decision.degraded,
-        routing_type: 'api_v1_route'
-      }
-    }
+  await persistLegacyCanonicalDecision({
+    createdAt: decision.created_at,
+    decisionFrameId: decision.decision_id,
+    selectedRunner: 'legacy-router-service',
+    workloadName: decision.workload_id,
+    opName: 'routing-decision',
+    baselineRegion: decision.candidate_regions[0] || 'unknown',
+    chosenRegion: decision.chosen_region,
+    carbonIntensityBaselineGPerKwh: decision.worst_value,
+    carbonIntensityChosenGPerKwh: decision.winner_value,
+    estimatedKwh: 1,
+    fallbackUsed: decision.degraded,
+    sourceUsed: decision.winner_source,
+    validationSource: decision.winner_source,
+    reason: `Routing decision via ${decision.winner_source}`,
+    decisionAction: 'run_now',
+    decisionMode: 'scenario_planning',
+    metadata: {
+      decision_id: decision.decision_id,
+      workload_id: decision.workload_id,
+      candidate_regions: decision.candidate_regions,
+      winner_source: decision.winner_source,
+      winner_value: decision.winner_value,
+      worst_value: decision.worst_value,
+      carbon_delta: decision.carbon_delta,
+      degraded: decision.degraded,
+      routing_type: 'api_v1_route',
+    },
+    jobType: 'legacy',
   })
 }
 

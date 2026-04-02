@@ -33,6 +33,7 @@ const envSchema = z.object({
 
   // GridStatus.io (curated EIA-930 data with real fuel mix)
   GRIDSTATUS_API_KEY: z.string().optional(),
+  GRIDSTATUS_ENABLED: z.string().default('false'),
   
   // Finland Fingrid (optional regional provider)
   FINGRID_API_KEY: z.string().optional(),
@@ -137,6 +138,16 @@ const envSchema = z.object({
   // Stripe Billing
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  STRIPE_SMALL_CI_MONTHLY_PRICE_ID: z.string().optional(),
+  STRIPE_MID_CI_MONTHLY_PRICE_ID: z.string().optional(),
+  STRIPE_LARGE_CI_MONTHLY_PRICE_ID: z.string().optional(),
+  STRIPE_SMALL_CONTROL_SURFACE_MONTHLY_PRICE_ID: z.string().optional(),
+  STRIPE_MID_CONTROL_SURFACE_MONTHLY_PRICE_ID: z.string().optional(),
+  STRIPE_LARGE_CONTROL_SURFACE_MONTHLY_PRICE_ID: z.string().optional(),
+  STRIPE_SMALL_ENTERPRISE_ANNUAL_PRICE_ID: z.string().optional(),
+  STRIPE_MID_ENTERPRISE_ANNUAL_PRICE_ID: z.string().optional(),
+  STRIPE_LARGE_ENTERPRISE_ANNUAL_PRICE_ID: z.string().optional(),
+  STRIPE_PILOT_30D_PRICE_ID: z.string().optional(),
   STRIPE_GROWTH_MONTHLY_PRICE_ID: z.string().optional(),
   STRIPE_GROWTH_ANNUAL_PRICE_ID: z.string().optional(),
   STRIPE_ENTERPRISE_PRICE_ID: z.string().optional(),

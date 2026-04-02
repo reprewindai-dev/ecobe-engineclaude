@@ -15,7 +15,8 @@ interface VerificationResult {
 class DeploymentVerification {
   private results: VerificationResult[] = []
   private readonly engineRoot = process.cwd()
-  private readonly dashboardRoot = join(process.cwd(), 'ecobe-dashboard')
+  private readonly workspaceRoot = join(process.cwd(), '..')
+  private readonly dashboardRoot = join(this.workspaceRoot, 'ecobe-dashboard')
 
   async run() {
     await this.verifyEngineBuild()
@@ -41,6 +42,10 @@ class DeploymentVerification {
 
   private async verifyDashboardBuild() {
     try {
+      if (!existsSync(join(this.dashboardRoot, 'package.json'))) {
+        this.addResult('FAIL', 'Dashboard Build', `Canonical dashboard root not found at ${this.dashboardRoot}`)
+        return
+      }
       execSync('npm run build', { cwd: this.dashboardRoot, stdio: 'pipe' })
       execSync('npm run type-check', { cwd: this.dashboardRoot, stdio: 'pipe' })
       this.addResult('PASS', 'Dashboard Build', 'Dashboard builds and type-checks cleanly.')
@@ -51,38 +56,38 @@ class DeploymentVerification {
 
   private async verifyIntegrationContracts() {
     const dashboardApiPath = join(this.dashboardRoot, 'src', 'lib', 'api.ts')
-    const dekesClientPath = join(
-      this.engineRoot,
-      '..',
-      'dekes-saas',
-      'dekes-saas',
-      'lib',
+    const dashboardProxyPath = join(
+      this.dashboardRoot,
+      'src',
+      'app',
+      'api',
       'ecobe',
-      'client.ts'
+      '[...path]',
+      'route.ts'
     )
-    const dekesRouterPath = join(
-      this.engineRoot,
-      '..',
-      'dekes-saas',
-      'dekes-saas',
-      'lib',
-      'ecobe',
-      'router.ts'
+    const commandCenterRoutePath = join(
+      this.dashboardRoot,
+      'src',
+      'app',
+      'api',
+      'control-surface',
+      'command-center',
+      'route.ts'
     )
 
-    if (!existsSync(dashboardApiPath) || !existsSync(dekesClientPath) || !existsSync(dekesRouterPath)) {
-      this.addResult('FAIL', 'Contracts', 'One or more integration client files are missing.')
+    if (!existsSync(dashboardApiPath) || !existsSync(dashboardProxyPath) || !existsSync(commandCenterRoutePath)) {
+      this.addResult('FAIL', 'Contracts', 'Canonical dashboard integration files are missing.')
       return
     }
 
     const dashboardApi = readFileSync(dashboardApiPath, 'utf8')
-    const dekesClient = readFileSync(dekesClientPath, 'utf8')
-    const dekesRouter = readFileSync(dekesRouterPath, 'utf8')
+    const dashboardProxy = readFileSync(dashboardProxyPath, 'utf8')
+    const commandCenterRoute = readFileSync(commandCenterRoutePath, 'utf8')
 
     const requiredDashboardEndpoints = [
-      '/integrations/dekes/summary',
-      '/integrations/dekes/events',
-      '/integrations/dekes/metrics',
+      '/ci/health',
+      '/ci/regions',
+      '/ci/decisions',
       'getProviderHealth',
     ]
 
@@ -99,19 +104,16 @@ class DeploymentVerification {
       return
     }
 
-    if (
-      !dekesClient.includes('/api/v1/integrations/dekes/prospects') ||
-      !dekesRouter.includes('/api/v1/integrations/dekes/route')
-    ) {
+    if (!dashboardProxy.includes('/api/v1/') || !commandCenterRoute.includes('getCommandCenterSnapshot')) {
       this.addResult(
         'FAIL',
         'Contracts',
-        'DEKES SaaS clients are not targeting the engine integration routes.'
+        'Canonical dashboard routing is not targeting the engine proxy/composer correctly.'
       )
       return
     }
 
-    this.addResult('PASS', 'Contracts', 'Engine, dashboard, and DEKES SaaS use the same integration routes.')
+    this.addResult('PASS', 'Contracts', 'Engine and canonical dashboard integration contracts are aligned.')
   }
 
   private async verifyAutomationAssets() {
@@ -122,7 +124,7 @@ class DeploymentVerification {
       '.github/workflows/warm-cache.yml',
     ]
 
-    const missing = workflows.filter((workflow) => !existsSync(join(this.engineRoot, '..', workflow)))
+    const missing = workflows.filter((workflow) => !existsSync(join(this.engineRoot, workflow)))
 
     if (missing.length > 0) {
       this.addResult('FAIL', 'Workflows', `Missing workflow files: ${missing.join(', ')}`)

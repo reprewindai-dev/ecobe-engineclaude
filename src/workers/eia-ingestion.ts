@@ -3,7 +3,6 @@ import { eia930 } from '../lib/grid-signals/eia-client'
 import { gridStatus } from '../lib/grid-signals/gridstatus-client'
 import { BalanceParser } from '../lib/grid-signals/balance-parser'
 import { InterchangeParser } from '../lib/grid-signals/interchange-parser'
-import { SubregionParser } from '../lib/grid-signals/subregion-parser'
 import { FuelMixParser } from '../lib/grid-signals/fuel-mix-parser'
 import { GridFeatureEngine } from '../lib/grid-signals/grid-feature-engine'
 import { GridSignalCache } from '../lib/grid-signals/grid-signal-cache'
@@ -114,9 +113,20 @@ export class EIAIngestionWorker {
       const endTime = new Date()
       const startTime = new Date(endTime.getTime() - 48 * 60 * 60 * 1000)
 
-      const results = await Promise.allSettled(
-        DEFAULT_REGIONS.map(config => this.ingestRegion(config, startTime, endTime))
-      )
+      const results: Array<PromiseSettledResult<{
+        snapshotsProcessed: number
+        rawRecordsStored: number
+        featuresCalculated: number
+      }>> = []
+
+      for (const config of DEFAULT_REGIONS) {
+        try {
+          const value = await this.ingestRegion(config, startTime, endTime)
+          results.push({ status: 'fulfilled', value })
+        } catch (error) {
+          results.push({ status: 'rejected', reason: error })
+        }
+      }
 
       // Log results
       let successCount = 0
@@ -187,6 +197,17 @@ export class EIAIngestionWorker {
       gridStatus.getFuelMix(config.eiaRespondent, startTime, endTime),
     ])
 
+    if (balanceData.length === 0 || interchangeData.length === 0 || fuelMixData.length === 0) {
+      if (eia930.isAvailable) {
+        console.warn(
+          `GridStatus returned incomplete data for ${config.region}; falling back to direct EIA.`
+        )
+        return this.ingestFromDirectEia(config, startTime, endTime)
+      }
+
+      throw new Error(`GridStatus returned incomplete data for ${config.region}`)
+    }
+
     // Store raw balance/interchange data for audit
     await this.storeRawData(config, balanceData, interchangeData, [])
 
@@ -220,6 +241,17 @@ export class EIAIngestionWorker {
     const snapshotsWithFeatures = GridFeatureEngine.updateSnapshotsWithFeatures(merged)
     const finalSnapshots = GridFeatureEngine.updateSignalQuality(snapshotsWithFeatures)
 
+    if (finalSnapshots.length === 0) {
+      if (eia930.isAvailable) {
+        console.warn(
+          `GridStatus produced zero processed snapshots for ${config.region}; falling back to direct EIA.`
+        )
+        return this.ingestFromDirectEia(config, startTime, endTime)
+      }
+
+      throw new Error(`GridStatus produced zero processed snapshots for ${config.region}`)
+    }
+
     // Store, cache, audit
     await this.storeProcessedSnapshots(finalSnapshots)
     await this.cacheSnapshots(config.region, finalSnapshots)
@@ -241,15 +273,18 @@ export class EIAIngestionWorker {
     startTime: Date,
     endTime: Date
   ): Promise<{ snapshotsProcessed: number; rawRecordsStored: number; featuresCalculated: number }> {
-    // Fetch raw data from EIA API
-    const [balanceData, interchangeData, subregionData] = await Promise.all([
+    const [balanceData, interchangeData, fuelMixData] = await Promise.all([
       eia930.getBalance(config.eiaRespondent, startTime, endTime),
       eia930.getInterchange(config.eiaRespondent, startTime, endTime),
-      eia930.getSubregion(config.eiaRespondent, startTime, endTime)
+      eia930.getFuelMix(config.eiaRespondent, startTime, endTime)
     ])
 
+    if (balanceData.length === 0 || interchangeData.length === 0 || fuelMixData.length === 0) {
+      throw new Error(`Direct EIA returned incomplete data for ${config.region}`)
+    }
+
     // Store raw data for audit
-    await this.storeRawData(config, balanceData, interchangeData, subregionData)
+    await this.storeRawData(config, balanceData, interchangeData, [])
 
     // Parse and normalize data
     const balanceSnapshots = BalanceParser.parseBalanceData(
@@ -265,32 +300,31 @@ export class EIAIngestionWorker {
       config.balancingAuthority
     )
 
-    // Heuristic subregion parser (less accurate than GridStatus fuel mix)
-    const subregionSnapshots = SubregionParser.parseSubregionData(
-      subregionData,
+    const fuelMixSnapshots = FuelMixParser.parseFuelMixData(
+      fuelMixData,
       config.region,
       config.balancingAuthority
     )
 
-    // Merge all data sources
-    const mergedSnapshots = this.mergeSnapshots(
-      balanceWithChanges,
-      interchangeSnapshots,
-      subregionSnapshots
-    )
+    let mergedSnapshots = InterchangeParser.mergeIntoSnapshots(balanceWithChanges, interchangeSnapshots)
+    mergedSnapshots = FuelMixParser.mergeIntoSnapshots(mergedSnapshots, fuelMixSnapshots)
 
     // Calculate derived features
     const snapshotsWithFeatures = GridFeatureEngine.updateSnapshotsWithFeatures(mergedSnapshots)
     const finalSnapshots = GridFeatureEngine.updateSignalQuality(snapshotsWithFeatures)
 
+    if (finalSnapshots.length === 0) {
+      throw new Error(`Direct EIA produced zero processed snapshots for ${config.region}`)
+    }
+
     // Store processed snapshots
     await this.storeProcessedSnapshots(finalSnapshots)
     await this.cacheSnapshots(config.region, finalSnapshots)
-    await this.recordAuditTrail(finalSnapshots, 'EIA_930')
+    await this.recordAuditTrail(finalSnapshots, 'EIA_930_DIRECT')
 
     return {
       snapshotsProcessed: finalSnapshots.length,
-      rawRecordsStored: balanceData.length + interchangeData.length + subregionData.length,
+      rawRecordsStored: balanceData.length + interchangeData.length + fuelMixData.length,
       featuresCalculated: finalSnapshots.length
     }
   }

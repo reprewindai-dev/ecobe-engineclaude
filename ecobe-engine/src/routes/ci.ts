@@ -172,6 +172,8 @@ export type DecisionExecutionContext = {
 const sloState = {
   totalMs: [] as number[],
   computeMs: [] as number[],
+  hotPathTotalMs: [] as number[],
+  hotPathComputeMs: [] as number[],
   budget: {
     totalP95Ms: 100,
     computeP95Ms: 50,
@@ -187,11 +189,14 @@ const SLO_ACTIVE_WINDOW_MINUTES = Math.max(
 type PersistedLatencyWindow = {
   totalMs: number[]
   computeMs: number[]
+  hotPathTotalMs: number[]
+  hotPathComputeMs: number[]
   sampleCount: number
   windowStart: string | null
   windowEnd: string | null
   selection: 'latest_active_window' | 'recent_history'
 }
+const HOT_PATH_RUNTIMES = new Set(['http', 'github_actions', 'kubernetes', 'lambda', 'queue', 'event'])
 
 function resolveRequestId(data: RoutingRequest) {
   return data.requestId?.trim() || randomUUID()
@@ -288,15 +293,39 @@ function assuranceToProofPosture(status: 'operational' | 'assurance_ready' | 'de
   return 'operational' as const
 }
 
-function recordLatency(totalMs: number, computeMs: number) {
-  const windowSize = 250
-  sloState.totalMs.push(totalMs)
-  sloState.computeMs.push(computeMs)
-  if (sloState.totalMs.length > windowSize) {
-    sloState.totalMs.splice(0, sloState.totalMs.length - windowSize)
+function pushLatencySample(window: number[], value: number, windowSize: number) {
+  window.push(value)
+  if (window.length > windowSize) {
+    window.splice(0, window.length - windowSize)
   }
-  if (sloState.computeMs.length > windowSize) {
-    sloState.computeMs.splice(0, sloState.computeMs.length - windowSize)
+}
+
+function isHotPathLatencySample(input: { decisionMode?: unknown; runtime?: unknown }) {
+  const decisionMode = typeof input.decisionMode === 'string' ? input.decisionMode : null
+  if (decisionMode !== 'runtime_authorization') {
+    return false
+  }
+
+  const runtime = typeof input.runtime === 'string' ? input.runtime : null
+  if (!runtime) {
+    return true
+  }
+
+  return HOT_PATH_RUNTIMES.has(runtime)
+}
+
+function recordLatency(
+  totalMs: number,
+  computeMs: number,
+  context?: { decisionMode?: unknown; runtime?: unknown }
+) {
+  const windowSize = 250
+  pushLatencySample(sloState.totalMs, totalMs, windowSize)
+  pushLatencySample(sloState.computeMs, computeMs, windowSize)
+
+  if (isHotPathLatencySample(context ?? {})) {
+    pushLatencySample(sloState.hotPathTotalMs, totalMs, windowSize)
+    pushLatencySample(sloState.hotPathComputeMs, computeMs, windowSize)
   }
 }
 
@@ -347,17 +376,24 @@ async function getPersistedLatencyWindow(limit = SLO_PERSISTED_WINDOW_LIMIT): Pr
     createdAt: Date
     totalMs: number | null
     computeMs: number | null
+    isHotPath: boolean
   }> = []
 
   for (const decision of recentDecisions) {
     const latency = (decision.metadata as any)?.response?.latencyMs
     const totalMs = isFiniteLatency(latency?.total) ? latency.total : null
     const computeMs = isFiniteLatency(latency?.compute) ? latency.compute : null
+    const isHotPath = isHotPathLatencySample({
+      decisionMode: (decision.metadata as any)?.response?.decisionMode,
+      runtime: (decision.metadata as any)?.response?.decisionEnvelope?.transport?.runtime,
+    })
+
     if (totalMs !== null || computeMs !== null) {
       latencySamples.push({
         createdAt: decision.createdAt,
         totalMs,
         computeMs,
+        isHotPath,
       })
     }
   }
@@ -366,6 +402,8 @@ async function getPersistedLatencyWindow(limit = SLO_PERSISTED_WINDOW_LIMIT): Pr
     return {
       totalMs: [],
       computeMs: [],
+      hotPathTotalMs: [],
+      hotPathComputeMs: [],
       sampleCount: 0,
       windowStart: null,
       windowEnd: null,
@@ -382,6 +420,7 @@ async function getPersistedLatencyWindow(limit = SLO_PERSISTED_WINDOW_LIMIT): Pr
   )
   const selectedSamples =
     activeWindowSamples.length > 0 ? activeWindowSamples : latencySamples
+  const selectedHotPathSamples = selectedSamples.filter((sample) => sample.isHotPath)
 
   return {
     totalMs: selectedSamples
@@ -389,6 +428,14 @@ async function getPersistedLatencyWindow(limit = SLO_PERSISTED_WINDOW_LIMIT): Pr
       .filter((value): value is number => value !== null)
       .reverse(),
     computeMs: selectedSamples
+      .map((sample) => sample.computeMs)
+      .filter((value): value is number => value !== null)
+      .reverse(),
+    hotPathTotalMs: selectedHotPathSamples
+      .map((sample) => sample.totalMs)
+      .filter((value): value is number => value !== null)
+      .reverse(),
+    hotPathComputeMs: selectedHotPathSamples
       .map((sample) => sample.computeMs)
       .filter((value): value is number => value !== null)
       .reverse(),
@@ -1197,10 +1244,43 @@ export async function createDecision(
     carbonFallbackUsed: selected.carbonFallbackUsed,
     manifestDatasets,
   })
+  const mss = buildMssState({
+    candidate: selected,
+    assurance,
+    carbonFreshnessSec: selected.carbonFreshnessSec,
+    waterFreshnessSec: selected.waterFreshnessSec,
+    cacheStatus: selected.cacheStatus,
+  })
+  const waterAuthorityHealthDegraded = mss.waterAuthorityHealth !== 'HEALTHY'
+  const waterFallbackUsedForMode =
+    selected.waterSignal.fallbackUsed ||
+    selected.waterAuthority.authorityMode === 'fallback' ||
+    mss.lastKnownGoodApplied ||
+    waterAuthorityHealthDegraded
+  const fallbackUsedForDecision = waterFallbackUsedForMode || selected.carbonFallbackUsed
+  const assuranceForResponse = waterAuthorityHealthDegraded
+    ? {
+        ...assurance,
+        operationallyUsable: false,
+        assuranceReady: false,
+        status: 'degraded' as const,
+        issues: Array.from(new Set([...assurance.issues, 'water_authority_health_degraded'])),
+      }
+    : assurance
+  const additionalPolicyReasonCodes: string[] = []
+  if (mss.lastKnownGoodApplied) {
+    additionalPolicyReasonCodes.push('WATER_LKG_APPLIED')
+  }
+  if (waterAuthorityHealthDegraded) {
+    additionalPolicyReasonCodes.push('WATER_AUTHORITY_HEALTH_DEGRADED')
+  }
+  if (fallbackUsedForDecision) {
+    additionalPolicyReasonCodes.push('SIGNAL_FALLBACK_OR_LKG_APPLIED')
+  }
   const operatingMode = resolveOperatingMode({
     signalConfidence,
     carbonFallbackUsed: selected.carbonFallbackUsed,
-    waterFallbackUsed: selected.waterSignal.fallbackUsed || selected.waterAuthority.authorityMode === 'fallback',
+    waterFallbackUsed: waterFallbackUsedForMode,
     disagreementPct: selected.carbonDisagreementPct,
     hardWaterBlock: bestGuardrail.hardBlock,
     noSafeRegion: !firstNonBlocked,
@@ -1215,7 +1295,7 @@ export async function createDecision(
     context: {
       signalConfidence,
       carbonFallbackUsed: selected.carbonFallbackUsed,
-      waterFallbackUsed: selected.waterSignal.fallbackUsed || selected.waterAuthority.authorityMode === 'fallback',
+      waterFallbackUsed: waterFallbackUsedForMode,
       disagreementPct: selected.carbonDisagreementPct,
       hardWaterBlock: bestGuardrail.hardBlock,
       noSafeRegion: !firstNonBlocked,
@@ -1226,15 +1306,9 @@ export async function createDecision(
   })
   decision = operatingModeDecision.adjustedAction
   reasonCode = operatingModeDecision.adjustedReasonCode
-  const mss = buildMssState({
-    candidate: selected,
-    assurance,
-    carbonFreshnessSec: selected.carbonFreshnessSec,
-    waterFreshnessSec: selected.waterFreshnessSec,
-    cacheStatus: selected.cacheStatus,
-  })
   const policyTrace = {
     ...bestGuardrail.trace,
+    fallbackUsed: fallbackUsedForDecision,
     delayWindow,
     reasonCodes: Array.from(
       new Set([
@@ -1242,6 +1316,7 @@ export async function createDecision(
         ...sekedApplied.reasonCodes,
         ...externalApplied.reasonCodes,
         ...operatingModeDecision.reasonCodes,
+        ...additionalPolicyReasonCodes,
       ])
     ),
     sekedPolicy: {
@@ -1312,13 +1387,13 @@ export async function createDecision(
       scenario: waterAuthority.scenario,
     })
   }
-  if (selected.waterSignal.fallbackUsed || waterAuthority.authorityMode === 'fallback') {
+  if (waterFallbackUsedForMode) {
     recordTelemetryMetric(telemetryMetricNames.waterSupplierFallbackRate, 'counter', 1, {
       scenario: waterAuthority.scenario,
       region: selected.region,
     })
   }
-  if (selected.waterSignal.fallbackUsed || selected.carbonFallbackUsed || waterAuthority.authorityMode === 'fallback') {
+  if (fallbackUsedForDecision) {
     recordTelemetryMetric(telemetryMetricNames.authorizationFallbackCount, 'counter', 1, {
       action: decision,
       runtime: transport.runtime,
@@ -1375,16 +1450,13 @@ export async function createDecision(
     rerouteFrom,
     policyTrace,
     signalConfidence,
-    fallbackUsed:
-      selected.waterSignal.fallbackUsed ||
-      selected.carbonFallbackUsed ||
-      selected.waterAuthority.authorityMode === 'fallback',
+    fallbackUsed: fallbackUsedForDecision,
     candidateEvaluations,
     proofHash,
     providerSnapshotRefs,
     waterAuthority,
     precedenceOverrideApplied,
-    assurance,
+    assurance: assuranceForResponse,
     mss,
     decisionExplanation,
   })
@@ -2011,7 +2083,10 @@ async function routeDecisionHandler(req: Request, res: Response) {
       await writeIdempotentResponse(idempotencyCacheKey, validatedResponse)
     }
 
-    recordLatency(recordedTotalMs, computeMs)
+    recordLatency(recordedTotalMs, computeMs, {
+      decisionMode: validatedResponse.decisionMode,
+      runtime: validatedResponse.decisionEnvelope?.transport?.runtime,
+    })
     recordTelemetryMetric(telemetryMetricNames.authorizationDecisionCount, 'counter', 1, {
       action: validatedResponse.decision,
       signal_mode: validatedResponse.signalMode,
@@ -2061,7 +2136,10 @@ async function routeDecisionHandler(req: Request, res: Response) {
       accountingMethod: 'average',
     })
 
-    recordLatency(totalMs, totalMs)
+    recordLatency(totalMs, totalMs, {
+      decisionMode: req.body?.decisionMode,
+      runtime: req.body?.runtimeTarget?.runtime ?? req.body?.transport?.runtime,
+    })
     recordTelemetryMetric(telemetryMetricNames.authorizationDecisionCount, 'counter', 1, {
       action: 'deny',
       signal_mode: 'fallback',
@@ -2590,18 +2668,18 @@ router.get('/health', async (_req, res) => {
 })
 
 router.get('/slo', async (_req, res) => {
-  let totalSamples = sloState.totalMs
-  let computeSamples = sloState.computeMs
+  let totalSamples = sloState.hotPathTotalMs
+  let computeSamples = sloState.hotPathComputeMs
   let sampleSource: 'memory' | 'persisted' | 'none' = 'memory'
   let persistedWindow: PersistedLatencyWindow | null = null
 
   if (totalSamples.length === 0 || computeSamples.length === 0) {
     persistedWindow = await getPersistedLatencyWindow()
-    if (totalSamples.length === 0 && persistedWindow.totalMs.length > 0) {
-      totalSamples = persistedWindow.totalMs
+    if (totalSamples.length === 0 && persistedWindow.hotPathTotalMs.length > 0) {
+      totalSamples = persistedWindow.hotPathTotalMs
     }
-    if (computeSamples.length === 0 && persistedWindow.computeMs.length > 0) {
-      computeSamples = persistedWindow.computeMs
+    if (computeSamples.length === 0 && persistedWindow.hotPathComputeMs.length > 0) {
+      computeSamples = persistedWindow.hotPathComputeMs
     }
     sampleSource =
       totalSamples.length > 0 || computeSamples.length > 0
@@ -2622,6 +2700,7 @@ router.get('/slo', async (_req, res) => {
       ? (persistedWindow?.sampleCount ?? Math.max(totalSamples.length, computeSamples.length))
       : Math.max(totalSamples.length, computeSamples.length)
   res.json({
+    scope: 'hot_path',
     samples,
     sampleSource,
     selection:

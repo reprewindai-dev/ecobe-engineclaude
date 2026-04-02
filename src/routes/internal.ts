@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import { Router } from 'express'
 import { z } from 'zod'
 
+import { persistLegacyCanonicalDecision } from '../lib/ci/legacy-canonical-ingest'
 import { prisma } from '../lib/db'
 import { routeGreen } from '../lib/green-routing'
 import { redis } from '../lib/redis'
@@ -86,70 +87,75 @@ router.post('/routing-decisions', async (req, res) => {
       (!payload.costCeiling || estimatedCost <= payload.costCeiling) &&
       (!payload.latencyCeiling || estimatedLatency <= payload.latencyCeiling)
 
-    const decision = await prisma.dashboardRoutingDecision.create({
-      data: {
-        workloadName: payload.projectId,
-        opName: String(payload.executionMetadata.operation ?? 'governed-run'),
-        baselineRegion: preferredRegions[0],
-        chosenRegion: routingResult.selectedRegion,
-        zoneBaseline: preferredRegions[0],
-        zoneChosen: routingResult.selectedRegion,
-        carbonIntensityBaselineGPerKwh: routingResult.alternatives[0]?.carbonIntensity ?? routingResult.carbonIntensity,
-        carbonIntensityChosenGPerKwh: routingResult.carbonIntensity,
-        estimatedKwh: Number(payload.executionMetadata.estimatedKwh ?? 0.08),
-        co2BaselineG: Number(payload.executionMetadata.baselineCo2G ?? 0),
-        co2ChosenG: Number(payload.executionMetadata.chosenCo2G ?? 0),
-        reason: routingResult.explanation ?? 'Engine routing decision created',
-        latencyEstimateMs: estimatedLatency,
-        fallbackUsed: routingResult.fallback_used ?? false,
-        requestCount: Number(payload.executionMetadata.requestCount ?? 1),
-        balancingAuthority: routingResult.balancingAuthority,
-        demandRampPct: routingResult.demandRampPct,
-        carbonSpikeProbability: routingResult.carbonSpikeProbability,
-        curtailmentProbability: routingResult.curtailmentProbability,
-        importCarbonLeakageScore: routingResult.importCarbonLeakageScore,
-        sourceUsed: routingResult.source_used,
-        validationSource: routingResult.validation_source,
-        disagreementFlag: routingResult.provider_disagreement.flag,
-        disagreementPct: routingResult.provider_disagreement.pct ?? undefined,
-        estimatedFlag: routingResult.estimatedFlag ?? undefined,
-        syntheticFlag: routingResult.syntheticFlag ?? undefined,
-        meta: {
-          decisionId: routingResult.decisionFrameId ?? randomUUID(),
-          runId: payload.runId,
-          orgId: payload.orgId,
-          projectId: payload.projectId,
-          selectedProvider,
-          estimatedCost,
-          costCeiling: payload.costCeiling ?? null,
-          latencyCeiling: payload.latencyCeiling ?? null,
-          satisfiable,
-          providerConstraints: payload.providerConstraints ?? {},
-          executionMetadata: payload.executionMetadata,
-          alternatives: routingResult.alternatives,
-          qualityTier: routingResult.qualityTier,
-          forecastStability: routingResult.forecast_stability,
-        } as any,
+    const decisionFrameId = routingResult.decisionFrameId ?? randomUUID()
+    const decision = await persistLegacyCanonicalDecision({
+      decisionFrameId,
+      selectedRunner: 'internal-routing',
+      workloadName: payload.projectId,
+      opName: String(payload.executionMetadata.operation ?? 'governed-run'),
+      baselineRegion: preferredRegions[0],
+      chosenRegion: routingResult.selectedRegion,
+      carbonIntensityBaselineGPerKwh:
+        routingResult.alternatives[0]?.carbonIntensity ?? routingResult.carbonIntensity,
+      carbonIntensityChosenGPerKwh: routingResult.carbonIntensity,
+      estimatedKwh: Number(payload.executionMetadata.estimatedKwh ?? 0.08),
+      fallbackUsed: routingResult.fallback_used ?? false,
+      lowConfidence: Boolean(
+        routingResult.estimatedFlag ||
+          routingResult.syntheticFlag ||
+          routingResult.provider_disagreement.flag
+      ),
+      reason: routingResult.explanation ?? 'Engine routing decision created',
+      decisionAction: satisfiable ? 'run_now' : 'delay',
+      decisionMode: 'runtime_authorization',
+      latencyEstimateMs: estimatedLatency,
+      requestCount: Number(payload.executionMetadata.requestCount ?? 1),
+      sourceUsed: routingResult.source_used,
+      validationSource: routingResult.validation_source,
+      disagreementFlag: routingResult.provider_disagreement.flag,
+      disagreementPct: routingResult.provider_disagreement.pct ?? undefined,
+      estimatedFlag: routingResult.estimatedFlag ?? undefined,
+      syntheticFlag: routingResult.syntheticFlag ?? undefined,
+      balancingAuthority: routingResult.balancingAuthority,
+      demandRampPct: routingResult.demandRampPct,
+      carbonSpikeProbability: routingResult.carbonSpikeProbability,
+      curtailmentProbability: routingResult.curtailmentProbability,
+      importCarbonLeakageScore: routingResult.importCarbonLeakageScore,
+      preferredRegions,
+      carbonWeight: 1,
+      metadata: {
+        decisionId: decisionFrameId,
+        runId: payload.runId,
+        orgId: payload.orgId,
+        projectId: payload.projectId,
+        selectedProvider,
+        estimatedCost,
+        costCeiling: payload.costCeiling ?? null,
+        latencyCeiling: payload.latencyCeiling ?? null,
+        satisfiable,
+        providerConstraints: payload.providerConstraints ?? {},
+        executionMetadata: {
+          ...payload.executionMetadata,
+          latencyEstimateMs: estimatedLatency,
+        },
+        alternatives: routingResult.alternatives,
+        qualityTier: routingResult.qualityTier,
+        forecastStability: routingResult.forecast_stability,
       },
-      select: {
-        id: true,
-        chosenRegion: true,
-        latencyEstimateMs: true,
-        reason: true,
-        meta: true,
-      },
+      jobType: 'internal',
     })
 
-    const decisionMeta = decision.meta as Record<string, any>
+    const decisionMeta = (decision.metadata ?? {}) as Record<string, any>
 
     return res.status(201).json({
-      decisionId: decision.id,
+      decisionId: decision.decisionFrameId,
+      canonicalId: decision.id,
       selectedProvider: decisionMeta.selectedProvider,
-      selectedRegion: decision.chosenRegion,
-      estimatedLatency: decision.latencyEstimateMs,
+      selectedRegion: decision.selectedRegion,
+      estimatedLatency: estimatedLatency,
       estimatedCost: decisionMeta.estimatedCost,
-      carbonEstimate: routingResult.carbonIntensity,
-      decisionReason: decision.reason,
+      carbonEstimate: decision.carbonIntensity,
+      decisionReason: decision.recommendation,
       satisfiable: decisionMeta.satisfiable,
     })
   } catch (error: any) {
@@ -166,26 +172,29 @@ router.post('/routing-decisions', async (req, res) => {
 })
 
 router.get('/routing-decisions/:decisionId', async (req, res) => {
-  const decision = await prisma.dashboardRoutingDecision.findUnique({
-    where: { id: req.params.decisionId },
+  const decision = await prisma.cIDecision.findFirst({
+    where: {
+      OR: [{ decisionFrameId: req.params.decisionId }, { id: req.params.decisionId }],
+    },
   })
 
   if (!decision) {
     return res.status(404).json({ error: 'Routing decision not found' })
   }
 
-  const meta = (decision.meta ?? {}) as Record<string, any>
+  const meta = (decision.metadata ?? {}) as Record<string, any>
 
   return res.json({
-    decisionId: decision.id,
+    decisionId: decision.decisionFrameId,
+    canonicalId: decision.id,
     runId: meta.runId ?? null,
     orgId: meta.orgId ?? null,
     projectId: meta.projectId ?? null,
     selectedProvider: meta.selectedProvider ?? null,
-    selectedRegion: decision.chosenRegion,
-    estimatedLatency: decision.latencyEstimateMs,
+    selectedRegion: decision.selectedRegion,
+    estimatedLatency: meta.executionMetadata?.latencyEstimateMs ?? null,
     estimatedCost: meta.estimatedCost ?? null,
-    decisionReason: decision.reason,
+    decisionReason: decision.recommendation,
     satisfiable: meta.satisfiable ?? true,
     trace: {
       qualityTier: meta.qualityTier ?? null,
@@ -198,35 +207,34 @@ router.get('/routing-decisions/:decisionId', async (req, res) => {
 })
 
 router.post('/routing-decisions/:decisionId/execute', async (req, res) => {
-  const decision = await prisma.dashboardRoutingDecision.findUnique({
-    where: { id: req.params.decisionId },
+  const decision = await prisma.cIDecision.findFirst({
+    where: {
+      OR: [{ decisionFrameId: req.params.decisionId }, { id: req.params.decisionId }],
+    },
   })
 
   if (!decision) {
     return res.status(404).json({ error: 'Routing decision not found' })
   }
 
-  const meta = (decision.meta ?? {}) as Record<string, any>
+  const meta = (decision.metadata ?? {}) as Record<string, any>
   const executionReference = `alloc_${randomUUID()}`
 
   await prisma.workloadDecisionOutcome.create({
     data: {
-      workloadId: decision.id,
-      region: decision.chosenRegion,
-      carbonSaved: Number(
-        (decision.carbonIntensityBaselineGPerKwh ?? 0) -
-          (decision.carbonIntensityChosenGPerKwh ?? 0)
-      ),
-      latency: Number(decision.latencyEstimateMs ?? 0),
+      workloadId: decision.decisionFrameId,
+      region: decision.selectedRegion,
+      carbonSaved: Number((decision.baseline ?? 0) - (decision.carbonIntensity ?? 0)),
+      latency: Number(meta.executionMetadata?.latencyEstimateMs ?? 0),
       cost: Number(meta.estimatedCost ?? 0),
       success: true,
     },
   })
 
-  await prisma.dashboardRoutingDecision.update({
+  await prisma.cIDecision.update({
     where: { id: decision.id },
     data: {
-      meta: {
+      metadata: {
         ...meta,
         executionReference,
         executedAt: new Date().toISOString(),
@@ -238,7 +246,7 @@ router.post('/routing-decisions/:decisionId/execute', async (req, res) => {
     executionReference,
     status: 'allocated',
     provider: meta.selectedProvider ?? null,
-    region: decision.chosenRegion,
+    region: decision.selectedRegion,
   })
 })
 
