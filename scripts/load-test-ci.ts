@@ -145,7 +145,7 @@ const SCENARIOS: ScenarioDefinition[] = [
 
 const RELEASE_GATES_ENABLED = process.argv.includes('--release-gates')
 const defaultLoadTestTotalGateMs = 100
-const defaultLoadTestComputeGateMs = 75
+const defaultLoadTestComputeGateMs = 60
 const loadTestTotalGateMs = Number(process.env.LOAD_TEST_P95_TOTAL_GATE_MS ?? defaultLoadTestTotalGateMs)
 const loadTestComputeGateMs = Number(process.env.LOAD_TEST_P95_COMPUTE_GATE_MS ?? defaultLoadTestComputeGateMs)
 const MAX_REPLAY_SAMPLES = 5

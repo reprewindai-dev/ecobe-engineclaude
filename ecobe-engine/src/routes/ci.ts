@@ -169,14 +169,22 @@ export type DecisionExecutionContext = {
   resolvedCandidateOverrides?: CandidateEvaluation[]
 }
 
+const CI_TOTAL_P95_CONTRACT_MS = 100
+const CI_COMPUTE_P95_CONTRACT_MS = 60
+const CI_COMPUTE_P95_TARGET_MS = 58
+
 const sloState = {
   totalMs: [] as number[],
   computeMs: [] as number[],
   hotPathTotalMs: [] as number[],
   hotPathComputeMs: [] as number[],
   budget: {
-    totalP95Ms: 100,
-    computeP95Ms: 50,
+    totalP95Ms: CI_TOTAL_P95_CONTRACT_MS,
+    computeP95Ms: CI_COMPUTE_P95_CONTRACT_MS,
+  },
+  target: {
+    totalP95Ms: CI_TOTAL_P95_CONTRACT_MS,
+    computeP95Ms: CI_COMPUTE_P95_TARGET_MS,
   },
 }
 
@@ -338,7 +346,7 @@ function logSlowDecision(input: {
   stageTimings: DecisionStageTimings
   providerResolutionMs: number
 }) {
-  if (input.computeMs <= sloState.budget.computeP95Ms) return
+  if (input.computeMs <= sloState.target.computeP95Ms) return
 
   console.warn('Slow decision path detected', {
     decisionFrameId: input.decisionFrameId,
@@ -348,6 +356,8 @@ function logSlowDecision(input: {
     totalMs: input.totalMs,
     providerResolutionMs: input.providerResolutionMs,
     stageTimings: input.stageTimings,
+    targetComputeMs: sloState.target.computeP95Ms,
+    contractComputeMs: sloState.budget.computeP95Ms,
   })
 }
 
@@ -2732,6 +2742,7 @@ router.get('/slo', async (_req, res) => {
       computeMs: Number(currentCompute.toFixed(3)),
     },
     budget: sloState.budget,
+    target: sloState.target,
     withinBudget: {
       total: p95Total <= sloState.budget.totalP95Ms,
       compute: p95Compute <= sloState.budget.computeP95Ms,
