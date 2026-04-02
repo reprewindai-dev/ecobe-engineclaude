@@ -4,6 +4,11 @@ This document defines the first publication-safe evidence set for CO2 Router.
 It is limited to claims that can be supported directly from the canonical live
 runtime without disclosing proprietary implementation details.
 
+Publication status for individual claims is governed by:
+
+- `claim-registry.md`
+- `C:\Users\antho\.windsurf\ecobe-engineclaude\ecobe-dashboard\src\lib\claims\registry.json`
+
 ## Claims Allowed in Public
 
 - CO2 Router is live in production.

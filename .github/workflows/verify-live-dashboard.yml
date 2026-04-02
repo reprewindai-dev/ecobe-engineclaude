@@ -71,7 +71,16 @@ jobs:
           node-version: '20'
 
       - name: Verify live dashboard routes and gates
+        env:
+          DASHBOARD_VERIFY_OUTPUT_PATH: .github-artifacts/verify-live-dashboard/result.json
         run: node .github/scripts/verify-live-dashboard.mjs
+
+      - name: Upload dashboard verification result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-live-dashboard-result
+          path: .github-artifacts/verify-live-dashboard/result.json
 
   failure-alert:
     name: Dashboard Verification Failure Alert

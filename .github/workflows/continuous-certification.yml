@@ -1,32 +1,12 @@
-name: Release Proof
+name: Continuous Certification
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/**'
-      - 'ecobe-engine/**'
-      - 'ecobe-dashboard/**'
-      - 'docs/public/**'
-      - 'docs/private/design-partner-program/**'
-  pull_request:
-    branches:
-      - main
-    paths:
-      - '.github/**'
-      - 'ecobe-engine/**'
-      - 'ecobe-dashboard/**'
-      - 'docs/public/**'
-      - 'docs/private/design-partner-program/**'
   workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'
 
 permissions:
   contents: read
-
-concurrency:
-  group: release-proof-${{ github.ref }}
-  cancel-in-progress: true
 
 env:
   DEFAULT_ECOBE_ENGINE_URL: https://ecobe-engineclaude-production.up.railway.app
@@ -38,35 +18,9 @@ env:
   DECISION_API_SIGNATURE_SECRET: ${{ secrets.DECISION_API_SIGNATURE_SECRET }}
 
 jobs:
-  determine-scope:
-    name: Determine Scope
-    runs-on: ubuntu-latest
-    outputs:
-      docs_only: ${{ steps.scope.outputs.docs_only }}
-      engine_live_required: ${{ steps.scope.outputs.engine_live_required }}
-      engine_skip_reason: ${{ steps.scope.outputs.engine_skip_reason }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - id: scope
-        name: Classify changed files
-        run: node .github/scripts/classify-run-scope.mjs
-        env:
-          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          GITHUB_BEFORE_SHA: ${{ github.event.before }}
-
   engine-release-proof:
     name: Engine Release Proof
     runs-on: ubuntu-latest
-    needs: determine-scope
-    if: ${{ needs.determine-scope.outputs.engine_live_required == 'true' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -84,14 +38,13 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: release-proof-result
+          name: scheduled-release-proof-result
           path: .github-artifacts/release-proof/result.json
 
   engine-live-load:
     name: Engine Live Load
     runs-on: ubuntu-latest
-    needs: [determine-scope, engine-release-proof]
-    if: ${{ needs.determine-scope.outputs.engine_live_required == 'true' }}
+    needs: engine-release-proof
     defaults:
       run:
         working-directory: ecobe-engine
@@ -123,14 +76,35 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: release-proof-load-report
+          name: scheduled-release-proof-load-report
           path: ecobe-engine/data/perf/ci-load-tests/latest.json
+
+  dashboard-verification:
+    name: Dashboard Route Verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify live dashboard routes and gates
+        env:
+          DASHBOARD_VERIFY_OUTPUT_PATH: .github-artifacts/verify-live-dashboard/result.json
+        run: node .github/scripts/verify-live-dashboard.mjs
+
+      - name: Upload dashboard verification result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduled-verify-live-dashboard-result
+          path: .github-artifacts/verify-live-dashboard/result.json
 
   claim-certification:
     name: Claim Certification
     runs-on: ubuntu-latest
-    needs: determine-scope
-    if: ${{ needs.determine-scope.outputs.docs_only != 'true' || github.event_name == 'workflow_dispatch' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -148,37 +122,14 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: claim-certification-result
+          name: scheduled-claim-certification-result
           path: .github-artifacts/claim-certification/result.json
 
-  release-proof-status:
-    name: Release Proof
-    runs-on: ubuntu-latest
-    needs: [determine-scope, engine-release-proof, engine-live-load, claim-certification]
-    if: always()
-    steps:
-      - name: Skip docs-only changes
-        if: ${{ needs.determine-scope.outputs.engine_live_required != 'true' }}
-        run: |
-          echo "Release proof skipped: ${{ needs.determine-scope.outputs.engine_skip_reason }}"
-
-      - name: Check release-proof jobs
-        if: ${{ needs.determine-scope.outputs.engine_live_required == 'true' }}
-        shell: bash
-        run: |
-          if [ "${{ needs.engine-release-proof.result }}" != "success" ] || \
-             [ "${{ needs.engine-live-load.result }}" != "success" ] || \
-             [ "${{ needs.claim-certification.result }}" != "success" ]; then
-            echo "Release proof failed"
-            exit 1
-          fi
-          echo "Release proof passed"
-
   failure-alert:
-    name: Release Proof Failure Alert
+    name: Certification Failure Alert
     runs-on: ubuntu-latest
-    needs: [determine-scope, engine-release-proof, engine-live-load, claim-certification]
-    if: ${{ always() && needs.determine-scope.outputs.engine_live_required == 'true' && (needs.engine-release-proof.result == 'failure' || needs.engine-live-load.result == 'failure' || needs.claim-certification.result == 'failure') }}
+    needs: [engine-release-proof, engine-live-load, dashboard-verification, claim-certification]
+    if: ${{ always() && (needs.engine-release-proof.result == 'failure' || needs.engine-live-load.result == 'failure' || needs.dashboard-verification.result == 'failure' || needs.claim-certification.result == 'failure') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -193,5 +144,5 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           RESEND_FROM_ALERTS: ${{ secrets.RESEND_FROM_ALERTS }}
           ALERT_INBOX_EMAIL: ${{ secrets.ALERT_INBOX_EMAIL }}
-          ALERT_SUBJECT: CO2 Router release proof failure
-          ALERT_SUMMARY: Engine release proof, live load gate, or claim certification failed.
+          ALERT_SUBJECT: CO2 Router continuous certification failure
+          ALERT_SUMMARY: One or more recurring certification gates failed.

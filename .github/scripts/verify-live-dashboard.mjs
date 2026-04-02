@@ -1,4 +1,5 @@
 const dashboardUrl = (process.env.DASHBOARD_URL || process.env.DEFAULT_DASHBOARD_URL || '').trim().replace(/\/$/, '')
+const outputPath = process.env.DASHBOARD_VERIFY_OUTPUT_PATH?.trim()
 
 if (!dashboardUrl) {
   console.error('Missing DASHBOARD_URL or DEFAULT_DASHBOARD_URL.')
@@ -128,9 +129,17 @@ async function runSimulation(mode) {
 
 const home = await fetchText('/')
 assert(home.text.includes('CO2 Router'), 'homepage missing CO2 Router')
+assert(home.text.includes('Operator trust contract'), 'homepage missing Operator trust contract section')
+assert(home.text.includes('Public maturity'), 'homepage missing Public maturity section')
+assert(home.text.includes('Buyer scenarios'), 'homepage missing Buyer scenarios section')
 
 const consolePage = await fetchText('/console')
 assert(consolePage.text.includes('CO2 Router'), '/console missing CO2 Router')
+assert(consolePage.text.includes('Active global execution authority'), '/console missing command center header')
+
+const roadmap = await fetchText('/company/roadmap')
+assert(roadmap.text.includes('Public maturity roadmap'), '/company/roadmap missing roadmap title')
+assert(roadmap.text.includes('Claim discipline'), '/company/roadmap missing claim discipline section')
 
 const commandCenter = await fetchJson('/api/control-surface/command-center')
 assert(Boolean(commandCenter.response.headers.get('x-co2router-snapshot-cache')), 'command-center missing cache header')
@@ -142,6 +151,26 @@ assert(Boolean(liveSystem.response.headers.get('Server-Timing')), 'live-system m
 
 const overview = await fetchJson('/api/control-surface/overview')
 assert(overview.response.status === 200, 'overview route returned non-200')
+assert(Boolean(overview.json?.liveDecision?.decisionExplanation), 'overview missing decisionExplanation')
+assert(Boolean(overview.json?.liveDecision?.decisionTrust), 'overview missing decisionTrust')
+assert(Boolean(overview.json?.liveDecision?.workloadClass), 'overview missing workloadClass')
+assert(Array.isArray(overview.json?.maturity) && overview.json.maturity.length >= 5, 'overview missing maturity lanes')
+assert(Array.isArray(overview.json?.buyerScenarios) && overview.json.buyerScenarios.length >= 3, 'overview missing buyer scenarios')
+assert(
+  Array.isArray(overview.json?.certification?.featuredClaims) && overview.json.certification.featuredClaims.length >= 3,
+  'overview missing certification claims'
+)
+
+const overviewAlias = await fetchJson('/api/ecobe/control-surface/overview')
+assert(overviewAlias.response.status === 200, 'overview alias returned non-200')
+assert(
+  overviewAlias.response.headers.get('x-ecobe-proxy-mode') === 'dashboard_local',
+  'overview alias missing dashboard_local proxy marker'
+)
+assert(
+  JSON.stringify(overviewAlias.json?.certification?.featuredClaims) === JSON.stringify(overview.json?.certification?.featuredClaims),
+  'overview alias diverged from primary overview route'
+)
 
 const metrics = await fetchJson('/api/control-surface/metrics')
 assert(Array.isArray(metrics.json?.metrics), 'metrics route missing metrics array')
@@ -160,15 +189,31 @@ const result = {
   routes: {
     home: home.response.status,
     console: consolePage.response.status,
+    roadmap: roadmap.response.status,
     commandCenter: commandCenter.response.status,
     liveSystem: liveSystem.response.status,
     overview: overview.response.status,
+    overviewAlias: overviewAlias.response.status,
     metrics: metrics.response.status,
+  },
+  certification: {
+    homepageSections: ['Operator trust contract', 'Public maturity', 'Buyer scenarios'],
+    maturityCount: overview.json?.maturity?.length ?? 0,
+    buyerScenarioCount: overview.json?.buyerScenarios?.length ?? 0,
+    featuredClaimCount: overview.json?.certification?.featuredClaims?.length ?? 0,
   },
   simulations: {
     fast,
     full,
   },
+}
+
+if (outputPath) {
+  const fs = await import('fs')
+  const path = await import('path')
+  const resolved = path.resolve(process.cwd(), outputPath)
+  fs.mkdirSync(path.dirname(resolved), { recursive: true })
+  fs.writeFileSync(resolved, JSON.stringify(result, null, 2))
 }
 
 console.log(JSON.stringify(result, null, 2))
