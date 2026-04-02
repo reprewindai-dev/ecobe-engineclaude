@@ -160,6 +160,7 @@ const envSchema = z.object({
   CO2ROUTER_PUBLIC_URL: z.string().optional(),
   RESEND_API_KEY: z.string().optional(),
   RESEND_FROM_CONTACT: z.string().optional(),
+  RESEND_FROM_HELLO: z.string().optional(),
   RESEND_FROM_ALERTS: z.string().optional(),
   CONTACT_INBOX_EMAIL: z.string().optional(),
   FOUNDER_ALERT_EMAIL: z.string().optional(),

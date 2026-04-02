@@ -8,6 +8,8 @@ import { redis } from '../lib/redis'
 import {
   getContactMailConfig,
   getFounderAlertMailConfig,
+  getPublicReplyFromAddress,
+  hasContactMailConfig,
   hasFounderAlertMailConfig,
   sendResendEmail,
 } from '../lib/mail/resend'
@@ -147,6 +149,35 @@ function buildAcknowledgementBody(payload: z.infer<typeof contactSchema>) {
   }
 }
 
+type DeliveryStatus = 'delivered' | 'degraded' | 'failed_persist'
+
+async function logContactEvent(input: {
+  eventType: string
+  success: boolean
+  startedAt: number
+  payload: z.infer<typeof contactSchema>
+  extra?: Record<string, unknown>
+  errorCode?: string
+}) {
+  await prisma.integrationEvent
+    .create({
+      data: {
+        source: 'WEBSITE_CONTACT',
+        eventType: input.eventType,
+        success: input.success,
+        durationMs: Date.now() - input.startedAt,
+        errorCode: input.errorCode,
+        message: JSON.stringify({
+          category: input.payload.category,
+          email: input.payload.email,
+          company: normalizeOptionalText(input.payload.company),
+          ...input.extra,
+        }),
+      },
+    })
+    .catch(() => undefined)
+}
+
 router.post('/contact', async (req, res) => {
   const startedAt = Date.now()
 
@@ -169,103 +200,111 @@ router.post('/contact', async (req, res) => {
       return res.json({
         success: true,
         message: 'Your message has been routed to the CO2 Router operating inbox.',
+        deliveryStatus: 'delivered' satisfies DeliveryStatus,
       })
     }
 
-    const contactConfig = getContactMailConfig()
-    const body = buildContactMailBody(payload, req)
-    const subject = `[CO2 Router Contact] ${getCategoryLabel(payload.category)} - ${payload.name}`
-
-    const intakeResult = await sendResendEmail({
-      from: contactConfig.from,
-      to: contactConfig.inbox,
-      subject,
-      text: body.text,
-      html: body.html,
-      replyTo: payload.email,
+    await logContactEvent({
+      eventType: 'CONTACT_RECEIVED',
+      success: true,
+      startedAt,
+      payload,
     })
 
-    if (!intakeResult.success) {
-      await prisma.integrationEvent
-        .create({
-          data: {
-            source: 'WEBSITE_CONTACT',
-            eventType: 'CONTACT_DELIVERY_FAILED',
-            success: false,
-            durationMs: Date.now() - startedAt,
-            errorCode: 'RESEND_DELIVERY_FAILED',
-            message: JSON.stringify({
-              category: payload.category,
-              email: payload.email,
-              error: intakeResult.error,
-            }),
-          },
-        })
-        .catch(() => undefined)
+    const body = buildContactMailBody(payload, req)
+    const subject = `[CO2 Router Contact] ${getCategoryLabel(payload.category)} - ${payload.name}`
+    const deliveryIssues: string[] = []
+    let deliveryStatus: DeliveryStatus = 'degraded'
+    let intakeMessageId: string | null = null
 
-      return res.status(502).json({
-        success: false,
-        error: {
-          code: 'DELIVERY_FAILED',
-          message: 'Contact delivery failed. Try again shortly.',
-        },
-      })
+    if (hasContactMailConfig()) {
+      try {
+        const contactConfig = getContactMailConfig()
+        const intakeResult = await sendResendEmail({
+          from: contactConfig.from,
+          to: contactConfig.inbox,
+          subject,
+          text: body.text,
+          html: body.html,
+          replyTo: payload.email,
+        })
+
+        if (intakeResult.success) {
+          deliveryStatus = 'delivered'
+          intakeMessageId = intakeResult.id ?? null
+        } else {
+          deliveryIssues.push(`intake_delivery_failed:${intakeResult.error ?? 'unknown'}`)
+        }
+      } catch (error) {
+        deliveryIssues.push(
+          `intake_delivery_failed:${error instanceof Error ? error.message : 'unknown'}`
+        )
+      }
+    } else {
+      deliveryIssues.push('mail_config_missing')
     }
 
     const acknowledgement = buildAcknowledgementBody(payload)
-    const followUpJobs: Array<Promise<unknown>> = [
-      sendResendEmail({
-        from: contactConfig.from,
+    if (deliveryStatus === 'delivered') {
+      const acknowledgementResult = await sendResendEmail({
+        from: getPublicReplyFromAddress(),
         to: payload.email,
         subject: 'CO2 Router received your message',
         text: acknowledgement.text,
         html: acknowledgement.html,
-      }),
-    ]
+      }).catch((error) => ({
+        success: false,
+        error: error instanceof Error ? error.message : 'unknown',
+      }))
 
-    if (hasFounderAlertMailConfig() && payload.category !== 'support') {
-      const founderAlert = getFounderAlertMailConfig()
-      followUpJobs.push(
-        sendResendEmail({
+      if (!acknowledgementResult.success) {
+        deliveryIssues.push(
+          `acknowledgement_failed:${acknowledgementResult.error ?? 'unknown'}`
+        )
+      }
+
+      if (hasFounderAlertMailConfig() && payload.category !== 'support') {
+        const founderAlert = getFounderAlertMailConfig()
+        const founderResult = await sendResendEmail({
           from: founderAlert.from,
           to: founderAlert.inbox,
           subject: `[CO2 Router Priority Contact] ${getCategoryLabel(payload.category)} - ${payload.name}`,
           text: body.text,
           html: body.html,
           replyTo: payload.email,
-        })
-      )
+        }).catch((error) => ({
+          success: false,
+          error: error instanceof Error ? error.message : 'unknown',
+        }))
+
+        if (!founderResult.success) {
+          deliveryIssues.push(`founder_alert_failed:${founderResult.error ?? 'unknown'}`)
+        }
+      }
     }
 
-    const followUpResults = await Promise.allSettled(followUpJobs)
-
-    await prisma.integrationEvent
-      .create({
-        data: {
-          source: 'WEBSITE_CONTACT',
-          eventType: 'CONTACT_DELIVERED',
-          success: true,
-          durationMs: Date.now() - startedAt,
-          message: JSON.stringify({
-            category: payload.category,
-            email: payload.email,
-            intakeMessageId: intakeResult.id,
-            acknowledgementDelivered:
-              followUpResults[0]?.status === 'fulfilled' &&
-              (followUpResults[0].value as { success?: boolean }).success === true,
-            founderEscalated:
-              followUpResults.length > 1 &&
-              followUpResults[1]?.status === 'fulfilled' &&
-              (followUpResults[1].value as { success?: boolean }).success === true,
-          }),
-        },
-      })
-      .catch(() => undefined)
+    await logContactEvent({
+      eventType: deliveryStatus === 'delivered' ? 'CONTACT_DELIVERED' : 'CONTACT_DELIVERY_DEGRADED',
+      success: deliveryStatus === 'delivered',
+      startedAt,
+      payload,
+      extra: {
+        intakeMessageId,
+        deliveryStatus,
+        deliveryIssues,
+      },
+      errorCode: deliveryStatus === 'delivered' ? undefined : 'RESEND_DELIVERY_DEGRADED',
+    })
 
     return res.json({
       success: true,
-      message: 'Your message has been routed to the CO2 Router operating inbox.',
+      message:
+        deliveryStatus === 'delivered'
+          ? 'Your message has been routed to the CO2 Router operating inbox.'
+          : 'Your message has been recorded. Email delivery is temporarily degraded, but the operating team can recover this submission from the intake ledger.',
       remainingRequestsThisWindow: rateLimit.remaining,
+      deliveryStatus,
+      deliveryIssues: deliveryIssues.length > 0 ? deliveryIssues : undefined,
     })
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -279,12 +318,34 @@ router.post('/contact', async (req, res) => {
     }
 
     console.error('Contact submission error:', error)
+    if (!(error instanceof z.ZodError)) {
+      await logContactEvent({
+        eventType: 'CONTACT_PERSIST_FAILED',
+        success: false,
+        startedAt,
+        payload: {
+          category: (req.body?.category as z.infer<typeof categorySchema>) ?? 'sales',
+          name: req.body?.name ?? 'unknown',
+          email: req.body?.email ?? 'unknown@example.com',
+          company: req.body?.company ?? null,
+          message: req.body?.message ?? 'unavailable',
+          executionFootprint: req.body?.executionFootprint ?? null,
+          integrationSurface: req.body?.integrationSurface ?? null,
+          website: req.body?.website ?? null,
+        },
+        extra: {
+          error: error instanceof Error ? error.message : 'unknown',
+        },
+        errorCode: 'PERSIST_FAILED',
+      })
+    }
     return res.status(500).json({
       success: false,
       error: {
         code: 'SERVER_ERROR',
         message: 'Failed to submit contact request',
       },
+      deliveryStatus: 'failed_persist' satisfies DeliveryStatus,
     })
   }
 })

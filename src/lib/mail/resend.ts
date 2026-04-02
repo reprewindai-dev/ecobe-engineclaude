@@ -38,6 +38,10 @@ export function getContactMailConfig() {
   }
 }
 
+export function getPublicReplyFromAddress() {
+  return env.RESEND_FROM_HELLO?.trim() || 'hello@co2router.com'
+}
+
 export function getFounderAlertMailConfig() {
   return {
     from: getRequiredValue(env.RESEND_FROM_ALERTS, 'RESEND_FROM_ALERTS'),

@@ -13,6 +13,8 @@ import { prisma } from '../lib/db'
 import {
   getContactMailConfig,
   getFounderAlertMailConfig,
+  getPublicReplyFromAddress,
+  hasContactMailConfig,
   hasFounderAlertMailConfig,
   sendResendEmail,
 } from '../lib/mail/resend'
@@ -355,6 +357,8 @@ function buildDesignPartnerNotificationBody(partner: {
   }
 }
 
+type DeliveryStatus = 'delivered' | 'degraded' | 'failed_persist'
+
 async function sendDesignPartnerNotifications(input: {
   partner: {
     companyName: string
@@ -373,11 +377,19 @@ async function sendDesignPartnerNotifications(input: {
     status: DesignPartnerStatus
   }
   existing: boolean
-}) {
-  const contactConfig = getContactMailConfig()
+}): Promise<{ deliveryStatus: DeliveryStatus; deliveryIssues: string[] }> {
   const subjectPrefix = input.existing ? 'Application Updated' : 'Application Created'
   const body = buildDesignPartnerNotificationBody(input.partner)
+  const deliveryIssues: string[] = []
 
+  if (!hasContactMailConfig()) {
+    return {
+      deliveryStatus: 'degraded',
+      deliveryIssues: ['mail_config_missing'],
+    }
+  }
+
+  const contactConfig = getContactMailConfig()
   const intakeResult = await sendResendEmail({
     from: contactConfig.from,
     to: contactConfig.inbox,
@@ -385,15 +397,21 @@ async function sendDesignPartnerNotifications(input: {
     text: body.text,
     html: body.html,
     replyTo: input.partner.applicantEmail,
-  })
+  }).catch((error) => ({
+    success: false,
+    error: error instanceof Error ? error.message : 'unknown',
+  }))
 
   if (!intakeResult.success) {
-    throw new Error(intakeResult.error || 'Shared intake delivery failed.')
+    return {
+      deliveryStatus: 'degraded',
+      deliveryIssues: [`intake_delivery_failed:${intakeResult.error ?? 'unknown'}`],
+    }
   }
 
-  const followUps: Array<Promise<unknown>> = [
+  const followUps: Array<Promise<{ success: boolean; error?: string }>> = [
     sendResendEmail({
-      from: contactConfig.from,
+      from: getPublicReplyFromAddress(),
       to: input.partner.applicantEmail,
       subject: 'CO2 Router design partner application received',
       text: [
@@ -433,7 +451,26 @@ async function sendDesignPartnerNotifications(input: {
     )
   }
 
-  await Promise.allSettled(followUps)
+  const followUpResults = await Promise.allSettled(followUps)
+  for (const [index, result] of followUpResults.entries()) {
+    if (result.status === 'fulfilled') {
+      if (!result.value.success) {
+        deliveryIssues.push(
+          `${index === 0 ? 'acknowledgement_failed' : 'founder_alert_failed'}:${result.value.error ?? 'unknown'}`
+        )
+      }
+      continue
+    }
+
+    deliveryIssues.push(
+      `${index === 0 ? 'acknowledgement_failed' : 'founder_alert_failed'}:${result.reason instanceof Error ? result.reason.message : 'unknown'}`
+    )
+  }
+
+  return {
+    deliveryStatus: 'delivered',
+    deliveryIssues,
+  }
 }
 
 router.post('/design-partners/applications', async (req, res) => {
@@ -537,7 +574,7 @@ router.post('/design-partners/applications', async (req, res) => {
       })
       .catch(() => undefined)
 
-    await sendDesignPartnerNotifications({
+    const notificationResult = await sendDesignPartnerNotifications({
       partner: {
         companyName: partner.companyName,
         companyDomain: partner.companyDomain,
@@ -557,10 +594,39 @@ router.post('/design-partners/applications', async (req, res) => {
       existing: Boolean(existing),
     })
 
+    await prisma.integrationEvent
+      .create({
+        data: {
+          source: 'DESIGN_PARTNER_PROGRAM',
+          eventType:
+            notificationResult.deliveryStatus === 'delivered'
+              ? 'APPLICATION_DELIVERED'
+              : 'APPLICATION_DELIVERY_DEGRADED',
+          success: notificationResult.deliveryStatus === 'delivered',
+          errorCode:
+            notificationResult.deliveryStatus === 'delivered'
+              ? undefined
+              : 'APPLICATION_DELIVERY_DEGRADED',
+          message: JSON.stringify({
+            partnerId: partner.id,
+            companyName: partner.companyName,
+            applicantEmail: partner.applicantEmail,
+            deliveryStatus: notificationResult.deliveryStatus,
+            deliveryIssues: notificationResult.deliveryIssues,
+          }),
+        },
+      })
+      .catch(() => undefined)
+
     return res.status(existing ? 200 : 201).json({
       success: true,
       partner: serializeDesignPartner(partner),
       remainingRequestsThisWindow: rateLimit.remaining,
+      deliveryStatus: notificationResult.deliveryStatus,
+      deliveryIssues:
+        notificationResult.deliveryIssues.length > 0
+          ? notificationResult.deliveryIssues
+          : undefined,
     })
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -593,6 +659,7 @@ router.post('/design-partners/applications', async (req, res) => {
         code: 'SERVER_ERROR',
         message: 'Failed to record design partner application',
       },
+      deliveryStatus: 'failed_persist' satisfies DeliveryStatus,
     })
   }
 })
