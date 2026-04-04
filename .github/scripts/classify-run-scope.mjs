@@ -3,16 +3,7 @@ import { appendFileSync } from 'node:fs'
 import process from 'node:process'
 
 const DOCS_PREFIXES = ['docs/public/', 'docs/private/design-partner-program/']
-const ENGINE_PROOF_PREFIXES = ['ecobe-engine/', '.github/scripts/verify-live-release.mjs']
-const DASHBOARD_PROOF_PREFIXES = [
-  'ecobe-dashboard/src/app/api/control-surface/',
-  'ecobe-dashboard/src/app/api/ecobe/',
-  'ecobe-dashboard/src/lib/control-surface/',
-  'ecobe-dashboard/src/lib/hooks/control-surface.ts',
-  'ecobe-dashboard/src/lib/observability/telemetry.ts',
-  'ecobe-dashboard/src/types/control-surface.ts',
-  '.github/scripts/verify-live-dashboard.mjs',
-]
+const CODE_PREFIXES = ['src/', 'prisma/', 'scripts/', '.github/', 'package.json', 'package-lock.json', 'tsconfig']
 
 function runGit(args) {
   return execFileSync('git', args, {
@@ -72,11 +63,8 @@ function main() {
       docsOnly = false
     }
 
-    if (ENGINE_PROOF_PREFIXES.some((prefix) => file.startsWith(prefix))) {
+    if (CODE_PREFIXES.some((prefix) => file.startsWith(prefix))) {
       engineLiveRequired = true
-    }
-
-    if (DASHBOARD_PROOF_PREFIXES.some((prefix) => file.startsWith(prefix))) {
       dashboardLiveRequired = true
     }
   }
