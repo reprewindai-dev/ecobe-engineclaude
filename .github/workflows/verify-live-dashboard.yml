@@ -6,19 +6,33 @@ on:
       - main
     paths:
       - '.github/**'
-      - 'ecobe-engine/**'
-      - 'ecobe-dashboard/**'
+      - 'src/**'
+      - 'prisma/**'
+      - 'scripts/**'
       - 'docs/public/**'
       - 'docs/private/design-partner-program/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'tsconfig.*.json'
+      - '.env.example'
+      - '.dockerignore'
   pull_request:
     branches:
       - main
     paths:
       - '.github/**'
-      - 'ecobe-engine/**'
-      - 'ecobe-dashboard/**'
+      - 'src/**'
+      - 'prisma/**'
+      - 'scripts/**'
       - 'docs/public/**'
       - 'docs/private/design-partner-program/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'tsconfig.*.json'
+      - '.env.example'
+      - '.dockerignore'
   workflow_dispatch:
 
 permissions:

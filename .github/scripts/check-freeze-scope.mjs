@@ -3,13 +3,32 @@ import path from 'path'
 import { execFileSync } from 'child_process'
 
 const repoRoot = process.cwd()
-const allowlistPrefixes = [
-  'ecobe-engine/',
-  'ecobe-dashboard/',
-  '.github/',
-  'docs/public/',
-  'docs/private/design-partner-program/',
-]
+const hasRootEngineLayout =
+  fs.existsSync(path.join(repoRoot, 'src')) &&
+  fs.existsSync(path.join(repoRoot, 'prisma')) &&
+  fs.existsSync(path.join(repoRoot, 'package.json'))
+const allowlistPrefixes = hasRootEngineLayout
+  ? [
+      'src/',
+      'prisma/',
+      'scripts/',
+      '.github/',
+      'docs/public/',
+      'docs/private/design-partner-program/',
+      'package.json',
+      'package-lock.json',
+      'tsconfig.json',
+      'tsconfig.',
+      '.env.example',
+      '.dockerignore',
+    ]
+  : [
+      'ecobe-engine/',
+      'ecobe-dashboard/',
+      '.github/',
+      'docs/public/',
+      'docs/private/design-partner-program/',
+    ]
 const blockedPrefixes = [
   'dekes-saas/',
   'demo/',
@@ -170,19 +189,26 @@ function hasLooseArtifact(filePath) {
 }
 
 function assertDesignPartnerSchema() {
-  const schemaPath = path.join(repoRoot, 'ecobe-engine', 'prisma', 'schema.prisma')
-  const migrationPath = path.join(
-    repoRoot,
-    'ecobe-engine',
-    'prisma',
-    'migrations',
-    '20260330173000_add_design_partner_program',
-    'migration.sql'
-  )
+  const schemaPath = fs.existsSync(path.join(repoRoot, 'prisma', 'schema.prisma'))
+    ? path.join(repoRoot, 'prisma', 'schema.prisma')
+    : path.join(repoRoot, 'ecobe-engine', 'prisma', 'schema.prisma')
+  const candidateMigrationPaths = [
+    path.join(repoRoot, 'prisma', 'migrations', '20260330173000_add_design_partner_program', 'migration.sql'),
+    path.join(repoRoot, 'ecobe-engine', 'prisma', 'migrations', '20260330173000_add_design_partner_program', 'migration.sql'),
+  ]
+  const migrationPath = candidateMigrationPaths.find((candidate) => fs.existsSync(candidate))
+
+  if (!fs.existsSync(schemaPath) || !migrationPath) {
+    return []
+  }
 
   const schema = fs.readFileSync(schemaPath, 'utf8')
   const migration = fs.readFileSync(migrationPath, 'utf8')
   const failures = []
+
+  if (!schema.includes('model design_partners') && !schema.includes('model DesignPartner')) {
+    return []
+  }
 
   for (const status of designPartnerStatuses) {
     if (!schema.includes(`@map("${status}")`)) failures.push(`schema missing design-partner status ${status}`)

@@ -18,6 +18,18 @@ function normalizeRedisUrl(url: string): string {
 
 function createDisabledRedisClient() {
   const disabledError = new Error('Redis disabled')
+  const multiProxy = new Proxy(
+    {},
+    {
+      get(_target, prop: string) {
+        if (prop === 'exec') {
+          return async () => []
+        }
+
+        return () => multiProxy
+      },
+    }
+  )
 
   return new Proxy(
     {},
@@ -35,6 +47,14 @@ function createDisabledRedisClient() {
 
         if (prop === 'on' || prop === 'once') {
           return () => undefined
+        }
+
+        if (prop === 'multi' || prop === 'pipeline') {
+          return () => multiProxy
+        }
+
+        if (prop === 'hgetall') {
+          return async () => ({})
         }
 
         return async () => null

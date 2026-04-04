@@ -1,0 +1,145 @@
+name: Continuous Certification
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'
+
+permissions:
+  contents: read
+
+env:
+  DEFAULT_ECOBE_ENGINE_URL: https://ecobe-engineclaude-production.up.railway.app
+  DEFAULT_DASHBOARD_URL: https://co2-router-dashboard-production.up.railway.app
+  ECOBE_ENGINE_URL: ${{ secrets.ECOBE_ENGINE_URL }}
+  DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
+  ECOBE_ENGINE_API_KEY: ${{ secrets.ECOBE_ENGINE_API_KEY }}
+  ECOBE_INTERNAL_API_KEY: ${{ secrets.ECOBE_INTERNAL_API_KEY }}
+  DECISION_API_SIGNATURE_SECRET: ${{ secrets.DECISION_API_SIGNATURE_SECRET }}
+
+jobs:
+  engine-release-proof:
+    name: Engine Release Proof
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify live engine release contract
+        env:
+          RELEASE_PROOF_OUTPUT_PATH: .github-artifacts/release-proof/result.json
+        run: node .github/scripts/verify-live-release.mjs
+
+      - name: Upload release-proof result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduled-release-proof-result
+          path: .github-artifacts/release-proof/result.json
+
+  engine-live-load:
+    name: Engine Live Load
+    runs-on: ubuntu-latest
+    needs: engine-release-proof
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run release load gates
+        run: npx tsx scripts/load-test-ci.ts --release-gates
+        env:
+          LOAD_TEST_BASE_URL: ${{ env.ECOBE_ENGINE_URL || env.DEFAULT_ECOBE_ENGINE_URL }}
+          DASHBOARD_URL: ${{ env.DASHBOARD_URL || env.DEFAULT_DASHBOARD_URL }}
+          DEFAULT_DASHBOARD_URL: ${{ env.DEFAULT_DASHBOARD_URL }}
+          LOAD_TEST_USE_DASHBOARD_PROXY: 'true'
+          ECOBE_ENGINE_API_KEY: ${{ secrets.ECOBE_ENGINE_API_KEY }}
+          ECOBE_INTERNAL_API_KEY: ${{ secrets.ECOBE_INTERNAL_API_KEY }}
+          DECISION_API_SIGNATURE_SECRET: ${{ secrets.DECISION_API_SIGNATURE_SECRET }}
+
+      - name: Upload load-test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduled-release-proof-load-report
+          path: data/perf/ci-load-tests/latest.json
+
+  dashboard-verification:
+    name: Dashboard Route Verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify live dashboard routes and gates
+        env:
+          DASHBOARD_VERIFY_OUTPUT_PATH: .github-artifacts/verify-live-dashboard/result.json
+        run: node .github/scripts/verify-live-dashboard.mjs
+
+      - name: Upload dashboard verification result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduled-verify-live-dashboard-result
+          path: .github-artifacts/verify-live-dashboard/result.json
+
+  claim-certification:
+    name: Claim Certification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Certify public claims
+        env:
+          CLAIM_CERT_OUTPUT_PATH: .github-artifacts/claim-certification/result.json
+        run: node .github/scripts/certify-public-claims.mjs
+
+      - name: Upload claim-certification result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduled-claim-certification-result
+          path: .github-artifacts/claim-certification/result.json
+
+  failure-alert:
+    name: Certification Failure Alert
+    runs-on: ubuntu-latest
+    needs: [engine-release-proof, engine-live-load, dashboard-verification, claim-certification]
+    if: ${{ always() && (needs.engine-release-proof.result == 'failure' || needs.engine-live-load.result == 'failure' || needs.dashboard-verification.result == 'failure' || needs.claim-certification.result == 'failure') }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Send failure alert
+        run: node .github/scripts/send-resend-alert.mjs
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_ALERTS: ${{ secrets.RESEND_FROM_ALERTS }}
+          ALERT_INBOX_EMAIL: ${{ secrets.ALERT_INBOX_EMAIL }}
+          ALERT_SUBJECT: CO2 Router continuous certification failure
+          ALERT_SUMMARY: One or more recurring certification gates failed.
