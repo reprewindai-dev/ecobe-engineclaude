@@ -132,6 +132,13 @@ const LIVE_SIGNAL_SOURCES = [
   'FI_CARBON',
 ] as const
 
+function normalizeProviderIdentity(provider: string) {
+  const normalized = provider.trim().toUpperCase().replace(/[\s-]+/g, '_')
+  if (normalized === 'WATTTIME') return 'WATTTIME_MOER'
+  if (normalized === 'EMBER' || normalized === 'EMBER_STRUCTURAL') return 'EMBER_STRUCTURAL_BASELINE'
+  return normalized
+}
+
 const isoLatest = (...values: Array<Date | null | undefined>) => {
   const valid = values.filter((value): value is Date => value instanceof Date)
   if (valid.length === 0) return null
@@ -2367,7 +2374,7 @@ router.get('/provider-trust', async (_req, res) => {
       getProviderFreshness(),
       prisma.providerSnapshot.findMany({
         orderBy: { observedAt: 'desc' },
-        take: 100,
+        take: 2000,
         select: {
           provider: true,
           zone: true,
@@ -2385,10 +2392,22 @@ router.get('/provider-trust', async (_req, res) => {
       }).catch(() => []),
     ])
 
-    // Group snapshots by provider
-    const providerMap = new Map<string, any[]>()
+    // Preserve the newest snapshot per provider/zone/signal-type combination so
+    // the control plane sees the full upstream field instead of just the latest
+    // globally dominant provider.
+    const latestSnapshotByKey = new Map<string, (typeof recentSnapshots)[number]>()
     for (const snap of recentSnapshots) {
-      const existing = providerMap.get(snap.provider) || []
+      const provider = normalizeProviderIdentity(snap.provider)
+      const key = `${provider}:${snap.zone}:${snap.signalType}`
+      if (!latestSnapshotByKey.has(key)) {
+        latestSnapshotByKey.set(key, snap)
+      }
+    }
+
+    const providerMap = new Map<string, any[]>()
+    for (const snap of latestSnapshotByKey.values()) {
+      const provider = normalizeProviderIdentity(snap.provider)
+      const existing = providerMap.get(provider) || []
       existing.push({
         zone: snap.zone,
         signalType: snap.signalType,
@@ -2398,7 +2417,7 @@ router.get('/provider-trust', async (_req, res) => {
           observedAt: snap.observedAt?.toISOString() ?? null,
           metadata: snap.metadata ?? null,
         })
-      providerMap.set(snap.provider, existing)
+      providerMap.set(provider, existing)
     }
 
     return res.json({
