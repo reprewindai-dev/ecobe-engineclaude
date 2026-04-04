@@ -12,6 +12,7 @@ describe('CiResponseV2 contract freeze', () => {
         'decision',
         'decisionEnvelope',
         'decisionExplanation',
+        'decisionTrust',
         'decisionMode',
         'decisionFrameId',
         'doctrineVersion',
@@ -37,6 +38,7 @@ describe('CiResponseV2 contract freeze', () => {
         'telemetryBridge',
         'water',
         'waterAuthority',
+        'workloadClass',
         'workflowOutputs',
         'adapterContext',
       ].sort()
@@ -70,6 +72,23 @@ describe('CiResponseV2 contract freeze', () => {
         'fallbackUsed',
       ])
     )
+  })
+
+  it('keeps richer explanation and trust fields stable', () => {
+    const explanationShape = CiResponseV2Schema.shape.decisionExplanation.shape
+    expect(explanationShape).toHaveProperty('dominantConstraint')
+    expect(explanationShape).toHaveProperty('policyPrecedence')
+    expect(explanationShape).toHaveProperty('counterfactualCondition')
+    expect(explanationShape).toHaveProperty('uncertaintySummary')
+
+    const trustShape = CiResponseV2Schema.shape.decisionTrust.shape
+    expect(trustShape).toHaveProperty('signalFreshness')
+    expect(trustShape).toHaveProperty('providerTrust')
+    expect(trustShape).toHaveProperty('disagreement')
+    expect(trustShape).toHaveProperty('estimatedFields')
+    expect(trustShape).toHaveProperty('replayability')
+    expect(trustShape).toHaveProperty('fallbackMode')
+    expect(trustShape).toHaveProperty('degradedState')
   })
 
   it('keeps canonical decision and proof envelopes available for adapter callers', () => {

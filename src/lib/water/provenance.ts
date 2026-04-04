@@ -11,6 +11,8 @@ const SOURCE_DIRECTORIES = [
   path.join(ROOT, 'data', 'raw', 'water'),
   path.join(ROOT, 'data', 'water'),
 ]
+const MANIFEST_PATH = path.join(ROOT, 'data', 'normalized', 'water', 'manifest.json')
+const LKG_MANIFEST_PATH = path.join(ROOT, 'data', 'normalized', 'water', '.lkg', 'manifest.json')
 
 function readDirectoryRecursive(dirPath: string): string[] {
   if (!fs.existsSync(dirPath)) return []
@@ -89,12 +91,14 @@ export function inspectWaterDatasetProvenance() {
 
 export function verifyWaterDatasetProvenance(options: { persistManifest?: boolean } = {}) {
   const { bundle, manifest } = loadWaterArtifacts(true)
-  const inspected = inspectWaterDatasetProvenance()
+  let inspected = inspectWaterDatasetProvenance()
 
   if (options.persistManifest) {
     let mutated = false
+    const persistedAt = new Date().toISOString()
     const nextManifest = {
       ...manifest,
+      built_at: persistedAt,
       datasets: manifest.datasets.map((dataset) => {
         const inspectedDataset = inspected.datasets.find((entry) => entry.name === dataset.name)
         if (!inspectedDataset?.computedHash) return dataset
@@ -108,9 +112,12 @@ export function verifyWaterDatasetProvenance(options: { persistManifest?: boolea
     }
 
     if (mutated) {
-      const manifestPath = path.join(ROOT, 'data', 'normalized', 'water', 'manifest.json')
-      fs.writeFileSync(manifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`, 'utf8')
+      fs.writeFileSync(MANIFEST_PATH, `${JSON.stringify(nextManifest, null, 2)}\n`, 'utf8')
+      if (fs.existsSync(LKG_MANIFEST_PATH)) {
+        fs.writeFileSync(LKG_MANIFEST_PATH, `${JSON.stringify(nextManifest, null, 2)}\n`, 'utf8')
+      }
       loadWaterArtifacts(true)
+      inspected = inspectWaterDatasetProvenance()
     }
   }
 

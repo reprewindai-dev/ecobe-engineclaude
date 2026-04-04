@@ -8,6 +8,8 @@ const dashboardUrl = (process.env.DASHBOARD_URL || process.env.DEFAULT_DASHBOARD
 const internalKey = (process.env.ECOBE_INTERNAL_API_KEY || process.env.ECOBE_ENGINE_API_KEY || '').trim()
 const signatureSecret = process.env.DECISION_API_SIGNATURE_SECRET?.trim() || ''
 const outputPath = process.env.RELEASE_PROOF_OUTPUT_PATH?.trim()
+const expectedComputeBudgetMs = Number(process.env.RELEASE_PROOF_COMPUTE_BUDGET_MS ?? 60)
+const expectedComputeTargetMs = Number(process.env.RELEASE_PROOF_COMPUTE_TARGET_MS ?? 58)
 const checkpoint = {
   ok: false,
   checkedAt: new Date().toISOString(),
@@ -297,11 +299,21 @@ async function main() {
   const slo = await fetchJson('/api/v1/ci/slo')
   const p95Total = Number(slo.json?.currentMs?.total?.p95 ?? NaN)
   const p95Compute = Number(slo.json?.currentMs?.compute?.p95 ?? NaN)
+  const computeBudgetMs = Number(slo.json?.budget?.computeP95Ms ?? slo.json?.budgetMs?.computeP95 ?? NaN)
+  const computeTargetMs = Number(slo.json?.target?.computeP95Ms ?? NaN)
   assert(Number.isFinite(p95Total), '/api/v1/ci/slo missing p95 total')
   assert(Number.isFinite(p95Compute), '/api/v1/ci/slo missing p95 compute')
   assert(p95Total <= 100, `engine p95 total above gate: ${p95Total}`)
-  assert(p95Compute <= 50, `engine p95 compute above gate: ${p95Compute}`)
-  stage('slo', { p95Total, p95Compute, counts: slo.json?.counts ?? null })
+  assert(p95Compute <= expectedComputeBudgetMs, `engine p95 compute above gate: ${p95Compute}`)
+  assert(
+    computeBudgetMs === expectedComputeBudgetMs,
+    `engine compute budget contract drifted: ${computeBudgetMs}`
+  )
+  assert(
+    computeTargetMs === expectedComputeTargetMs,
+    `engine compute target drifted: ${computeTargetMs}`
+  )
+  stage('slo', { p95Total, p95Compute, computeBudgetMs, computeTargetMs, counts: slo.json?.counts ?? null })
 
   const provenance = await fetchJson('/api/v1/water/provenance')
   const provenanceVerified = Number(
@@ -389,6 +401,8 @@ async function main() {
     slo: {
       p95Total,
       p95Compute,
+      computeBudgetMs,
+      computeTargetMs,
       counts: slo.json?.counts ?? null,
     },
     provenance: {

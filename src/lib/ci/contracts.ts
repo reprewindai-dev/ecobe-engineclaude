@@ -7,11 +7,13 @@ import {
 } from './canonical'
 
 const DecisionAction = z.enum(['run_now', 'reroute', 'delay', 'throttle', 'deny'])
+const WorkloadClass = z.enum(['batch', 'interactive', 'critical', 'regulated', 'emergency'])
 
 export const CiResponseV2Schema = z.object({
   decision: DecisionAction,
   decisionMode: z.enum(['runtime_authorization', 'scenario_planning']),
   doctrineVersion: z.string().min(1),
+  workloadClass: WorkloadClass,
   operatingMode: z.enum(['NORMAL', 'STRESS', 'CRISIS']),
   reasonCode: z.string().min(1),
   decisionFrameId: z.string().min(1),
@@ -50,7 +52,7 @@ export const CiResponseV2Schema = z.object({
     waterAuthorityHealth: z.enum(['HEALTHY', 'DEGRADED', 'FAILED']),
     carbonFreshnessSec: z.number().nullable(),
     waterFreshnessSec: z.number().nullable(),
-    cacheStatus: z.enum(['live', 'warm', 'fallback']),
+    cacheStatus: z.enum(['live', 'warm', 'redis', 'lkg', 'degraded-safe']),
     disagreement: z.object({
       flag: z.boolean(),
       pct: z.number(),
@@ -63,12 +65,51 @@ export const CiResponseV2Schema = z.object({
     hierarchy: z.array(z.string()),
     whyAction: z.string().min(1),
     whyTarget: z.string().min(1),
+    dominantConstraint: z.string().min(1),
+    policyPrecedence: z.array(z.string().min(1)),
     rejectedAlternatives: z.array(
       z.object({
         region: z.string().min(1),
         reason: z.string().min(1),
       })
     ),
+    counterfactualCondition: z.string().min(1),
+    uncertaintySummary: z.string().min(1),
+  }),
+  decisionTrust: z.object({
+    signalFreshness: z.object({
+      carbonFreshnessSec: z.number().nullable(),
+      waterFreshnessSec: z.number().nullable(),
+      freshnessSummary: z.string().min(1),
+    }),
+    providerTrust: z.object({
+      carbonProvider: z.string().min(1),
+      carbonProviderHealth: z.enum(['HEALTHY', 'DEGRADED', 'FAILED']),
+      waterAuthorityHealth: z.enum(['HEALTHY', 'DEGRADED', 'FAILED']),
+      providerTrustTier: z.enum(['high', 'medium', 'guarded']),
+    }),
+    disagreement: z.object({
+      present: z.boolean(),
+      pct: z.number(),
+      summary: z.string().min(1),
+    }),
+    estimatedFields: z.object({
+      present: z.boolean(),
+      fields: z.array(z.string().min(1)),
+    }),
+    replayability: z.object({
+      status: z.enum(['replayable', 'degraded', 'local_only']),
+      summary: z.string().min(1),
+    }),
+    fallbackMode: z.object({
+      engaged: z.boolean(),
+      summary: z.string().min(1),
+    }),
+    degradedState: z.object({
+      degraded: z.boolean(),
+      reasons: z.array(z.string().min(1)),
+      summary: z.string().min(1),
+    }),
   }),
   policyTrace: z.object({
     capabilityId: z.string().min(1).optional(),
@@ -256,6 +297,7 @@ export const CiResponseV2Schema = z.object({
   }),
   workflowOutputs: z.object({
     decision: DecisionAction,
+    workloadClass: WorkloadClass,
     reasonCode: z.string().min(1),
     selectedRegion: z.string().min(1),
     selectedRunner: z.string().min(1),
@@ -349,7 +391,7 @@ export const CiResponseV2Schema = z.object({
       total: z.number(),
       compute: z.number(),
       providerResolution: z.number().optional(),
-      cacheStatus: z.enum(['live', 'warm', 'redis', 'fallback']).optional(),
+      cacheStatus: z.enum(['live', 'warm', 'redis', 'lkg', 'degraded-safe', 'fallback']).optional(),
       influencedDecision: z.boolean().optional(),
       providers: z
         .object({

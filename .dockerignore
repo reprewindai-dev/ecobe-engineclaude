@@ -103,8 +103,24 @@ coverage
 # Development
 demo-server.js
 .windsurf/
+.claude/
 
 # Git
 .git
 .gitignore
 README.md
+
+# Embedded legacy duplicates and non-runtime collateral
+ecobe-dashboard/
+ecobe-engine/
+docs/
+demo/
+engine-local.log
+*.patch
+*.code-workspace
+AUDIT_REPORT.md
+ARCHITECTURE_LAWS.md
+CORRECTIONS_IMPLEMENTED.md
+FORECAST_ACCURACY_IMPLEMENTATION.md
+IMPLEMENTATION_SUMMARY.md
+TESTING.md

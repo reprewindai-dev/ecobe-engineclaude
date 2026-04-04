@@ -40,6 +40,9 @@ const envSchema = z.object({
   // Grid Signal Cache
   GRID_SIGNAL_CACHE_TTL: z.string().default('900'),
   GRID_FEATURE_CACHE_TTL: z.string().default('3600'),
+  GRID_SIGNAL_L1_CACHE_TTL_MS: z.string().default('5000'),
+  ROUTING_SIGNAL_WARM_LOOP_INTERVAL_MS: z.string().default('15000'),
+  ROUTING_SIGNAL_REQUIRED_REGIONS: z.string().optional(),
 
   // Ingestion
   EIA_INGESTION_SCHEDULE: z.string().default('0 */15 * * * *'),
@@ -88,6 +91,11 @@ const envSchema = z.object({
   DECISION_EVENT_ALERT_LAG_MINUTES: z.string().default('10'),
   DECISION_EVENT_ALERT_FAILURE_RATE_PCT: z.string().default('20'),
   DECISION_EVENT_ALERT_DEADLETTER_COUNT: z.string().default('25'),
+  DECISION_PROJECTION_ENABLED: z.string().optional(),
+  DECISION_PROJECTION_CRON: z.string().default('*/20 * * * * *'),
+  DECISION_PROJECTION_BATCH_SIZE: z.string().default('25'),
+  DECISION_PROJECTION_MAX_ATTEMPTS: z.string().default('5'),
+  DECISION_PROJECTION_RETRY_BASE_MS: z.string().default('1000'),
   DECISION_API_IDEMPOTENCY_TTL_SEC: z.string().default('900'),
   DECISION_API_SIGNATURE_SECRET: z.string().optional(),
 
@@ -137,6 +145,29 @@ const envSchema = z.object({
   STRIPE_GROWTH_MONTHLY_PRICE_ID: z.string().optional(),
   STRIPE_GROWTH_ANNUAL_PRICE_ID: z.string().optional(),
   STRIPE_ENTERPRISE_PRICE_ID: z.string().optional(),
+  STRIPE_PILOT_30D_PRICE_ID: z.string().optional(),
+  STRIPE_SMALL_CI_PRICE_ID: z.string().optional(),
+  STRIPE_SMALL_CONTROL_SURFACE_PRICE_ID: z.string().optional(),
+  STRIPE_SMALL_ENTERPRISE_PRICE_ID: z.string().optional(),
+  STRIPE_MID_CI_PRICE_ID: z.string().optional(),
+  STRIPE_MID_CONTROL_SURFACE_PRICE_ID: z.string().optional(),
+  STRIPE_MID_ENTERPRISE_PRICE_ID: z.string().optional(),
+  STRIPE_LARGE_CI_PRICE_ID: z.string().optional(),
+  STRIPE_LARGE_CONTROL_SURFACE_PRICE_ID: z.string().optional(),
+  STRIPE_LARGE_ENTERPRISE_PRICE_ID: z.string().optional(),
+
+  // Public site / mail
+  CO2ROUTER_PUBLIC_URL: z.string().optional(),
+  RESEND_API_KEY: z.string().optional(),
+  RESEND_FROM_CONTACT: z.string().optional(),
+  RESEND_FROM_HELLO: z.string().optional(),
+  RESEND_FROM_ALERTS: z.string().optional(),
+  RESEND_FALLBACK_FROM: z.string().optional(),
+  CONTACT_INBOX_EMAIL: z.string().optional(),
+  CONTACT_SALES_EMAIL: z.string().optional(),
+  CONTACT_SUPPORT_EMAIL: z.string().optional(),
+  CONTACT_SECURITY_EMAIL: z.string().optional(),
+  FOUNDER_ALERT_EMAIL: z.string().optional(),
 })
 
 const parsed = envSchema.safeParse(process.env)
@@ -153,6 +184,13 @@ export const env = {
   PORT: parseInt(parsed.data.PORT),
   GRID_SIGNAL_CACHE_TTL: parseInt(parsed.data.GRID_SIGNAL_CACHE_TTL),
   GRID_FEATURE_CACHE_TTL: parseInt(parsed.data.GRID_FEATURE_CACHE_TTL),
+  GRID_SIGNAL_L1_CACHE_TTL_MS: parseInt(parsed.data.GRID_SIGNAL_L1_CACHE_TTL_MS),
+  ROUTING_SIGNAL_WARM_LOOP_INTERVAL_MS: parseInt(parsed.data.ROUTING_SIGNAL_WARM_LOOP_INTERVAL_MS),
+  ROUTING_SIGNAL_REQUIRED_REGIONS: parsed.data.ROUTING_SIGNAL_REQUIRED_REGIONS
+    ? parsed.data.ROUTING_SIGNAL_REQUIRED_REGIONS.split(',')
+        .map((region) => region.trim())
+        .filter(Boolean)
+    : [],
   UI_ENABLED:
     parsed.data.UI_ENABLED !== undefined
       ? parsed.data.UI_ENABLED === 'true'
@@ -193,6 +231,14 @@ export const env = {
   DECISION_EVENT_ALERT_LAG_MINUTES: parseInt(parsed.data.DECISION_EVENT_ALERT_LAG_MINUTES),
   DECISION_EVENT_ALERT_FAILURE_RATE_PCT: parseInt(parsed.data.DECISION_EVENT_ALERT_FAILURE_RATE_PCT),
   DECISION_EVENT_ALERT_DEADLETTER_COUNT: parseInt(parsed.data.DECISION_EVENT_ALERT_DEADLETTER_COUNT),
+  DECISION_PROJECTION_ENABLED:
+    parsed.data.DECISION_PROJECTION_ENABLED !== undefined
+      ? parsed.data.DECISION_PROJECTION_ENABLED === 'true'
+      : parsed.data.NODE_ENV !== 'test',
+  DECISION_PROJECTION_CRON: parsed.data.DECISION_PROJECTION_CRON,
+  DECISION_PROJECTION_BATCH_SIZE: parseInt(parsed.data.DECISION_PROJECTION_BATCH_SIZE),
+  DECISION_PROJECTION_MAX_ATTEMPTS: parseInt(parsed.data.DECISION_PROJECTION_MAX_ATTEMPTS),
+  DECISION_PROJECTION_RETRY_BASE_MS: parseInt(parsed.data.DECISION_PROJECTION_RETRY_BASE_MS),
   DECISION_API_IDEMPOTENCY_TTL_SEC: parseInt(parsed.data.DECISION_API_IDEMPOTENCY_TTL_SEC),
   DECISION_API_SIGNATURE_SECRET: parsed.data.DECISION_API_SIGNATURE_SECRET,
   EXTERNAL_POLICY_HOOK_ENABLED:

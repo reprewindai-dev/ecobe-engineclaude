@@ -11,6 +11,12 @@ import {
 } from 'date-fns'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/db'
+import {
+  getDecisionProjectionFreshness,
+  normalizeLegacySavingsRatio,
+  type DecisionProjectionDataStatus,
+} from '../lib/ci/decision-projection'
+import { persistLegacyCanonicalDecision } from '../lib/ci/legacy-canonical-ingest'
 import { getIntegrationMetricsSummary, computeIntegrationSuccessRate } from '../lib/integration-metrics'
 import { getForecastRefreshSummary, getLastForecastRefreshState } from '../lib/forecast-refresh'
 import { getTelemetrySnapshot } from '../lib/observability/telemetry'
@@ -125,6 +131,13 @@ const LIVE_SIGNAL_SOURCES = [
   'DK_CARBON',
   'FI_CARBON',
 ] as const
+
+function normalizeProviderIdentity(provider: string) {
+  const normalized = provider.trim().toUpperCase().replace(/[\s-]+/g, '_')
+  if (normalized === 'WATTTIME') return 'WATTTIME_MOER'
+  if (normalized === 'EMBER' || normalized === 'EMBER_STRUCTURAL') return 'EMBER_STRUCTURAL_BASELINE'
+  return normalized
+}
 
 const isoLatest = (...values: Array<Date | null | undefined>) => {
   const valid = values.filter((value): value is Date => value instanceof Date)
@@ -388,6 +401,580 @@ const percentile = (sorted: number[], p: number): number | null => {
   return loVal + (hiVal - loVal) * frac
 }
 
+type ImpactWindowKey = '24h' | '7d' | '30d'
+
+const impactWindowDays: Record<ImpactWindowKey, number> = {
+  '24h': 1,
+  '7d': 7,
+  '30d': 30,
+}
+
+const IMPACT_STALE_SECONDS = 60 * 60
+const CI_INTENSITY_MAX = 2000
+const CI_SAVINGS_MIN = -100
+const CI_SAVINGS_MAX = 100
+
+const impactReportQuerySchema = z.object({
+  window: z.enum(['auto', '24h', '7d', '30d']).default('auto'),
+  minSamples: z.coerce.number().int().min(10).max(100000).default(50),
+})
+
+type ImpactDecisionRow = {
+  createdAt: Date
+  baselineRegion: string
+  chosenRegion: string
+  co2BaselineG: number | null
+  co2ChosenG: number | null
+  fallbackUsed: boolean
+  dataFreshnessSeconds: number | null
+  disagreementFlag: boolean | null
+  estimatedFlag: boolean | null
+  syntheticFlag: boolean | null
+  requestCount: number
+  meta: Prisma.JsonValue
+}
+
+type ImpactCiDecisionRow = {
+  createdAt: Date
+  selectedRegion: string
+  carbonIntensity: number
+  baseline: number
+  savings: number
+  carbonSavingsRatio?: number | null
+  estimatedKwh?: number | null
+  decisionAction: string | null
+  fallbackUsed: boolean
+  lowConfidence?: boolean | null
+  signalConfidence: number | null
+  reasonCode: string | null
+  waterImpactLiters: number | null
+  waterBaselineLiters: number | null
+  waterScarcityImpact: number | null
+  waterStressIndex: number | null
+  waterConfidence: number | null
+  waterAuthorityMode: string | null
+}
+
+const normalizeDecisionAction = (value: string) => {
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'run' || normalized === 'run_now' || normalized === 'runnow') return 'run_now'
+  if (normalized === 'delay' || normalized === 'delayed') return 'delay'
+  if (normalized === 'deny' || normalized === 'blocked' || normalized === 'block') return 'deny'
+  return normalized
+}
+
+const getMetaValue = (meta: Prisma.JsonValue, path: Array<string | number>): unknown => {
+  let cursor: unknown = meta
+  for (const key of path) {
+    if (Array.isArray(cursor)) {
+      if (typeof key !== 'number') return undefined
+      cursor = cursor[key]
+      continue
+    }
+    if (!cursor || typeof cursor !== 'object') return undefined
+    cursor = (cursor as Record<string, unknown>)[String(key)]
+  }
+  return cursor
+}
+
+type ProjectionResponseMetadata = {
+  dataSource: 'projection' | 'canonical_fallback'
+  dataStatus: DecisionProjectionDataStatus
+  projectionLagSec: number | null
+  latestProjectionAt: string | null
+  latestCanonicalAt: string | null
+}
+
+type CanonicalMetricsRow = {
+  createdAt: Date
+  selectedRegion: string
+  baseline: number
+  carbonIntensity: number
+  fallbackUsed: boolean
+  signalConfidence: number | null
+  lowConfidence?: boolean | null
+  estimatedKwh?: number | null
+  metadata: Prisma.JsonValue
+}
+
+const buildProjectionResponseMetadata = (
+  freshness: Awaited<ReturnType<typeof getDecisionProjectionFreshness>>,
+  dataSource: ProjectionResponseMetadata['dataSource']
+): ProjectionResponseMetadata => ({
+  dataSource,
+  dataStatus: freshness.dataStatus,
+  projectionLagSec: freshness.projectionLagSec,
+  latestProjectionAt: freshness.latestProjectionAt?.toISOString() ?? null,
+  latestCanonicalAt: freshness.latestCanonicalAt?.toISOString() ?? null,
+})
+
+const shouldUseCanonicalFallback = (status: DecisionProjectionDataStatus) =>
+  status === 'stale' || status === 'broken'
+
+const getCiEstimatedKwh = (row: {
+  estimatedKwh?: number | null
+  metadata: Prisma.JsonValue
+}) => {
+  const explicit = typeof row.estimatedKwh === 'number' && Number.isFinite(row.estimatedKwh)
+    ? row.estimatedKwh
+    : null
+  if (explicit !== null) return explicit
+
+  const candidates = [
+    getMetaValue(row.metadata, ['request', 'estimatedEnergyKwh']),
+    getMetaValue(row.metadata, ['request', 'estimatedKwh']),
+    getMetaValue(row.metadata, ['request', 'energyKwh']),
+    getMetaValue(row.metadata, ['request', 'metadata', 'estimatedEnergyKwh']),
+    getMetaValue(row.metadata, ['request', 'metadata', 'estimatedKwh']),
+  ]
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'number' && Number.isFinite(candidate) && candidate > 0) {
+      return candidate
+    }
+  }
+
+  return null
+}
+
+const getCiLatencySnapshot = (meta: Prisma.JsonValue) => {
+  const compute = getMetaValue(meta, ['response', 'latencyMs', 'compute'])
+  const total = getMetaValue(meta, ['response', 'latencyMs', 'total'])
+  return {
+    compute: typeof compute === 'number' && Number.isFinite(compute) ? compute : null,
+    total: typeof total === 'number' && Number.isFinite(total) ? total : null,
+  }
+}
+
+const getCiFreshnessSeconds = (meta: Prisma.JsonValue) => {
+  const waterFreshness = getMetaValue(meta, ['response', 'mss', 'waterFreshnessSec'])
+  if (typeof waterFreshness === 'number' && Number.isFinite(waterFreshness)) return waterFreshness
+  const carbonFreshness = getMetaValue(meta, ['response', 'mss', 'carbonFreshnessSec'])
+  return typeof carbonFreshness === 'number' && Number.isFinite(carbonFreshness)
+    ? carbonFreshness
+    : null
+}
+
+const normalizeCiSavingsPct = (row: ImpactCiDecisionRow) => {
+  const ratio =
+    typeof row.carbonSavingsRatio === 'number' && Number.isFinite(row.carbonSavingsRatio)
+      ? row.carbonSavingsRatio
+      : normalizeLegacySavingsRatio(row.savings)
+  if (ratio === null) return null
+  return Number((ratio * 100).toFixed(4))
+}
+
+const summarizeCanonicalMetricsRows = (rows: CanonicalMetricsRow[]) => {
+  const totalDecisions = rows.length
+  const totalRequests = rows.length
+  let co2SavedG = 0
+  let greenRouteCount = 0
+  let fallbackCount = 0
+  const chosenRegionCounts = new Map<string, number>()
+  const latencyDeltas: number[] = []
+  let dataFreshnessMaxSeconds: number | null = null
+
+  rows.forEach((row) => {
+    chosenRegionCounts.set(row.selectedRegion, (chosenRegionCounts.get(row.selectedRegion) ?? 0) + 1)
+    if (row.fallbackUsed) fallbackCount += 1
+
+    const estimatedKwh = getCiEstimatedKwh(row)
+    if (
+      Number.isFinite(row.baseline) &&
+      Number.isFinite(row.carbonIntensity) &&
+      estimatedKwh !== null
+    ) {
+      const baselineG = row.baseline * estimatedKwh
+      const chosenG = row.carbonIntensity * estimatedKwh
+      const delta = baselineG - chosenG
+      if (delta > 0) co2SavedG += delta
+      if (baselineG > chosenG) greenRouteCount += 1
+    }
+
+    const latency = getCiLatencySnapshot(row.metadata)
+    if (latency.compute !== null && latency.total !== null) {
+      latencyDeltas.push(latency.total - latency.compute)
+    }
+
+    const freshnessSec = getCiFreshnessSeconds(row.metadata)
+    if (freshnessSec !== null) {
+      dataFreshnessMaxSeconds =
+        dataFreshnessMaxSeconds === null
+          ? freshnessSec
+          : Math.max(dataFreshnessMaxSeconds, freshnessSec)
+    }
+  })
+
+  latencyDeltas.sort((a, b) => a - b)
+
+  return {
+    totalDecisions,
+    totalRequests,
+    co2SavedG: Number(co2SavedG.toFixed(3)),
+    co2AvoidedPer1kRequestsG:
+      totalRequests > 0 ? Number(((co2SavedG / totalRequests) * 1000).toFixed(3)) : 0,
+    greenRouteRate: totalDecisions > 0 ? greenRouteCount / totalDecisions : 0,
+    fallbackRate: totalDecisions > 0 ? fallbackCount / totalDecisions : 0,
+    topChosenRegion:
+      Array.from(chosenRegionCounts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
+    p95LatencyDeltaMs: percentile(latencyDeltas, 0.95),
+    dataFreshnessMaxSeconds,
+  }
+}
+
+const summarizeCanonicalSavingsRows = (
+  rows: Array<{
+    createdAt: Date
+    baseline: number
+    carbonIntensity: number
+    estimatedKwh?: number | null
+    metadata: Prisma.JsonValue
+  }>
+) => {
+  let totalBaseline = 0
+  let totalChosen = 0
+  let totalKwh = 0
+  const dailyMap = new Map<string, { baseline: number; chosen: number; count: number }>()
+
+  rows.forEach((row) => {
+    const estimatedKwh = getCiEstimatedKwh(row)
+    if (
+      estimatedKwh === null ||
+      !Number.isFinite(row.baseline) ||
+      !Number.isFinite(row.carbonIntensity)
+    ) {
+      return
+    }
+
+    const baselineG = row.baseline * estimatedKwh
+    const chosenG = row.carbonIntensity * estimatedKwh
+    totalBaseline += baselineG
+    totalChosen += chosenG
+    totalKwh += estimatedKwh
+
+    const day = row.createdAt.toISOString().split('T')[0]
+    const existing = dailyMap.get(day) || { baseline: 0, chosen: 0, count: 0 }
+    existing.baseline += baselineG
+    existing.chosen += chosenG
+    existing.count += 1
+    dailyMap.set(day, existing)
+  })
+
+  return {
+    totalBaseline: Number(totalBaseline.toFixed(3)),
+    totalChosen: Number(totalChosen.toFixed(3)),
+    totalAvoided: Number((totalBaseline - totalChosen).toFixed(3)),
+    totalKwh: Number(totalKwh.toFixed(6)),
+    dailyTrend: Array.from(dailyMap.entries())
+      .map(([date, data]) => ({
+        date,
+        baselineG: Math.round(data.baseline),
+        chosenG: Math.round(data.chosen),
+        avoidedG: Math.round(data.baseline - data.chosen),
+        decisions: data.count,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date)),
+  }
+}
+
+const extractDecisionAction = (meta: Prisma.JsonValue): string | null => {
+  if (!meta || typeof meta !== 'object') return null
+  const paths = [
+    ['decision'],
+    ['action'],
+    ['decisionAction'],
+    ['decisionPath', 'action'],
+    ['decisionEnvelope', 'action'],
+    ['workflowOutputs', 'decision'],
+    ['replayedResponse', 'decision'],
+    ['replay', 'decision'],
+    ['selected', 'decision'],
+  ]
+  for (const path of paths) {
+    const value = getMetaValue(meta, path)
+    if (typeof value === 'string' && value.trim()) {
+      return normalizeDecisionAction(value)
+    }
+  }
+  return null
+}
+
+const summarizeImpactWindow = (
+  rows: ImpactDecisionRow[],
+  windowStart: Date,
+  windowEnd: Date
+) => {
+  const totals = {
+    decisionCount: rows.length,
+    requestCount: rows.reduce((sum, row) => sum + (row.requestCount || 0), 0),
+    rerouteCount: 0,
+    fallbackCount: 0,
+    staleCount: 0,
+    disagreementCount: 0,
+    estimatedCount: 0,
+    syntheticCount: 0,
+    missingCo2Count: 0,
+    co2BaselineG: 0,
+    co2ChosenG: 0,
+    co2SavingsG: 0,
+    co2SavingsGrossG: 0,
+    co2IncreaseCount: 0,
+  }
+
+  const actionCounts: Record<string, number> = {}
+  const freshnessValues: number[] = []
+  const chosenRegionCounts = new Map<string, number>()
+  const rerouteCounts = new Map<string, number>()
+
+  rows.forEach((row) => {
+    const requests = row.requestCount || 0
+    if (row.baselineRegion !== row.chosenRegion) {
+      totals.rerouteCount += requests
+      const key = `${row.baselineRegion} -> ${row.chosenRegion}`
+      rerouteCounts.set(key, (rerouteCounts.get(key) ?? 0) + requests)
+    }
+    chosenRegionCounts.set(row.chosenRegion, (chosenRegionCounts.get(row.chosenRegion) ?? 0) + requests)
+
+    if (row.fallbackUsed) totals.fallbackCount += requests
+    if (row.dataFreshnessSeconds !== null && row.dataFreshnessSeconds >= IMPACT_STALE_SECONDS) {
+      totals.staleCount += requests
+    }
+    if (row.dataFreshnessSeconds !== null && Number.isFinite(row.dataFreshnessSeconds)) {
+      freshnessValues.push(row.dataFreshnessSeconds)
+    }
+    if (row.disagreementFlag) totals.disagreementCount += requests
+    if (row.estimatedFlag) totals.estimatedCount += requests
+    if (row.syntheticFlag) totals.syntheticCount += requests
+
+    if (row.co2BaselineG === null || row.co2ChosenG === null) {
+      totals.missingCo2Count += requests
+    } else {
+      totals.co2BaselineG += row.co2BaselineG
+      totals.co2ChosenG += row.co2ChosenG
+      const delta = row.co2BaselineG - row.co2ChosenG
+      totals.co2SavingsG += delta
+      if (delta > 0) {
+        totals.co2SavingsGrossG += delta
+      } else if (delta < 0) {
+        totals.co2IncreaseCount += requests
+      }
+    }
+
+    const action = extractDecisionAction(row.meta)
+    if (action) {
+      actionCounts[action] = (actionCounts[action] ?? 0) + requests
+    } else {
+      actionCounts.unknown = (actionCounts.unknown ?? 0) + requests
+    }
+  })
+
+  const freshnessSorted = freshnessValues.sort((a, b) => a - b)
+  const freshnessP50 = percentile(freshnessSorted, 0.5)
+  const freshnessP95 = percentile(freshnessSorted, 0.95)
+  const freshnessP99 = percentile(freshnessSorted, 0.99)
+
+  const topChosenRegions = Array.from(chosenRegionCounts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([region, count]) => ({ region, count }))
+
+  const topReroutes = Array.from(rerouteCounts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([route, count]) => ({ route, count }))
+
+  const requestCount = totals.requestCount
+  const rates = {
+    rerouteRate: rate(totals.rerouteCount, requestCount),
+    fallbackRate: rate(totals.fallbackCount, requestCount),
+    staleRate: rate(totals.staleCount, requestCount),
+    disagreementRate: rate(totals.disagreementCount, requestCount),
+    estimatedRate: rate(totals.estimatedCount, requestCount),
+    syntheticRate: rate(totals.syntheticCount, requestCount),
+    missingCo2Rate: rate(totals.missingCo2Count, requestCount),
+  }
+
+  const co2BaselineKg = totals.co2BaselineG / 1000
+  const co2ChosenKg = totals.co2ChosenG / 1000
+  const netSavingsKg = totals.co2SavingsG / 1000
+  const grossSavingsKg = totals.co2SavingsGrossG / 1000
+  const savingsRatePct =
+    totals.co2BaselineG > 0
+      ? Number(((totals.co2SavingsG / totals.co2BaselineG) * 100).toFixed(2))
+      : 0
+
+  return {
+    source: 'routing',
+    window: {
+      start: windowStart.toISOString(),
+      end: windowEnd.toISOString(),
+    },
+    totals,
+    rates,
+    freshness: {
+      p50Sec: freshnessP50,
+      p95Sec: freshnessP95,
+      p99Sec: freshnessP99,
+    },
+    co2: {
+      baselineKg: Number(co2BaselineKg.toFixed(3)),
+      chosenKg: Number(co2ChosenKg.toFixed(3)),
+      netSavingsKg: Number(netSavingsKg.toFixed(3)),
+      grossSavingsKg: Number(grossSavingsKg.toFixed(3)),
+      savingsRatePct,
+      increaseEventCount: totals.co2IncreaseCount,
+    },
+    actions: actionCounts,
+    regions: {
+      topChosen: topChosenRegions,
+      topReroutes,
+    },
+  }
+}
+
+const summarizeCiImpactWindow = (
+  rows: ImpactCiDecisionRow[],
+  windowStart: Date,
+  windowEnd: Date
+) => {
+  const totals = {
+    decisionCount: rows.length,
+    requestCount: rows.length,
+    fallbackCount: 0,
+    lowConfidenceCount: 0,
+  }
+
+  const actionCounts: Record<string, number> = {}
+  const chosenRegionCounts = new Map<string, number>()
+  const baselineIntensities: number[] = []
+  const chosenIntensities: number[] = []
+  const savingsPctValues: number[] = []
+  let baselineOutliers = 0
+  let chosenOutliers = 0
+  let savingsOutliers = 0
+  const waterImpactValues: number[] = []
+  const waterStressValues: number[] = []
+  const waterConfidenceValues: number[] = []
+
+  rows.forEach((row) => {
+    chosenRegionCounts.set(row.selectedRegion, (chosenRegionCounts.get(row.selectedRegion) ?? 0) + 1)
+    if (row.fallbackUsed) totals.fallbackCount += 1
+    if (
+      row.lowConfidence === true ||
+      (typeof row.signalConfidence === 'number' && row.signalConfidence < 0.6)
+    ) {
+      totals.lowConfidenceCount += 1
+    }
+
+    const action = row.decisionAction ? normalizeDecisionAction(row.decisionAction) : 'unknown'
+    actionCounts[action] = (actionCounts[action] ?? 0) + 1
+
+    if (Number.isFinite(row.baseline)) {
+      if (row.baseline >= 0 && row.baseline <= CI_INTENSITY_MAX) {
+        baselineIntensities.push(row.baseline)
+      } else {
+        baselineOutliers += 1
+      }
+    }
+    if (Number.isFinite(row.carbonIntensity)) {
+      if (row.carbonIntensity >= 0 && row.carbonIntensity <= CI_INTENSITY_MAX) {
+        chosenIntensities.push(row.carbonIntensity)
+      } else {
+        chosenOutliers += 1
+      }
+    }
+    const normalizedSavingsPct = normalizeCiSavingsPct(row)
+    if (normalizedSavingsPct !== null) {
+      if (normalizedSavingsPct >= CI_SAVINGS_MIN && normalizedSavingsPct <= CI_SAVINGS_MAX) {
+        savingsPctValues.push(normalizedSavingsPct)
+      } else {
+        savingsOutliers += 1
+      }
+    }
+
+    if (Number.isFinite(row.waterImpactLiters ?? NaN) && row.waterImpactLiters !== null) {
+      waterImpactValues.push(row.waterImpactLiters)
+    }
+    if (Number.isFinite(row.waterStressIndex ?? NaN) && row.waterStressIndex !== null) {
+      waterStressValues.push(row.waterStressIndex)
+    }
+    if (Number.isFinite(row.waterConfidence ?? NaN) && row.waterConfidence !== null) {
+      waterConfidenceValues.push(row.waterConfidence)
+    }
+  })
+
+  const topChosenRegions = Array.from(chosenRegionCounts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([region, count]) => ({ region, count }))
+
+  const avgBaselineIntensity = safeAvg(baselineIntensities)
+  const avgChosenIntensity = safeAvg(chosenIntensities)
+  const avgSavingsPct = safeAvg(savingsPctValues)
+  const avgIntensityDelta =
+    avgBaselineIntensity !== null && avgChosenIntensity !== null
+      ? Number((avgBaselineIntensity - avgChosenIntensity).toFixed(2))
+      : null
+
+  const requestCount = totals.requestCount
+
+  return {
+    source: 'ci',
+    window: {
+      start: windowStart.toISOString(),
+      end: windowEnd.toISOString(),
+    },
+    totals,
+    rates: {
+      fallbackRate: rate(totals.fallbackCount, requestCount),
+      lowConfidenceRate: rate(totals.lowConfidenceCount, requestCount),
+      delayRate: rate(actionCounts.delay ?? 0, requestCount),
+      denyRate: rate(actionCounts.deny ?? 0, requestCount),
+      runNowRate: rate(actionCounts.run_now ?? 0, requestCount),
+    },
+    carbonIntensity: {
+      avgBaseline: avgBaselineIntensity,
+      avgChosen: avgChosenIntensity,
+      avgDelta: avgIntensityDelta,
+      avgSavingsPct,
+      baselineSampleCount: baselineIntensities.length,
+      chosenSampleCount: chosenIntensities.length,
+      savingsSampleCount: savingsPctValues.length,
+      baselineOutlierCount: baselineOutliers,
+      chosenOutlierCount: chosenOutliers,
+      savingsOutlierCount: savingsOutliers,
+    },
+    water: {
+      avgImpactLiters: safeAvg(waterImpactValues),
+      avgStressIndex: safeAvg(waterStressValues),
+      avgConfidence: safeAvg(waterConfidenceValues),
+    },
+    actions: actionCounts,
+    regions: {
+      topChosen: topChosenRegions,
+    },
+  }
+}
+
+const scoreImpactWindow = (summary: ReturnType<typeof summarizeImpactWindow>) => {
+  const { rates, totals } = summary
+  const volumeFactor = Math.min(1, totals.decisionCount / 1000)
+  const score =
+    1 -
+    rates.fallbackRate * 0.4 -
+    rates.disagreementRate * 0.3 -
+    rates.missingCo2Rate * 0.2 -
+    rates.staleRate * 0.1
+  return Number(Math.max(0, Math.min(1, score * (0.7 + 0.3 * volumeFactor))).toFixed(4))
+}
+
+const scoreCiImpactWindow = (summary: ReturnType<typeof summarizeCiImpactWindow>) => {
+  const { rates, totals } = summary
+  const volumeFactor = Math.min(1, totals.decisionCount / 2000)
+  const score = 1 - rates.fallbackRate * 0.4 - rates.lowConfidenceRate * 0.4 - rates.denyRate * 0.2
+  return Number(Math.max(0, Math.min(1, score * (0.7 + 0.3 * volumeFactor))).toFixed(4))
+}
+
 router.get('/metrics', async (req, res) => {
   try {
     const { window } = metricsQuerySchema.parse(req.query)
@@ -421,14 +1008,16 @@ router.get('/metrics', async (req, res) => {
     const integrationMetricsPromise = getIntegrationMetricsSummary()
     const refreshSummaryPromise = getForecastRefreshSummary(windowHours)
     const refreshStatePromise = getLastForecastRefreshState()
+    const freshnessPromise = getDecisionProjectionFreshness()
 
-    const [decisions, topChosenRegionAgg, integrationMetrics, refreshSummary, refreshState] =
+    const [decisions, topChosenRegionAgg, integrationMetrics, refreshSummary, refreshState, freshness] =
       await Promise.all([
         decisionsPromise,
         topChosenRegionPromise,
         integrationMetricsPromise,
         refreshSummaryPromise,
         refreshStatePromise,
+        freshnessPromise,
       ])
 
     const totalDecisions = decisions.length
@@ -535,9 +1124,40 @@ router.get('/metrics', async (req, res) => {
         : null,
     }
 
+    const projectionResponseMeta = buildProjectionResponseMetadata(freshness, 'projection')
+
+    if (shouldUseCanonicalFallback(freshness.dataStatus)) {
+      const ciDecisions = await prisma.cIDecision.findMany({
+        where: { createdAt: { gte: since } },
+        select: {
+          createdAt: true,
+          selectedRegion: true,
+          baseline: true,
+          carbonIntensity: true,
+          fallbackUsed: true,
+          signalConfidence: true,
+          lowConfidence: true,
+          estimatedKwh: true,
+          metadata: true,
+        },
+      }) as CanonicalMetricsRow[]
+
+      const fallbackMetrics = summarizeCanonicalMetricsRows(ciDecisions)
+      return res.json({
+        ...fallbackMetrics,
+        window,
+        windowHours,
+        ...buildProjectionResponseMetadata(freshness, 'canonical_fallback'),
+        providerSignals: providerSignalsMetric,
+        forecastRefresh,
+        observability: getTelemetrySnapshot(),
+      })
+    }
+
     return res.json({
       window,
       windowHours,
+      ...projectionResponseMeta,
       totalDecisions,
       totalRequests,
       co2SavedG,
@@ -556,6 +1176,162 @@ router.get('/metrics', async (req, res) => {
       return res.status(400).json({ error: 'Invalid request', details: error.errors })
     }
     console.error('Dashboard metrics error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+router.get('/impact-report', async (req, res) => {
+  try {
+    const { window, minSamples } = impactReportQuerySchema.parse(req.query)
+    const now = new Date()
+    const maxWindowStart = addDays(now, -impactWindowDays['30d'])
+
+    const [routingDecisions, ciDecisions, freshness] = await Promise.all([
+      prisma.dashboardRoutingDecision.findMany({
+        where: { createdAt: { gte: maxWindowStart } },
+        select: {
+          createdAt: true,
+          baselineRegion: true,
+          chosenRegion: true,
+          co2BaselineG: true,
+          co2ChosenG: true,
+          fallbackUsed: true,
+          dataFreshnessSeconds: true,
+          disagreementFlag: true,
+          estimatedFlag: true,
+          syntheticFlag: true,
+          requestCount: true,
+          meta: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      }) as Promise<ImpactDecisionRow[]>,
+      prisma.cIDecision.findMany({
+        where: { createdAt: { gte: maxWindowStart } },
+        select: {
+          createdAt: true,
+          selectedRegion: true,
+          carbonIntensity: true,
+          baseline: true,
+          savings: true,
+          carbonSavingsRatio: true,
+          estimatedKwh: true,
+          decisionAction: true,
+          fallbackUsed: true,
+          lowConfidence: true,
+          signalConfidence: true,
+          reasonCode: true,
+          waterImpactLiters: true,
+          waterBaselineLiters: true,
+          waterScarcityImpact: true,
+          waterStressIndex: true,
+          waterConfidence: true,
+          waterAuthorityMode: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      }) as Promise<ImpactCiDecisionRow[]>,
+      getDecisionProjectionFreshness(),
+    ])
+
+    const routingResponseMeta = buildProjectionResponseMetadata(freshness, 'projection')
+    const fallbackResponseMeta = buildProjectionResponseMetadata(freshness, 'canonical_fallback')
+
+    if (routingDecisions.length === 0 && ciDecisions.length === 0) {
+      return res.json({
+        success: true,
+        ...fallbackResponseMeta,
+        window: { start: maxWindowStart.toISOString(), end: now.toISOString() },
+        summary: null,
+        selection: {
+          strategy: window,
+          reason: 'No decision data available in the last 30 days.',
+          candidates: [],
+        },
+      })
+    }
+
+    const ciCandidates: Array<{
+      key: ImpactWindowKey
+      start: Date
+      end: Date
+      summary: ReturnType<typeof summarizeCiImpactWindow>
+      score: number
+    }> = (['24h', '7d', '30d'] as ImpactWindowKey[]).map((key) => {
+      const start = addDays(now, -impactWindowDays[key])
+      const rows = ciDecisions.filter((row) => row.createdAt >= start)
+      const summary = summarizeCiImpactWindow(rows, start, now)
+      const score = scoreCiImpactWindow(summary)
+      return { key, start, end: now, summary, score }
+    })
+
+    const routingCandidates: Array<{
+      key: ImpactWindowKey
+      start: Date
+      end: Date
+      summary: ReturnType<typeof summarizeImpactWindow>
+      score: number
+    }> = (['24h', '7d', '30d'] as ImpactWindowKey[]).map((key) => {
+      const start = addDays(now, -impactWindowDays[key])
+      const rows = routingDecisions.filter((row) => row.createdAt >= start)
+      const summary = summarizeImpactWindow(rows, start, now)
+      const score = scoreImpactWindow(summary)
+      return { key, start, end: now, summary, score }
+    })
+
+    const hasCiRecent = ciCandidates.some((c) => c.summary.totals.decisionCount >= minSamples)
+    const hasRoutingRecent = routingCandidates.some((c) => c.summary.totals.decisionCount >= minSamples)
+
+    const dataset = hasCiRecent || !hasRoutingRecent ? 'ci' : 'routing'
+    const responseMeta =
+      dataset === 'routing' && !shouldUseCanonicalFallback(freshness.dataStatus)
+        ? routingResponseMeta
+        : fallbackResponseMeta
+    const candidates = dataset === 'ci' ? ciCandidates : routingCandidates
+    const candidatesByKey = new Map(candidates.map((c) => [c.key, c]))
+    const eligible = candidates.filter((c) => c.summary.totals.decisionCount >= minSamples)
+
+    let selected = candidatesByKey.get('24h')!
+    let selectionReason = 'Selected the most recent 24h window.'
+
+    if (window !== 'auto') {
+      const explicit = candidatesByKey.get(window as ImpactWindowKey)
+      if (explicit) {
+        selected = explicit
+        selectionReason = `Explicit window override (${window}).`
+      }
+    } else if (eligible.length > 0) {
+      selected = eligible.reduce((best, current) => (current.score > best.score ? current : best))
+      selectionReason = `Selected the highest-quality eligible window (${selected.key}).`
+    } else {
+      selected = candidates.reduce((best, current) =>
+        current.summary.totals.decisionCount > best.summary.totals.decisionCount ? current : best
+      )
+      selectionReason = 'Selected the window with the most samples due to low volume.'
+    }
+
+    return res.json({
+      success: true,
+      ...responseMeta,
+      selection: {
+        strategy: window,
+        reason: selectionReason,
+        minSamples,
+        source: dataset,
+        candidates: candidates.map((candidate) => ({
+          window: candidate.key,
+          score: candidate.score,
+          decisionCount: candidate.summary.totals.decisionCount,
+          requestCount: candidate.summary.totals.requestCount,
+          start: candidate.start.toISOString(),
+          end: candidate.end.toISOString(),
+        })),
+      },
+      summary: selected.summary,
+    })
+  } catch (error: any) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Invalid request', details: error.errors })
+    }
+    console.error('Impact report error:', error)
     res.status(500).json({ error: 'Internal server error' })
   }
 })
@@ -1076,48 +1852,85 @@ router.get('/savings', async (req, res) => {
     const days = range === '7d' ? 7 : range === '90d' ? 90 : 30
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
 
-    const decisions = await prisma.dashboardRoutingDecision.findMany({
-      where: { createdAt: { gte: since } },
-      select: {
-        co2BaselineG: true,
-        co2ChosenG: true,
-        estimatedKwh: true,
-        createdAt: true,
-      },
-    })
+    const freshness = await getDecisionProjectionFreshness()
+    let totalBaseline = 0
+    let totalChosen = 0
+    let totalKwh = 0
+    let dailyTrend: Array<{
+      date: string
+      baselineG: number
+      chosenG: number
+      avoidedG: number
+      decisions?: number
+    }> = []
+    let totalDecisions = 0
+    let responseMeta = buildProjectionResponseMetadata(freshness, 'projection')
 
-    const totalBaseline = decisions.reduce((sum: number, d: any) => sum + (d.co2BaselineG ?? 0), 0)
-    const totalChosen = decisions.reduce((sum: number, d: any) => sum + (d.co2ChosenG ?? 0), 0)
-    const totalAvoided = totalBaseline - totalChosen
-    const totalKwh = decisions.reduce((sum: number, d: any) => sum + (d.estimatedKwh ?? 0), 0)
+    if (shouldUseCanonicalFallback(freshness.dataStatus)) {
+      const decisions = await prisma.cIDecision.findMany({
+        where: { createdAt: { gte: since } },
+        select: {
+          createdAt: true,
+          baseline: true,
+          carbonIntensity: true,
+          estimatedKwh: true,
+          metadata: true,
+        },
+      })
 
-    // Group by day for trend
-    const dailyMap = new Map<string, { baseline: number; chosen: number; count: number }>()
-    for (const d of decisions) {
-      const day = d.createdAt.toISOString().split('T')[0]
-      const existing = dailyMap.get(day) || { baseline: 0, chosen: 0, count: 0 }
-      existing.baseline += d.co2BaselineG ?? 0
-      existing.chosen += d.co2ChosenG ?? 0
-      existing.count++
-      dailyMap.set(day, existing)
+      const fallback = summarizeCanonicalSavingsRows(decisions)
+      totalBaseline = fallback.totalBaseline
+      totalChosen = fallback.totalChosen
+      totalKwh = fallback.totalKwh
+      dailyTrend = fallback.dailyTrend
+      totalDecisions = decisions.length
+      responseMeta = buildProjectionResponseMetadata(freshness, 'canonical_fallback')
+    } else {
+      const decisions = await prisma.dashboardRoutingDecision.findMany({
+        where: { createdAt: { gte: since } },
+        select: {
+          co2BaselineG: true,
+          co2ChosenG: true,
+          estimatedKwh: true,
+          createdAt: true,
+        },
+      })
+
+      totalBaseline = decisions.reduce((sum: number, d: any) => sum + (d.co2BaselineG ?? 0), 0)
+      totalChosen = decisions.reduce((sum: number, d: any) => sum + (d.co2ChosenG ?? 0), 0)
+      totalKwh = decisions.reduce((sum: number, d: any) => sum + (d.estimatedKwh ?? 0), 0)
+      totalDecisions = decisions.length
+
+      const dailyMap = new Map<string, { baseline: number; chosen: number; count: number }>()
+      for (const d of decisions) {
+        const day = d.createdAt.toISOString().split('T')[0]
+        const existing = dailyMap.get(day) || { baseline: 0, chosen: 0, count: 0 }
+        existing.baseline += d.co2BaselineG ?? 0
+        existing.chosen += d.co2ChosenG ?? 0
+        existing.count++
+        dailyMap.set(day, existing)
+      }
+
+      dailyTrend = Array.from(dailyMap.entries())
+        .map(([date, data]) => ({
+          date,
+          baselineG: Math.round(data.baseline),
+          chosenG: Math.round(data.chosen),
+          avoidedG: Math.round(data.baseline - data.chosen),
+          decisions: data.count,
+        }))
+        .sort((a, b) => a.date.localeCompare(b.date))
     }
 
-    const dailyTrend = Array.from(dailyMap.entries())
-      .map(([date, data]) => ({
-        date,
-        baselineG: Math.round(data.baseline),
-        chosenG: Math.round(data.chosen),
-        avoidedG: Math.round(data.baseline - data.chosen),
-        decisions: data.count,
-      }))
-      .sort((a, b) => a.date.localeCompare(b.date))
+    const totalAvoided = totalBaseline - totalChosen
 
     res.json({
+      ...responseMeta,
       window: range,
       co2AvoidedKg: Math.round(totalAvoided / 1000 * 100) / 100, // Convert g to kg
       avgMultiplier: totalChosen > 0 ? Math.round((totalBaseline / totalChosen) * 100) / 100 : 1.34,
       bestToday: 1.91, // Temporary static value
-      last100AvgDelta: decisions.length > 0 ? Math.round(totalAvoided / Math.min(decisions.length, 100) * 100) / 100 : 0,
+      last100AvgDelta: totalDecisions > 0 ? Math.round(totalAvoided / Math.min(totalDecisions, 100) * 100) / 100 : 0,
       timeRange: range,
       totalBaselineG: Math.round(totalBaseline),
       totalChosenG: Math.round(totalChosen),
@@ -1127,7 +1940,7 @@ router.get('/savings', async (req, res) => {
           ? Math.round((totalAvoided / totalBaseline) * 100 * 10) / 10
           : 0,
       totalKwh: Math.round(totalKwh * 1000) / 1000,
-      totalDecisions: decisions.length,
+      totalDecisions,
       carbonReductionMultiplier:
         totalChosen > 0
           ? Math.round((totalBaseline / totalChosen) * 100) / 100
@@ -1299,14 +2112,27 @@ router.post('/demo-seed', async (req, res) => {
       })
     }
 
-    // Batch insert
     let created = 0
     for (const d of decisions) {
       try {
-        await prisma.dashboardRoutingDecision.create({ data: d as any })
+        await persistLegacyCanonicalDecision({
+          createdAt: d.ts,
+          selectedRunner: 'demo-seed',
+          workloadName: d.workloadName,
+          opName: d.opName,
+          baselineRegion: d.baselineRegion,
+          chosenRegion: d.chosenRegion,
+          carbonIntensityBaselineGPerKwh: d.carbonIntensityBaselineGPerKwh,
+          carbonIntensityChosenGPerKwh: d.carbonIntensityChosenGPerKwh,
+          estimatedKwh: d.estimatedKwh,
+          reason: d.reason,
+          requestCount: d.requestCount,
+          metadata: d.meta,
+          jobType: 'demo',
+        })
         created++
       } catch (e) {
-        // Skip duplicates
+        // Ignore duplicate or validation failures in demo seeding.
       }
     }
 
@@ -1548,7 +2374,7 @@ router.get('/provider-trust', async (_req, res) => {
       getProviderFreshness(),
       prisma.providerSnapshot.findMany({
         orderBy: { observedAt: 'desc' },
-        take: 100,
+        take: 2000,
         select: {
           provider: true,
           zone: true,
@@ -1566,10 +2392,22 @@ router.get('/provider-trust', async (_req, res) => {
       }).catch(() => []),
     ])
 
-    // Group snapshots by provider
-    const providerMap = new Map<string, any[]>()
+    // Preserve the newest snapshot per provider/zone/signal-type combination so
+    // the control plane sees the full upstream field instead of just the latest
+    // globally dominant provider.
+    const latestSnapshotByKey = new Map<string, (typeof recentSnapshots)[number]>()
     for (const snap of recentSnapshots) {
-      const existing = providerMap.get(snap.provider) || []
+      const provider = normalizeProviderIdentity(snap.provider)
+      const key = `${provider}:${snap.zone}:${snap.signalType}`
+      if (!latestSnapshotByKey.has(key)) {
+        latestSnapshotByKey.set(key, snap)
+      }
+    }
+
+    const providerMap = new Map<string, any[]>()
+    for (const snap of latestSnapshotByKey.values()) {
+      const provider = normalizeProviderIdentity(snap.provider)
+      const existing = providerMap.get(provider) || []
       existing.push({
         zone: snap.zone,
         signalType: snap.signalType,
@@ -1579,7 +2417,7 @@ router.get('/provider-trust', async (_req, res) => {
           observedAt: snap.observedAt?.toISOString() ?? null,
           metadata: snap.metadata ?? null,
         })
-      providerMap.set(snap.provider, existing)
+      providerMap.set(provider, existing)
     }
 
     return res.json({

@@ -2,6 +2,10 @@ import type {
   AuthorizationAccountingMethod,
   AuthorizationSignalMode,
 } from './authorization'
+import type {
+  SignalFrame,
+  GovernanceFrame,
+} from './frames'
 import type { CanonicalTransportMetadata } from './canonical'
 import { sha256Canonical } from '../proof/export-chain'
 import type {
@@ -10,6 +14,7 @@ import type {
   WaterManifestDataset,
   WaterSignal,
 } from '../water/types'
+import type { DecisionExplanation, DecisionTrust, WorkloadClass } from './doctrine'
 
 export interface ResolvedCandidateOverride {
   region: string
@@ -33,7 +38,7 @@ export interface ResolvedCandidateOverride {
   guardrailReasons: string[]
   providerSnapshotRef: string
   waterAuthority: WaterAuthority
-  cacheStatus: 'live' | 'warm' | 'fallback'
+  cacheStatus: 'live' | 'warm' | 'redis' | 'lkg' | 'degraded-safe'
   providerResolutionMs: number
   carbonFreshnessSec: number | null
   waterFreshnessSec: number | null
@@ -50,7 +55,7 @@ export interface TraceStageTimings {
 export interface TraceProviderTiming {
   region: string
   latencyMs: number
-  cacheStatus: 'live' | 'warm' | 'fallback'
+  cacheStatus: 'live' | 'warm' | 'redis' | 'lkg' | 'degraded-safe'
   carbonFreshnessSec: number | null
   waterFreshnessSec: number | null
   stalenessSec: number | null
@@ -82,7 +87,7 @@ export interface TraceEnvelopeSeed {
       defensibleReasonCodes: string[]
       guardrailBlocked: boolean
       guardrailReasons: string[]
-      cacheStatus: 'live' | 'warm' | 'fallback'
+      cacheStatus: 'live' | 'warm' | 'redis' | 'lkg' | 'degraded-safe'
       authorityMode: WaterAuthority['authorityMode']
       signalMode: AuthorizationSignalMode
       accountingMethod: AuthorizationAccountingMethod
@@ -91,6 +96,8 @@ export interface TraceEnvelopeSeed {
       fallbackApplied: boolean
     }>
   }
+  signalFrame: SignalFrame
+  governanceFrame: GovernanceFrame
   decisionPath: {
     evaluatedRegions: string[]
     rejectedRegions: Array<{
@@ -101,6 +108,7 @@ export interface TraceEnvelopeSeed {
     baselineRegion: string
     action: string
     reasonCode: string
+    workloadClass: WorkloadClass
     operatingMode: string
     rerouteFrom: string | null
     precedenceOverrideApplied: boolean
@@ -110,6 +118,24 @@ export interface TraceEnvelopeSeed {
       notBefore: string | null
       reason: string
     }
+  }
+  explanation: Pick<
+    DecisionExplanation,
+    | 'whyAction'
+    | 'whyTarget'
+    | 'dominantConstraint'
+    | 'policyPrecedence'
+    | 'rejectedAlternatives'
+    | 'counterfactualCondition'
+    | 'uncertaintySummary'
+  >
+  trust: {
+    providerTrustTier: DecisionTrust['providerTrust']['providerTrustTier']
+    replayabilityStatus: DecisionTrust['replayability']['status']
+    fallbackEngaged: boolean
+    degraded: boolean
+    degradedReasons: string[]
+    estimatedFields: string[]
   }
   governance: {
     label: 'SAIQ'
@@ -246,11 +272,25 @@ export function buildCuratedTraceEnvelopeView(record: TraceEnvelopeRecord) {
     inputSignalHash: record.inputSignalHash,
     traceAvailable: true,
     governanceSource: record.payload.governance.source,
+    governanceZone: record.payload.governanceFrame.zone,
+    governanceScore: record.payload.governanceFrame.score,
+    governanceStrict: record.payload.governanceFrame.strict,
+    policyReference: record.payload.governanceFrame.policyReference,
     action: record.payload.decisionPath.action,
     reasonCode: record.payload.decisionPath.reasonCode,
     selectedRegion: record.payload.decisionPath.selectedRegion,
+    workloadClass: record.payload.decisionPath.workloadClass,
     operatingMode: record.payload.decisionPath.operatingMode,
+    dominantConstraint: record.payload.explanation.dominantConstraint,
+    providerTrustTier: record.payload.trust.providerTrustTier,
+    replayabilityStatus: record.payload.trust.replayabilityStatus,
     proofHash: record.payload.proof.proofHash,
+    signalFrameId: record.payload.signalFrame.signalFrameId,
+    sourceClass: record.payload.signalFrame.sourceClass,
+    cacheStatus: record.payload.signalFrame.cacheStatus,
+    qualityTier: record.payload.signalFrame.qualityTier,
+    mirrorStatus: record.payload.signalFrame.mirrorState.status,
+    lease: record.payload.governanceFrame.lease,
     totalMs: record.payload.performance.totalMs,
     computeMs: record.payload.performance.computeMs,
     cacheHit: record.payload.performance.cacheHit,

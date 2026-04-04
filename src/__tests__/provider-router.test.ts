@@ -28,8 +28,10 @@ jest.mock('../lib/grid-signals/grid-signal-cache', () => ({
   GridSignalCache: {
     cacheRoutingSignal: jest.fn().mockResolvedValue(undefined),
     getCachedRoutingSignal: jest.fn().mockResolvedValue(null),
+    getCachedRoutingSignalWithSource: jest.fn().mockResolvedValue(null),
     cacheLastKnownGoodRoutingSignal: jest.fn().mockResolvedValue(undefined),
     getLastKnownGoodRoutingSignal: jest.fn().mockResolvedValue(null),
+    getLastKnownGoodRoutingSignalWithSource: jest.fn().mockResolvedValue(null),
     cacheProviderDisagreement: jest.fn().mockResolvedValue(undefined),
     getCachedProviderDisagreement: jest.fn().mockResolvedValue(null),
   }
@@ -384,6 +386,65 @@ describe('ProviderRouter', () => {
       expect(record.signal.provenance.fallbackUsed).toBe(true)
       expect(record.signal.carbonIntensity).toBeGreaterThan(180)
       expect(record.degraded).toBe(true)
+    })
+  })
+
+  describe('getHotPathRoutingSignalRecord', () => {
+    it('uses cache-first precedence and never falls through to live providers when warm data exists', async () => {
+      const { GridSignalCache } = require('../lib/grid-signals/grid-signal-cache')
+      const { wattTime } = require('../lib/watttime')
+
+      GridSignalCache.getCachedRoutingSignalWithSource.mockResolvedValue({
+        source: 'warm',
+        record: {
+          signal: {
+            carbonIntensity: 140,
+            source: 'watttime',
+            isForecast: false,
+            confidence: 0.92,
+            signalMode: 'marginal',
+            accountingMethod: 'marginal',
+            provenance: {
+              sourceUsed: 'WATTTIME_MOER',
+              contributingSources: ['watttime'],
+              referenceTime: new Date().toISOString(),
+              fetchedAt: new Date().toISOString(),
+              fallbackUsed: false,
+              disagreementFlag: false,
+              disagreementPct: 0,
+            },
+          },
+          fetchedAt: new Date().toISOString(),
+          stalenessSec: 4,
+          lastLatencyMs: 8,
+          degraded: false,
+          cacheSource: 'warm',
+        },
+      })
+
+      const record = await router.getHotPathRoutingSignalRecord('us-east-1', new Date())
+
+      expect(record.cacheSource).toBe('warm')
+      expect(record.signal.provenance.sourceUsed.startsWith('WARM_CACHE_')).toBe(true)
+      expect(GridSignalCache.getLastKnownGoodRoutingSignalWithSource).not.toHaveBeenCalled()
+      expect(wattTime.getCurrentMOER).not.toHaveBeenCalled()
+      expect(wattTime.getMOERForecast).not.toHaveBeenCalled()
+    })
+
+    it('falls back to deterministic degraded-safe output when no hot-path cache data exists', async () => {
+      const { GridSignalCache } = require('../lib/grid-signals/grid-signal-cache')
+      const { wattTime } = require('../lib/watttime')
+
+      GridSignalCache.getCachedRoutingSignalWithSource.mockResolvedValue(null)
+      GridSignalCache.getLastKnownGoodRoutingSignalWithSource.mockResolvedValue(null)
+
+      const record = await router.getHotPathRoutingSignalRecord('us-east-1', new Date())
+
+      expect(record.cacheSource).toBe('degraded-safe')
+      expect(record.signal.source).toBe('fallback')
+      expect(record.signal.provenance.fallbackUsed).toBe(true)
+      expect(wattTime.getCurrentMOER).not.toHaveBeenCalled()
+      expect(wattTime.getMOERForecast).not.toHaveBeenCalled()
     })
   })
 })

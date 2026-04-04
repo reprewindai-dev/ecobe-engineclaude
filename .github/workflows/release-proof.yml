@@ -126,10 +126,35 @@ jobs:
           name: release-proof-load-report
           path: ecobe-engine/data/perf/ci-load-tests/latest.json
 
+  claim-certification:
+    name: Claim Certification
+    runs-on: ubuntu-latest
+    needs: determine-scope
+    if: ${{ needs.determine-scope.outputs.docs_only != 'true' || github.event_name == 'workflow_dispatch' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Certify public claims
+        env:
+          CLAIM_CERT_OUTPUT_PATH: .github-artifacts/claim-certification/result.json
+        run: node .github/scripts/certify-public-claims.mjs
+
+      - name: Upload claim-certification result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claim-certification-result
+          path: .github-artifacts/claim-certification/result.json
+
   release-proof-status:
     name: Release Proof
     runs-on: ubuntu-latest
-    needs: [determine-scope, engine-release-proof, engine-live-load]
+    needs: [determine-scope, engine-release-proof, engine-live-load, claim-certification]
     if: always()
     steps:
       - name: Skip docs-only changes
@@ -142,7 +167,8 @@ jobs:
         shell: bash
         run: |
           if [ "${{ needs.engine-release-proof.result }}" != "success" ] || \
-             [ "${{ needs.engine-live-load.result }}" != "success" ]; then
+             [ "${{ needs.engine-live-load.result }}" != "success" ] || \
+             [ "${{ needs.claim-certification.result }}" != "success" ]; then
             echo "Release proof failed"
             exit 1
           fi
@@ -151,8 +177,8 @@ jobs:
   failure-alert:
     name: Release Proof Failure Alert
     runs-on: ubuntu-latest
-    needs: [determine-scope, engine-release-proof, engine-live-load]
-    if: ${{ always() && needs.determine-scope.outputs.engine_live_required == 'true' && (needs.engine-release-proof.result == 'failure' || needs.engine-live-load.result == 'failure') }}
+    needs: [determine-scope, engine-release-proof, engine-live-load, claim-certification]
+    if: ${{ always() && needs.determine-scope.outputs.engine_live_required == 'true' && (needs.engine-release-proof.result == 'failure' || needs.engine-live-load.result == 'failure' || needs.claim-certification.result == 'failure') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -168,4 +194,4 @@ jobs:
           RESEND_FROM_ALERTS: ${{ secrets.RESEND_FROM_ALERTS }}
           ALERT_INBOX_EMAIL: ${{ secrets.ALERT_INBOX_EMAIL }}
           ALERT_SUBJECT: CO2 Router release proof failure
-          ALERT_SUMMARY: Engine release proof or live load gate failed.
+          ALERT_SUMMARY: Engine release proof, live load gate, or claim certification failed.
