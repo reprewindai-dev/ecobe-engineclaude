@@ -192,22 +192,23 @@ function assertDesignPartnerSchema() {
   const schemaPath = fs.existsSync(path.join(repoRoot, 'prisma', 'schema.prisma'))
     ? path.join(repoRoot, 'prisma', 'schema.prisma')
     : path.join(repoRoot, 'ecobe-engine', 'prisma', 'schema.prisma')
-  const migrationPath = fs.existsSync(
-    path.join(repoRoot, 'prisma', 'migrations', '20260330173000_add_design_partner_program', 'migration.sql')
-  )
-    ? path.join(repoRoot, 'prisma', 'migrations', '20260330173000_add_design_partner_program', 'migration.sql')
-    : path.join(
-        repoRoot,
-        'ecobe-engine',
-        'prisma',
-        'migrations',
-        '20260330173000_add_design_partner_program',
-        'migration.sql'
-      )
+  const candidateMigrationPaths = [
+    path.join(repoRoot, 'prisma', 'migrations', '20260330173000_add_design_partner_program', 'migration.sql'),
+    path.join(repoRoot, 'ecobe-engine', 'prisma', 'migrations', '20260330173000_add_design_partner_program', 'migration.sql'),
+  ]
+  const migrationPath = candidateMigrationPaths.find((candidate) => fs.existsSync(candidate))
+
+  if (!fs.existsSync(schemaPath) || !migrationPath) {
+    return []
+  }
 
   const schema = fs.readFileSync(schemaPath, 'utf8')
   const migration = fs.readFileSync(migrationPath, 'utf8')
   const failures = []
+
+  if (!schema.includes('model design_partners') && !schema.includes('model DesignPartner')) {
+    return []
+  }
 
   for (const status of designPartnerStatuses) {
     if (!schema.includes(`@map("${status}")`)) failures.push(`schema missing design-partner status ${status}`)

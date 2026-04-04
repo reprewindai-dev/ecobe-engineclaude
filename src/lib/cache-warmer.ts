@@ -5,7 +5,7 @@ import { denmarkCarbon } from './denmark-carbon'
 import { finlandCarbon } from './finland-carbon'
 import { gbCarbonIntensity } from './gb-carbon-intensity'
 import { GridSignalCache } from './grid-signals/grid-signal-cache'
-import { recordTelemetryMetric, telemetryMetricNames } from './observability/telemetry'
+import { recordTelemetryMetric } from './observability/telemetry'
 import { redis } from './redis'
 
 const DEFAULT_SUPPORTED_REGIONS = [
@@ -17,15 +17,28 @@ const DEFAULT_SUPPORTED_REGIONS = [
   'ap-northeast-1',
 ]
 
+const configuredRequiredRegions = process.env.ROUTING_SIGNAL_REQUIRED_REGIONS
+  ?.split(',')
+  .map((region) => region.trim())
+  .filter(Boolean)
+
 const SUPPORTED_REGIONS =
-  env.ROUTING_SIGNAL_REQUIRED_REGIONS.length > 0
-    ? env.ROUTING_SIGNAL_REQUIRED_REGIONS
+  configuredRequiredRegions && configuredRequiredRegions.length > 0
+    ? configuredRequiredRegions
     : DEFAULT_SUPPORTED_REGIONS
 
 const AMBIENT_PROVIDER_PROBE_INTERVAL_MS = 15 * 60 * 1000
+const WARM_LOOP_INTERVAL_MS = Math.max(
+  5_000,
+  Number.parseInt(process.env.ROUTING_SIGNAL_WARM_LOOP_INTERVAL_MS ?? '', 10) || 30_000
+)
 const recentRegions = new Map<string, number>()
 let warmLoopTimer: NodeJS.Timeout | null = null
 let lastAmbientProviderProbeAt = 0
+const routingWarmLoopCycleMetric = 'ecobe.routing.warm_loop.cycle.count'
+const routingCacheCoverageMetric = 'ecobe.routing.cache.coverage.pct'
+const routingWarmLoopLagMetric = 'ecobe.routing.warm_loop.lag.seconds'
+const routingWarmLoopFailureMetric = 'ecobe.routing.warm_loop.failure.count'
 
 async function runAmbientProviderProbe() {
   const probes: Promise<unknown>[] = [gbCarbonIntensity.getCurrentIntensity(), denmarkCarbon.getCurrentIntensity()]
@@ -63,7 +76,7 @@ export function trackRecentRoutingRegions(regions: string[]) {
 
 export async function warmCacheOnStartup(): Promise<void> {
   const startedAt = Date.now()
-  const nextRunAt = new Date(startedAt + Math.max(5_000, env.ROUTING_SIGNAL_WARM_LOOP_INTERVAL_MS))
+  const nextRunAt = new Date(startedAt + WARM_LOOP_INTERVAL_MS)
 
   setWorkerStatus('routingSignalWarmLoop', {
     running: true,
@@ -106,18 +119,18 @@ export async function warmCacheOnStartup(): Promise<void> {
       (result) => result.status === 'fulfilled' && result.value.status === 'ok'
     ).length
 
-    recordTelemetryMetric(telemetryMetricNames.routingWarmLoopCycleCount, 'counter', 1, {
+    recordTelemetryMetric(routingWarmLoopCycleMetric, 'counter', 1, {
       requested_regions: regions.length,
       warmed_regions: succeeded,
     })
     recordTelemetryMetric(
-      telemetryMetricNames.routingCacheCoveragePct,
+      routingCacheCoverageMetric,
       'gauge',
       regions.length > 0 ? (succeeded / regions.length) * 100 : 0,
       { scope: 'warm_loop' }
     )
     recordTelemetryMetric(
-      telemetryMetricNames.routingWarmLoopLagSeconds,
+      routingWarmLoopLagMetric,
       'gauge',
       Math.max(0, Math.round((Date.now() - startedAt) / 1000)),
       { scope: 'warm_loop' }
@@ -139,7 +152,7 @@ export async function warmCacheOnStartup(): Promise<void> {
     }
   } catch (error) {
     console.error('Fatal error during routing cache warming:', error)
-    recordTelemetryMetric(telemetryMetricNames.routingWarmLoopFailureCount, 'counter', 1, {
+    recordTelemetryMetric(routingWarmLoopFailureMetric, 'counter', 1, {
       scope: 'warm_loop',
     })
   } finally {
@@ -153,18 +166,17 @@ export async function warmCacheOnStartup(): Promise<void> {
 export function startRoutingSignalWarmLoop() {
   if (warmLoopTimer) return
 
-  const intervalMs = Math.max(5_000, env.ROUTING_SIGNAL_WARM_LOOP_INTERVAL_MS)
   warmLoopTimer = setInterval(() => {
     void warmCacheOnStartup().catch((error) => {
       console.error('Routing signal warm loop failed:', error)
     })
-  }, intervalMs)
+  }, WARM_LOOP_INTERVAL_MS)
   warmLoopTimer.unref?.()
 
   setWorkerStatus('routingSignalWarmLoop', {
     running: true,
     lastRun: null,
-    nextRun: new Date(Date.now() + intervalMs).toISOString(),
+    nextRun: new Date(Date.now() + WARM_LOOP_INTERVAL_MS).toISOString(),
   })
 }
 
@@ -189,7 +201,7 @@ export async function getCacheHealthStatus(): Promise<{
     totalKeys: number
     keyTypes: Record<string, number>
     regions: Record<string, number>
-    l1: {
+    l1?: {
       routingSignalEntries: number
       routingLkgEntries: number
     }
@@ -216,7 +228,7 @@ export async function getCacheHealthStatus(): Promise<{
 
     const [warmCoverage, lkgCoverage] = await Promise.all([
       Promise.all(
-        SUPPORTED_REGIONS.map(async (region) => {
+        SUPPORTED_REGIONS.map(async (region: string) => {
           const [current, next] = await Promise.all([
             GridSignalCache.getCachedRoutingSignal(region, currentBucket.toISOString()),
             GridSignalCache.getCachedRoutingSignal(region, nextBucket.toISOString()),
@@ -225,7 +237,7 @@ export async function getCacheHealthStatus(): Promise<{
         })
       ),
       Promise.all(
-        SUPPORTED_REGIONS.map(async (region) =>
+        SUPPORTED_REGIONS.map(async (region: string) =>
           Boolean(await GridSignalCache.getLastKnownGoodRoutingSignal(region))
         )
       ),
