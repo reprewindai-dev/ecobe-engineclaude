@@ -268,6 +268,9 @@ export interface CiRouteResponse {
       matrixAllowedRegions: string[]
     }
   }
+  workloadClass?: WorkloadClass
+  decisionExplanation?: DecisionExplanationContract | null
+  decisionTrust?: DecisionTrustContract | null
   workflowOutputs: Record<string, string | number | boolean | null>
   candidateEvaluations: Array<{
     region: string
@@ -543,6 +546,162 @@ export interface ControlSurfaceOverview {
 
 export type WorldExecutionState = 'active' | 'marginal' | 'blocked'
 
+export type WorkloadClass = 'batch' | 'interactive' | 'critical' | 'regulated' | 'emergency'
+
+export interface DecisionExplanationContract {
+  whyAction: string
+  dominantConstraint: string
+  counterfactualCondition: string
+}
+
+export interface DecisionTrustContract {
+  signalFreshness: {
+    carbonFreshnessSec: number | null
+    waterFreshnessSec: number | null
+  }
+  providerTrust: {
+    providerTrustTier: string
+    carbonProvider: string
+  }
+  replayability: {
+    summary: string
+  }
+  degradedState: {
+    degraded: boolean
+    summary: string
+  }
+  fallbackMode: {
+    engaged: boolean
+    summary: string
+  }
+}
+
+export interface HallOGridAdapterProfile {
+  id: string
+  label: string
+  kind: 'canonical' | 'sse' | 'websocket' | 'polling'
+  enabled: boolean
+  notes: string
+}
+
+export interface HallOGridFrame {
+  id: string
+  createdAt: string
+  action: 'run_now' | 'reroute' | 'delay' | 'throttle' | 'deny'
+  region: string
+  reasonCode: string
+  reasonLabel: string
+  workloadClass: WorkloadClass
+  proofState: 'available' | 'unavailable'
+  replayState: 'verified' | 'mismatch' | 'pending' | 'unavailable'
+  traceState: 'locked' | 'unavailable'
+  governanceSource: string | null
+  explanation: {
+    headline: string
+    dominantConstraint: string
+    counterfactual: string
+  }
+  trust: {
+    tier: string
+    freshnessLabel: string
+    replayability: string
+    degraded: boolean
+    summary: string
+  }
+  metrics: {
+    totalLatencyMs: number | null
+    computeLatencyMs: number | null
+    carbonReductionPct: number | null
+    waterImpactDeltaLiters: number | null
+    signalConfidence: number | null
+  }
+  runtime: {
+    signalMode: string | null
+    accountingMethod: string | null
+    waterAuthorityMode: string | null
+    fallbackUsed: boolean
+    systemState: WorldExecutionState
+  }
+}
+
+export interface HallOGridFrameDetail {
+  generatedAt: string
+  frame: HallOGridFrame
+  evidence: {
+    trace: {
+      available: boolean
+      hash: string | null
+      inputHash: string | null
+      sequenceNumber: number | null
+      createdAt: string | null
+      governanceSource: string | null
+      constraintsApplied: string[]
+      candidates: Array<{
+        region: string
+        score: number
+        waterStressIndex: number
+        cacheStatus: string | null
+      }>
+    }
+    replay: {
+      available: boolean
+      deterministicMatch: boolean | null
+      traceBacked: boolean
+      mismatches: string[]
+      selectedRegion: string | null
+      selectedAction: string | null
+      reasonCode: string | null
+      proofHash: string | null
+    }
+    proof: {
+      hash: string | null
+      evidenceRefs: string[]
+      providerSnapshotRefs: string[]
+      notBefore: string | null
+    }
+  }
+  explanation: DecisionExplanationContract | null
+  trust: DecisionTrustContract | null
+}
+
+export interface CommandCenterProjectionSnapshot {
+  dataStatus: 'live' | 'stale' | 'broken'
+  projectionLagSec: number | null
+  latestProjectionAt?: string | null
+  latestCanonicalAt?: string | null
+  quality: { suspectCount: number; invalidCount: number }
+  outbox: {
+    pending: number
+    failed: number
+  } | null
+}
+
+export interface HallOGridSnapshot {
+  generatedAt: string
+  selectedFrameId: string | null
+  title: string
+  subtitle: string
+  projection: CommandCenterProjectionSnapshot
+  selectedFrame: HallOGridFrameDetail | null
+  frames: HallOGridFrame[]
+  world: {
+    nodes: WorldRegionState[]
+    flows: WorldRoutingFlow[]
+  }
+  governance: SaiqGovernanceSnapshot
+  traceStream: {
+    items: TraceEventItem[]
+  }
+  health: SystemHealthSnapshot
+  transport: {
+    mode: string
+    streamHealthy: boolean
+    snapshotUrl: string
+    streamUrl: string
+    adapters: HallOGridAdapterProfile[]
+  }
+}
+
 export interface DecisionTraceRawRecord {
   sequenceNumber: number
   decisionFrameId: string
@@ -730,6 +889,7 @@ export interface CommandCenterDecisionItem {
   governanceSource: string | null
   latencyTotalMs: number | null
   latencyComputeMs: number | null
+  signalConfidence: number | null
   signalMode: 'marginal' | 'average' | 'fallback' | null
   accountingMethod: 'marginal' | 'flow-traced' | 'average' | null
   waterAuthorityMode: 'basin' | 'facility_overlay' | 'fallback' | null
@@ -746,6 +906,16 @@ export interface WorldRegionState {
   decisionFrameId: string | null
   action: string | null
   reasonCode: string | null
+  confidenceTier: 'high' | 'medium' | 'low'
+  freshnessState: 'fresh' | 'degraded' | 'stale'
+  pressureLevel: 'low' | 'medium' | 'high'
+  signalConfidence: number | null
+  decisionState: 'run' | 'guarded' | 'blocked'
+  providerHealth?: { healthy: number; degraded: number; offline: number }
+  selected?: boolean
+  lastChangedAt?: string
+  routePressure?: number
+  blockedFocusLanes?: number
 }
 
 export interface WorldRoutingFlow {
@@ -800,6 +970,7 @@ export interface SystemHealthSnapshot {
 export interface CommandCenterSnapshot {
   generatedAt: string
   selectedDecisionFrameId: string | null
+  projection: CommandCenterProjectionSnapshot
   header: CommandCenterHeader
   world: {
     nodes: WorldRegionState[]

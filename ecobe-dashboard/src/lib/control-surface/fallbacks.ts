@@ -60,6 +60,14 @@ export const FALLBACK_LIVE_SYSTEM_SNAPSHOT: LiveSystemSnapshot = {
 export const FALLBACK_COMMAND_CENTER_SNAPSHOT: CommandCenterSnapshot = {
   generatedAt: 'Shell ready',
   selectedDecisionFrameId: null,
+  projection: {
+    dataStatus: 'broken',
+    projectionLagSec: null,
+    latestProjectionAt: null,
+    latestCanonicalAt: null,
+    quality: { suspectCount: 0, invalidCount: 0 },
+    outbox: null,
+  },
   header: {
     systemActive: null,
     systemStatus: 'shell-ready',
