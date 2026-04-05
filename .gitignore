@@ -33,6 +33,7 @@ ecobe-engine/.windsurf/
 
 # Claude local settings (contains machine-specific permissions)
 .claude/settings.local.json
+.claude/worktrees/
 
 # logs
 *.log

@@ -27,6 +27,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -43,7 +46,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Verify canonical freeze scope
         run: node .github/scripts/check-freeze-scope.mjs
@@ -63,7 +66,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: ecobe-dashboard/package-lock.json
 
@@ -92,7 +95,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: ecobe-engine/package-lock.json
 
@@ -115,7 +118,7 @@ jobs:
           DIRECT_DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
 
       - name: Run targeted tests
-        run: npm test -- --runInBand --passWithNoTests ci-authorization ci-response-v2-contract ci-replay-determinism ci-trace dekes-canonical github-actions-policy grid-intelligence k8s-policy provider-router routing-contract seked-internal system-status grid-signal-cache-bucket
+        run: npm test -- --runInBand --passWithNoTests ci-authorization ci-response-v2-contract ci-replay-determinism ci-trace dekes-canonical decision-projection github-actions-policy grid-intelligence k8s-policy provider-router routing-contract seked-internal system-status grid-signal-cache-bucket
         env:
           DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
           DIRECT_DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder

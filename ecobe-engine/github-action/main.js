@@ -2,9 +2,19 @@ const fs = require('fs')
 const os = require('os')
 
 function getInput(name, fallback = '') {
-  const envName = `INPUT_${name.replace(/ /g, '_').replace(/-/g, '_').toUpperCase()}`
-  const value = process.env[envName]
-  return value == null ? fallback : value.trim()
+  const envNames = [
+    `INPUT_${name.replace(/ /g, '_').toUpperCase()}`,
+    `INPUT_${name.replace(/ /g, '_').replace(/-/g, '_').toUpperCase()}`,
+  ]
+
+  for (const envName of envNames) {
+    const value = process.env[envName]
+    if (value != null && value.trim() !== '') {
+      return value.trim()
+    }
+  }
+
+  return fallback
 }
 
 function requireInput(name) {

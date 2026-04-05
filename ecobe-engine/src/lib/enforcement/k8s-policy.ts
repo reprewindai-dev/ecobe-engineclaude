@@ -221,6 +221,24 @@ function finalizeGatekeeper(plan: KubernetesEnforcementPlan) {
           names: {
             kind: 'EcobeDecisionGuard',
           },
+          validation: {
+            openAPIV3Schema: {
+              type: 'object',
+              properties: {
+                parameters: {
+                  type: 'object',
+                  properties: {
+                    decisionFrameId: { type: 'string' },
+                    selectedRegion: { type: 'string' },
+                    notBefore: { type: 'string', nullable: true },
+                    minReplicaFactor: { type: 'number' },
+                    maxReplicaFactor: { type: 'number' },
+                    blocked: { type: 'boolean' },
+                  },
+                },
+              },
+            },
+          },
         },
       },
       targets: [
@@ -229,9 +247,31 @@ function finalizeGatekeeper(plan: KubernetesEnforcementPlan) {
           rego: `
 package ecobedecisionguard
 
+object_labels(obj) := object.get(object.get(obj, "metadata", {}), "labels", {})
+
+template_labels(obj) := object.get(object.get(object.get(object.get(obj, "spec", {}), "template", {}), "metadata", {}), "labels", {})
+
+label_value(obj, key) := value {
+  value := object.get(object_labels(obj), key, "")
+} else := value {
+  value := object.get(template_labels(obj), key, "")
+}
+
+desired_replicas(obj) := replicas {
+  replicas := object.get(object.get(obj, "spec", {}), "replicas", 1)
+}
+
+effective_max_replicas(max_factor) := replicas {
+  max_factor == 0
+  replicas := 0
+} else := replicas {
+  max_factor > 0
+  replicas := ceil(max_factor)
+}
+
 violation[{"msg": msg}] {
   required := {"ecobe.io/decision-frame", "ecobe.io/region", "ecobe.io/decision"}
-  provided := {key | input.review.object.metadata.labels[key]}
+  provided := {key | required[key]; label_value(input.review.object, key) != ""}
   missing := required - provided
   count(missing) > 0
   msg := sprintf("missing ecobe labels: %v", [missing])
@@ -239,7 +279,7 @@ violation[{"msg": msg}] {
 
 violation[{"msg": msg}] {
   expected := input.parameters.selectedRegion
-  actual := input.review.object.metadata.labels["ecobe.io/region"]
+  actual := label_value(input.review.object, "ecobe.io/region")
   expected != actual
   msg := sprintf("region %v violates ecobe authorization region %v", [actual, expected])
 }
@@ -247,6 +287,19 @@ violation[{"msg": msg}] {
 violation[{"msg": msg}] {
   input.parameters.blocked
   msg := "workload is blocked by ecobe authorization"
+}
+
+violation[{"msg": msg}] {
+  input.parameters.notBefore != null
+  time.now_ns() < time.parse_rfc3339_ns(input.parameters.notBefore)
+  msg := sprintf("workload is deferred until %v", [input.parameters.notBefore])
+}
+
+violation[{"msg": msg}] {
+  replicas := desired_replicas(input.review.object)
+  allowed := effective_max_replicas(input.parameters.maxReplicaFactor)
+  replicas > allowed
+  msg := sprintf("replicas %v exceed ecobe authorized maximum %v", [replicas, allowed])
 }
 `,
         },
@@ -261,11 +314,20 @@ violation[{"msg": msg}] {
       name: plan.gatekeeper.constraintName,
     },
     spec: {
+      enforcementAction: 'deny',
       match: {
         kinds: [
           {
             apiGroups: [''],
             kinds: ['Pod'],
+          },
+          {
+            apiGroups: ['apps'],
+            kinds: ['Deployment', 'StatefulSet'],
+          },
+          {
+            apiGroups: ['batch'],
+            kinds: ['Job'],
           },
         ],
         labelSelector,

@@ -8,6 +8,7 @@ import { GridSignalCache } from '../lib/grid-signals/grid-signal-cache'
 import { getProviderFreshness } from '../lib/routing'
 
 const router = Router()
+type ProviderFreshnessEntry = Awaited<ReturnType<typeof getProviderFreshness>>[number]
 
 function resolveBaseUrl(req: Request) {
   const protocol = req.headers['x-forwarded-proto']?.toString().split(',')[0] ?? req.protocol
@@ -158,7 +159,9 @@ router.get('/status', async (req: Request, res: Response) => {
           prisma.decisionProjectionOutbox.count({ where: { status: 'FAILED' } }),
           prisma.decisionProjectionOutbox.count({ where: { status: 'DEAD_LETTER' } }),
           getDecisionProjectionFreshness(),
-          getProviderFreshness().catch(() => []),
+          getProviderFreshness().catch(
+            () => [] as Awaited<ReturnType<typeof getProviderFreshness>>
+          ),
         ])
 
         decisionEventOutbox = { pending, processing, failed, deadLetter, sent }
@@ -177,20 +180,26 @@ router.get('/status', async (req: Request, res: Response) => {
           quality: projectionFreshness.quality,
         }
         providerFreshnessSummary = {
-          healthy: providerFreshness.filter((provider) => provider.status === 'healthy').length,
-          degraded: providerFreshness.filter((provider) => provider.status === 'degraded').length,
-          offline: providerFreshness.filter((provider) => provider.status === 'offline').length,
-          stale: providerFreshness.filter((provider) => provider.isStale).length,
+          healthy: providerFreshness.filter(
+            (provider: ProviderFreshnessEntry) => provider.status === 'healthy'
+          ).length,
+          degraded: providerFreshness.filter(
+            (provider: ProviderFreshnessEntry) => provider.status === 'degraded'
+          ).length,
+          offline: providerFreshness.filter(
+            (provider: ProviderFreshnessEntry) => provider.status === 'offline'
+          ).length,
+          stale: providerFreshness.filter((provider: ProviderFreshnessEntry) => provider.isStale).length,
           maxFreshnessSec:
             providerFreshness.length > 0
-              ? providerFreshness.reduce<number | null>((max, provider) => {
+              ? providerFreshness.reduce<number | null>((max, provider: ProviderFreshnessEntry) => {
                   if (!Number.isFinite(provider.freshnessSec) || provider.freshnessSec < 0) {
                     return max
                   }
                   return max === null ? provider.freshnessSec : Math.max(max, provider.freshnessSec)
                 }, null)
               : null,
-          providers: providerFreshness.map((provider) => ({
+          providers: providerFreshness.map((provider: ProviderFreshnessEntry) => ({
             provider: provider.provider,
             status: provider.status,
             freshnessSec: provider.freshnessSec,

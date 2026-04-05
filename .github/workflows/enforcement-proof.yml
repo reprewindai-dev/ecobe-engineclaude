@@ -23,6 +23,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 concurrency:
   group: enforcement-proof-${{ github.ref }}
   cancel-in-progress: true
@@ -74,12 +77,15 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: ecobe-engine/package-lock.json
 
       - name: Install engine dependencies
         run: npm --prefix ecobe-engine ci
+
+      - name: Prisma generate
+        run: npm --prefix ecobe-engine run prisma:generate
 
       - name: Prisma migrate deploy
         run: npm --prefix ecobe-engine run prisma:migrate:deploy
@@ -132,7 +138,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Start mock authorization server
         shell: bash
@@ -274,7 +280,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: ecobe-engine/package-lock.json
 
@@ -323,8 +329,15 @@ jobs:
         shell: bash
         run: |
           kubectl apply -f .github-artifacts/gatekeeper-proof/deny/gatekeeper-template.yaml
+          for attempt in {1..60}; do
+            created=$(kubectl get constrainttemplate ecobedecisionguard -o jsonpath='{.status.created}' 2>/dev/null || true)
+            if [ "$created" = "true" ]; then
+              break
+            fi
+            sleep 2
+          done
           kubectl apply -f .github-artifacts/gatekeeper-proof/deny/gatekeeper-constraint.yaml
-          sleep 25
+          sleep 20
 
       - name: Assert denied workload is blocked at admission
         shell: bash
