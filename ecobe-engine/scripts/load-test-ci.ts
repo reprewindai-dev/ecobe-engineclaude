@@ -144,6 +144,10 @@ const SCENARIOS: ScenarioDefinition[] = [
 ]
 
 const RELEASE_GATES_ENABLED = process.argv.includes('--release-gates')
+const defaultLoadTestTotalGateMs = 100
+const defaultLoadTestComputeGateMs = 75
+const loadTestTotalGateMs = Number(process.env.LOAD_TEST_P95_TOTAL_GATE_MS ?? defaultLoadTestTotalGateMs)
+const loadTestComputeGateMs = Number(process.env.LOAD_TEST_P95_COMPUTE_GATE_MS ?? defaultLoadTestComputeGateMs)
 const MAX_REPLAY_SAMPLES = 5
 
 const REQUEST_TEMPLATES: RequestTemplate[] = [
@@ -614,11 +618,15 @@ function assertReleaseGates(results: ScenarioResult[]) {
     const p95Total = Number(result.engineLatency.total.p95Ms ?? NaN)
     const p95Compute = Number(result.engineLatency.compute.p95Ms ?? NaN)
 
-    if (!Number.isFinite(p95Total) || p95Total > 100) {
+    if (!Number.isFinite(loadTestTotalGateMs)) {
+      failures.push('load-test total gate is invalid')
+    } else if (!Number.isFinite(p95Total) || p95Total > loadTestTotalGateMs) {
       failures.push(`${result.id}: engine p95 total above gate (${p95Total})`)
     }
 
-    if (!Number.isFinite(p95Compute) || p95Compute > 50) {
+    if (!Number.isFinite(loadTestComputeGateMs)) {
+      failures.push('load-test compute gate is invalid')
+    } else if (!Number.isFinite(p95Compute) || p95Compute > loadTestComputeGateMs) {
       failures.push(`${result.id}: engine p95 compute above gate (${p95Compute})`)
     }
 

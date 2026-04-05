@@ -1,0 +1,509 @@
+contract_id: ecobe-co2-router-data-pipelines-v1
+contract_version: 1
+orchestration_model: declarative_dependency_graph
+runtime_modes:
+  - streaming
+  - batch
+platform_defaults:
+  idempotency:
+    rule: Every stage must use its declared business key or event key to make writes upsert-safe or append-safe.
+    duplicate_handling: Duplicate inputs with the same idempotency key must be ignored or merged without changing prior authoritative outputs.
+  replay:
+    rule: Replay runs must consume event_time-ordered inputs, fixed schema versions, fixed policy versions, and fixed engine_build_ref values.
+    output_rule: Replay outputs must match the original decision_action, selected_region, decision_reason_code, canonical_input_hash, deterministic_trace_hash, and proof_hash.
+  schema_evolution:
+    rule: Additive changes are forward-compatible; breaking changes require a new schema_version and dual-read period.
+    backfill_rule: Historical backfills must materialize the latest compatible Silver and Gold schemas without rewriting prior Bronze payloads.
+  failure_model:
+    rule: No manual orchestration. Each stage advances only when declared input freshness, dependency completion, and data quality contracts are satisfied.
+    quarantine_rule: Contract-violating rows move to quarantine topics or tables and never block healthy partitions.
+stages:
+  - name: bronze_provider_signal_ingest
+    inputs:
+      tables: []
+      topics:
+        - topic.provider_signals.raw
+    outputs:
+      tables:
+        - bronze_provider_signal_ingest
+      topics:
+        - topic.provider_signals.accepted
+        - topic.provider_signals.quarantined
+    transform_logic:
+      - Persist each raw provider payload exactly once with payload_sha256, schema_version, event_time, and ingest metadata.
+      - Reject malformed provider envelopes, but retain them in quarantine with the original payload hash.
+      - Preserve provider ordering per provider_name and region_code by observed_at.
+    data_quality_checks:
+      - provider_name is present and allowed by catalog.
+      - observed_at is present and not more than accepted drift ahead of collector time.
+      - payload_sha256 is unique within provider_name, region_code, signal_family, and observed_at.
+      - schema_version is recognized.
+    dependencies: []
+    failure_retry_behavior:
+      mode: append_only_retry
+      retry_policy: Retry transient collector failures with exponential backoff; never rewrite successful rows.
+      quarantine_policy: Invalid rows route to topic.provider_signals.quarantined and require operator review only for parser fixes, not for row acceptance.
+    execution_modes:
+      streaming: continuous
+      batch: backfill by provider_name plus observed_at range
+    idempotency_guarantees:
+      key: provider_name + region_code + signal_family + observed_at + payload_sha256
+      behavior: duplicate_ingests_noop
+    deterministic_replay_rules:
+      - Replay reuses stored Bronze payloads and original schema_version only.
+    schema_evolution_handling:
+      - New provider fields remain inside payload until Silver canonicalization supports them.
+
+  - name: bronze_policy_and_hook_ingest
+    inputs:
+      tables: []
+      topics:
+        - topic.policy_inputs.raw
+        - topic.external_hooks.raw
+        - topic.decision_requests.raw
+        - topic.metrics.raw
+    outputs:
+      tables:
+        - bronze_policy_input_ingest
+        - bronze_external_hook_ingest
+        - bronze_decision_event_intake
+        - bronze_metric_event_intake
+      topics:
+        - topic.policy_inputs.accepted
+        - topic.external_hooks.accepted
+        - topic.decision_requests.accepted
+        - topic.metrics.accepted
+        - topic.control_plane.quarantine
+    transform_logic:
+      - Persist raw tenant policy changes, webhook callbacks, decision requests, and metric envelopes with exact payload hashes and event times.
+      - Verify signatures for signed hooks at ingest time and store the verification result.
+      - Preserve engine_build_ref and idempotency_key for all decision requests.
+    data_quality_checks:
+      - tenant_id is present for tenant-scoped inputs.
+      - decision_frame_id is present for decision requests.
+      - signature_valid is computed for signed hook sources.
+      - metric_name and metric_value are present for raw metrics.
+    dependencies: []
+    failure_retry_behavior:
+      mode: append_only_retry
+      retry_policy: Retry transient write failures; invalid rows land in topic.control_plane.quarantine.
+      quarantine_policy: Quarantined records remain queryable and replayable but are excluded from downstream contracts until corrected by parser version.
+    execution_modes:
+      streaming: continuous
+      batch: backfill by topic, tenant_id, and event_time range
+    idempotency_guarantees:
+      key: source_topic + idempotency_key_or_payload_sha256
+      behavior: duplicate_ingests_noop
+    deterministic_replay_rules:
+      - Replay reuses the original Bronze decision requests and policy payloads without normalization drift.
+    schema_evolution_handling:
+      - New keys remain inside payload json until downstream schemas adopt them.
+
+  - name: silver_provider_normalization
+    inputs:
+      tables:
+        - bronze_provider_signal_ingest
+      topics:
+        - topic.provider_signals.accepted
+    outputs:
+      tables:
+        - silver_provider_signal_canonical
+      topics:
+        - topic.provider_signals.canonical
+        - topic.provider_signals.canonical_quarantine
+    transform_logic:
+      - Normalize provider payloads to canonical region codes, standardized carbon units, standardized water units, and shared confidence semantics.
+      - Emit one canonical row per provider signal event.
+      - Preserve source_record_id and canonical_schema_version on every row.
+    data_quality_checks:
+      - region_code resolves through the canonical region catalog.
+      - unit conversions are lossless within defined tolerance.
+      - confidence_score is within 0 to 1.
+      - source_record_id exists in Bronze.
+    dependencies:
+      - bronze_provider_signal_ingest
+    failure_retry_behavior:
+      mode: partition_retry
+      retry_policy: Retry parser or mapping failures after reference-data refresh; quarantine only the failing rows.
+      quarantine_policy: Canonicalization failures route to topic.provider_signals.canonical_quarantine and do not block other providers or regions.
+    execution_modes:
+      streaming: micro_batch_by_provider_and_region
+      batch: backfill by observed_at range
+    idempotency_guarantees:
+      key: source_record_id
+      behavior: upsert_same_value_only
+    deterministic_replay_rules:
+      - Replay uses the canonical_schema_version recorded on each Silver row or recomputes from Bronze using that same version.
+    schema_evolution_handling:
+      - Additive canonical columns default null until the producing parser version populates them.
+
+  - name: silver_signal_reconciliation
+    inputs:
+      tables:
+        - silver_provider_signal_canonical
+      topics:
+        - topic.provider_signals.canonical
+    outputs:
+      tables:
+        - silver_signal_state_reconciled
+      topics:
+        - topic.signal_state.reconciled
+    transform_logic:
+      - Group canonical signals by region_code and event-time window.
+      - Select the authoritative provider by freshness, provider priority, and quality score.
+      - Compute fallback_provider_name, provider_consensus_pct, and reconciled grid_condition.
+    data_quality_checks:
+      - each reconciled window has at least one canonical source row.
+      - selected_provider_name is not stale beyond its configured threshold.
+      - source_signal_ids is non-empty and ordered.
+      - provider_consensus_pct is within 0 to 1.
+    dependencies:
+      - silver_provider_signal_canonical
+    failure_retry_behavior:
+      mode: window_retry
+      retry_policy: Retry incomplete windows until watermark expiry; then emit a suspect state with dq_status=suspect if policy allows fallback.
+      quarantine_policy: Windows with no viable provider basis are quarantined and cannot feed decision computation.
+    execution_modes:
+      streaming: event_time_windowed
+      batch: window_rebuild_by_region_and_day
+    idempotency_guarantees:
+      key: region_code + state_window_start + reconciliation_rule_id
+      behavior: upsert_if_same_source_set
+    deterministic_replay_rules:
+      - Replay uses the reconciled state chosen for the original decision window, not newly refreshed provider data.
+    schema_evolution_handling:
+      - New provider attributes may influence future reconciliation_rule_id values but never rewrite past reconciled windows.
+
+  - name: silver_policy_materialization
+    inputs:
+      tables:
+        - bronze_policy_input_ingest
+      topics:
+        - topic.policy_inputs.accepted
+    outputs:
+      tables:
+        - silver_policy_rule_version
+      topics:
+        - topic.policy_versions.materialized
+    transform_logic:
+      - Materialize policy bundles into fully expanded rule documents with stable rule_hash and explicit effective windows.
+      - Stamp approval metadata and human review status onto every version.
+      - Keep superseded versions valid for replay even after newer versions exist.
+    data_quality_checks:
+      - effective_from is present.
+      - overlapping approved versions for the same tenant and subject_type are disallowed unless policy explicitly supports precedence.
+      - materialized_payload hashes to rule_hash.
+      - classification_review_status is present for assisted mappings.
+    dependencies:
+      - bronze_policy_input_ingest
+    failure_retry_behavior:
+      mode: version_retry
+      retry_policy: Retry failed materializations after reference data or template dependencies resolve.
+      quarantine_policy: Invalid policy documents remain in Bronze and never advance to approved Silver versions.
+    execution_modes:
+      streaming: event_driven
+      batch: rebuild versions by tenant and effective window
+    idempotency_guarantees:
+      key: tenant_id + policy_bundle_id + payload_sha256
+      behavior: duplicate_versions_noop
+    deterministic_replay_rules:
+      - Replay resolves the exact policy_version_id active for the original decision timestamp.
+    schema_evolution_handling:
+      - Breaking rule grammar changes require new rule_version and dual-read evaluators.
+
+  - name: silver_decision_preparation
+    inputs:
+      tables:
+        - bronze_decision_event_intake
+        - silver_signal_state_reconciled
+        - silver_policy_rule_version
+      topics:
+        - topic.decision_requests.accepted
+        - topic.signal_state.reconciled
+        - topic.policy_versions.materialized
+    outputs:
+      tables:
+        - silver_decision_input_envelope
+        - silver_policy_evaluation_trace
+        - silver_replay_artifact
+      topics:
+        - topic.decisions.prepared
+    transform_logic:
+      - Normalize raw decision requests into canonical workload and constraint envelopes.
+      - Bind each request to the exact reconciled signal window and policy version valid at request time.
+      - Execute deterministic policy evaluation and persist both rule trace and replay artifacts.
+    data_quality_checks:
+      - canonical_input_hash is present and unique per decision_frame_id.
+      - a single policy_version_id and signal_state_id are bound to each decision_frame_id.
+      - deterministic_inputs_hash equals canonical_input_hash in the policy trace.
+      - replay artifacts include candidate_set and score_vector for every prepared decision.
+    dependencies:
+      - silver_signal_reconciliation
+      - silver_policy_materialization
+    failure_retry_behavior:
+      mode: dependency_aware_retry
+      retry_policy: Wait for late signal_state or policy_version dependencies until watermark; then mark the request as blocked for operator review.
+      quarantine_policy: Prepared decisions with missing deterministic inputs do not advance to Gold.
+    execution_modes:
+      streaming: continuous_with_event_time_binding
+      batch: reprepare by tenant_id and decision_frame_id range
+    idempotency_guarantees:
+      key: tenant_id + decision_frame_id + canonical_schema_version
+      behavior: upsert_if_same_input_hash
+    deterministic_replay_rules:
+      - Replay reuses the original Silver envelope, policy trace, and replay artifacts unless explicit reconstitution is requested for verification.
+    schema_evolution_handling:
+      - New envelope fields may be added additively; replay always reads the original canonical_schema_version.
+
+  - name: gold_decision_computation
+    inputs:
+      tables:
+        - silver_decision_input_envelope
+        - silver_policy_evaluation_trace
+        - silver_replay_artifact
+      topics:
+        - topic.decisions.prepared
+    outputs:
+      tables:
+        - gold_routing_decision
+      topics:
+        - topic.decisions.authoritative
+    transform_logic:
+      - Compute the final routing action from the canonical envelope, policy trace, and replay artifacts.
+      - Persist selected_region, selected_provider, savings estimates, decision_reason_code, and proof_hash precursor fields.
+      - Treat the written Gold decision as the only authoritative decision outcome.
+    data_quality_checks:
+      - decision_action is one of run_now, reroute, delay, throttle, deny.
+      - policy_trace_id and input_envelope_id both exist.
+      - proof_hash precursor inputs are complete.
+      - only one authoritative Gold decision exists per tenant_id and decision_frame_id.
+    dependencies:
+      - silver_decision_preparation
+    failure_retry_behavior:
+      mode: deterministic_retry
+      retry_policy: Retry only when the same prepared inputs are available; mismatched recomputation is a hard failure.
+      quarantine_policy: Divergent recomputation routes to incident handling and blocks downstream proof and delivery.
+    execution_modes:
+      streaming: continuous
+      batch: deterministic_replay_by_decision_frame_id_range
+    idempotency_guarantees:
+      key: tenant_id + decision_frame_id
+      behavior: immutable_after_first_success
+    deterministic_replay_rules:
+      - Recomputed Gold decisions must exactly match the original decision_action, selected_region, decision_reason_code, canonical_input_hash, and deterministic_trace_hash.
+    schema_evolution_handling:
+      - New decision columns are additive only; past decisions are never rederived under a new semantic contract.
+
+  - name: gold_proof_chain_commit
+    inputs:
+      tables:
+        - gold_routing_decision
+        - silver_policy_evaluation_trace
+        - silver_replay_artifact
+      topics:
+        - topic.decisions.authoritative
+    outputs:
+      tables:
+        - gold_proof_hash_chain_record
+      topics:
+        - topic.proof_chain.committed
+    transform_logic:
+      - Build a canonical payload hash from the Gold decision, deterministic trace hash, and replay artifact root.
+      - Link each proof record to the previous_hash in the tenant chain.
+      - Sign the chain record and stamp verification metadata.
+    data_quality_checks:
+      - previous_hash continuity holds inside each chain_name and tenant_id.
+      - current_hash equals the canonicalized signed payload hash.
+      - signer_key_id is active and approved for the tenant scope.
+      - one proof record exists for each authoritative decision unless explicitly configured otherwise.
+    dependencies:
+      - gold_decision_computation
+    failure_retry_behavior:
+      mode: append_only_retry
+      retry_policy: Retry signing or anchor transient failures without mutating prior proof rows.
+      quarantine_policy: Decisions without proof cannot advance to delivery or disclosure exports.
+    execution_modes:
+      streaming: continuous
+      batch: chain_rebuild_by_tenant_and_sequence
+    idempotency_guarantees:
+      key: tenant_id + chain_name + decision_frame_id
+      behavior: duplicate_commit_noop_if_hash_matches
+    deterministic_replay_rules:
+      - Replay must regenerate the same payload_hash, current_hash, and proof_hash from stored inputs.
+    schema_evolution_handling:
+      - New proof metadata fields are additive and excluded from historical payload_hash calculations unless versioned.
+
+  - name: gold_outbox_publication
+    inputs:
+      tables:
+        - gold_routing_decision
+        - gold_proof_hash_chain_record
+        - silver_usage_meter_event
+      topics:
+        - topic.decisions.authoritative
+        - topic.proof_chain.committed
+    outputs:
+      tables:
+        - gold_signed_event_outbox
+      topics:
+        - topic.outbox.pending
+    transform_logic:
+      - Create signed outbound payloads for destinations declared in the tenant delivery catalog.
+      - Stamp event_key, payload_hash, signature, and retry schedule onto each outbox row.
+      - Emit meter events for billable delivery-producing actions when required.
+    data_quality_checks:
+      - proof exists before any proof-backed event is queued.
+      - event_key is unique per destination and decision_frame_id.
+      - payload_hash matches the serialized payload.
+      - destination_endpoint_id resolves to an active endpoint contract.
+    dependencies:
+      - gold_decision_computation
+      - gold_proof_chain_commit
+    failure_retry_behavior:
+      mode: enqueue_retry
+      retry_policy: Retry enqueue only if no outbox row exists for the same event_key.
+      quarantine_policy: Invalid destination contracts block only the affected endpoint, not the authoritative decision.
+    execution_modes:
+      streaming: continuous
+      batch: regenerate_pending_outbox_by_decision_frame_id
+    idempotency_guarantees:
+      key: tenant_id + destination_endpoint_id + event_key
+      behavior: immutable_after_first_success
+    deterministic_replay_rules:
+      - Replay regenerates identical payloads and signatures for the same destination contract version.
+    schema_evolution_handling:
+      - Payload contract changes require event_type versioning and endpoint compatibility declarations.
+
+  - name: gold_webhook_delivery
+    inputs:
+      tables:
+        - gold_signed_event_outbox
+      topics:
+        - topic.outbox.pending
+    outputs:
+      tables:
+        - gold_event_delivery_attempt
+        - gold_signed_event_outbox
+      topics:
+        - topic.outbox.delivered
+        - topic.outbox.failed
+    transform_logic:
+      - Deliver pending outbox rows according to endpoint retry policy.
+      - Append one delivery attempt record per send attempt.
+      - Advance outbox delivery_status only through declared state transitions.
+    data_quality_checks:
+      - every state transition has a matching delivery attempt row except initial pending.
+      - attempt_number is monotonic per outbox_id.
+      - retryable is set consistently with failure_class.
+      - delivered rows have terminal response evidence.
+    dependencies:
+      - gold_outbox_publication
+    failure_retry_behavior:
+      mode: scheduled_retry
+      retry_policy: Honor per-endpoint backoff and max_attempts; move exhausted messages to dead_letter.
+      quarantine_policy: Transport failures never mutate the authoritative decision or proof state.
+    execution_modes:
+      streaming: worker_loop_or_queue_consumer
+      batch: redrive_dead_letter_or_pending_by_schedule
+    idempotency_guarantees:
+      key: outbox_id + attempt_number
+      behavior: append_once_per_attempt
+    deterministic_replay_rules:
+      - Replay may re-emit delivery only under explicit operator authorization; default replay verifies payload and signature without redelivery.
+    schema_evolution_handling:
+      - Delivery attempt schema may grow additively; historical attempts remain immutable.
+
+  - name: gold_usage_and_slo_rollup
+    inputs:
+      tables:
+        - silver_usage_meter_event
+        - silver_slo_measurement
+        - silver_provider_signal_canonical
+        - gold_routing_decision
+        - gold_event_delivery_attempt
+      topics:
+        - topic.decisions.authoritative
+        - topic.outbox.delivered
+        - topic.outbox.failed
+    outputs:
+      tables:
+        - gold_slo_fact_minute
+        - gold_provider_freshness_fact
+        - gold_account_usage_fact
+        - gold_compliance_audit_fact
+      topics:
+        - topic.governance.audit_ready
+    transform_logic:
+      - Aggregate SLO metrics by minute bucket.
+      - Aggregate provider freshness and confidence facts by provider, signal family, region, and date.
+      - Roll up tenant and account usage into billable and non-billable hourly facts.
+      - Materialize audit facts joining decision, proof, policy, and provider lineage pointers.
+    data_quality_checks:
+      - hourly usage facts reconcile to raw meter-event totals within zero tolerance.
+      - SLO facts reconcile to source measurement counts.
+      - compliance audit facts have lineage_complete=true before export.
+      - every Gold decision has exactly one audit fact row.
+    dependencies:
+      - gold_decision_computation
+      - gold_proof_chain_commit
+      - gold_webhook_delivery
+    failure_retry_behavior:
+      mode: aggregate_retry
+      retry_policy: Retry late or incomplete windows until watermark expiry, then mark facts partial with explicit dq indicators.
+      quarantine_policy: Partial facts never overwrite complete facts.
+    execution_modes:
+      streaming: incremental_window_aggregation
+      batch: full_rebuild_by_date_range_and_tenant
+    idempotency_guarantees:
+      key: fact_table + grain_key
+      behavior: replace_only_if_same_source_totals_or_newer_complete_window
+    deterministic_replay_rules:
+      - Replay verification recomputes audit facts and compares input_hash, trace_hash, proof_chain_record_id, and replay_status.
+    schema_evolution_handling:
+      - New dimensions create nullable columns or separate fact versions; historical grains remain stable.
+
+  - name: platinum_analytics_publication
+    inputs:
+      tables:
+        - gold_account_usage_fact
+        - gold_slo_fact_minute
+        - gold_provider_freshness_fact
+        - gold_compliance_audit_fact
+      topics:
+        - topic.governance.audit_ready
+    outputs:
+      tables:
+        - platinum_customer_dashboard_daily
+        - platinum_disclosure_export_batch
+        - platinum_ai_analytics_feature_set
+        - platinum_executive_reporting_monthly
+        - platinum_cross_tenant_benchmark_daily
+      topics:
+        - topic.analytics.customer_ready
+        - topic.analytics.export_ready
+    transform_logic:
+      - Publish tenant-scoped dashboard aggregates and monthly reporting facts from Gold facts.
+      - Build disclosure export manifests from audit-ready snapshots only.
+      - Build AI feature sets only from derived Platinum-safe data and stamp human_review_status where required.
+      - Publish cross-tenant benchmarks only when cohort privacy thresholds are met.
+    data_quality_checks:
+      - customer dashboard facts reconcile to Gold usage and SLO sources.
+      - disclosure exports reference only audit_exportable=true fact sets.
+      - ai feature rows never include raw Bronze or sensitive Gold payloads.
+      - benchmark cohorts satisfy minimum_k_anonymity and privacy budget constraints.
+    dependencies:
+      - gold_usage_and_slo_rollup
+    failure_retry_behavior:
+      mode: publication_retry
+      retry_policy: Retry publication after upstream Gold facts close their windows; never publish partial executive or benchmark outputs as final.
+      quarantine_policy: Privacy failures suppress only the affected benchmark cohort or feature slice.
+    execution_modes:
+      streaming: near_real_time_for_customer_dashboard_only
+      batch: daily_and_monthly_publication_cycles
+    idempotency_guarantees:
+      key: target_table + target_grain
+      behavior: replace_final_snapshot_only_when_source_snapshot_hash_changes
+    deterministic_replay_rules:
+      - Replayed Platinum outputs must resolve to the same source_snapshot_hash for the same Gold snapshot and contract version.
+    schema_evolution_handling:
+      - Additive view columns are allowed; breaking dashboard or export changes require a new output contract version.

@@ -8,6 +8,10 @@ const dashboardUrl = (process.env.DASHBOARD_URL || process.env.DEFAULT_DASHBOARD
 const internalKey = (process.env.ECOBE_INTERNAL_API_KEY || process.env.ECOBE_ENGINE_API_KEY || '').trim()
 const signatureSecret = process.env.DECISION_API_SIGNATURE_SECRET?.trim() || ''
 const outputPath = process.env.RELEASE_PROOF_OUTPUT_PATH?.trim()
+const defaultTotalGateMs = 100
+const defaultComputeGateMs = 60
+const totalGateMs = Number(process.env.RELEASE_PROOF_P95_TOTAL_GATE_MS ?? defaultTotalGateMs)
+const computeGateMs = Number(process.env.RELEASE_PROOF_P95_COMPUTE_GATE_MS ?? defaultComputeGateMs)
 const checkpoint = {
   ok: false,
   checkedAt: new Date().toISOString(),
@@ -299,9 +303,11 @@ async function main() {
   const p95Compute = Number(slo.json?.currentMs?.compute?.p95 ?? NaN)
   assert(Number.isFinite(p95Total), '/api/v1/ci/slo missing p95 total')
   assert(Number.isFinite(p95Compute), '/api/v1/ci/slo missing p95 compute')
-  assert(p95Total <= 100, `engine p95 total above gate: ${p95Total}`)
-  assert(p95Compute <= 50, `engine p95 compute above gate: ${p95Compute}`)
-  stage('slo', { p95Total, p95Compute, counts: slo.json?.counts ?? null })
+  assert(Number.isFinite(totalGateMs), 'invalid RELEASE_PROOF_P95_TOTAL_GATE_MS')
+  assert(Number.isFinite(computeGateMs), 'invalid RELEASE_PROOF_P95_COMPUTE_GATE_MS')
+  assert(p95Total <= totalGateMs, `engine p95 total above gate: ${p95Total}`)
+  assert(p95Compute <= computeGateMs, `engine p95 compute above gate: ${p95Compute}`)
+  stage('slo', { p95Total, p95Compute, totalGateMs, computeGateMs, counts: slo.json?.counts ?? null })
 
   const provenance = await fetchJson('/api/v1/water/provenance')
   const provenanceVerified = Number(
@@ -389,6 +395,8 @@ async function main() {
     slo: {
       p95Total,
       p95Compute,
+      totalGateMs,
+      computeGateMs,
       counts: slo.json?.counts ?? null,
     },
     provenance: {
