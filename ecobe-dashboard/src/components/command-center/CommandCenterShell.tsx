@@ -9,9 +9,12 @@ import {
   GitBranch,
   Globe2,
   Lock,
+  Radio,
   Radar,
   RefreshCw,
+  Shield,
   ShieldCheck,
+  Wifi,
 } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
@@ -297,6 +300,53 @@ function MetricChip({
   )
 }
 
+function ConsoleHeaderBar({ snapshot }: { snapshot: CommandCenterSnapshot }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-[16px] border border-emerald-400/20 bg-[linear-gradient(135deg,rgba(5,15,33,0.98),rgba(3,7,18,0.96))] px-5 py-3">
+      <div className="flex items-center gap-3">
+        <div className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
+        <span className="text-[12px] font-bold uppercase tracking-[0.22em] text-white">CO2 Router</span>
+        <span className="rounded border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-300">Console</span>
+      </div>
+      <div className="text-[10px] tracking-[0.14em] text-slate-400">
+        CO2 Router Console | Powered by HallOGrid
+      </div>
+      <div className="flex items-center gap-2 rounded-full border border-emerald-400/25 bg-emerald-400/8 px-3 py-1.5">
+        <Wifi className="h-3 w-3 text-emerald-400" />
+        <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-300">Live Mirror</span>
+      </div>
+    </div>
+  )
+}
+
+function ActionCountersStrip({ decisions }: { decisions: CommandCenterDecisionItem[] }) {
+  const counts = useMemo(() => {
+    const map: Record<string, number> = { run_now: 0, deny: 0, reroute: 0, delay: 0, throttle: 0 }
+    decisions.forEach((d) => {
+      if (d.action in map) map[d.action]++
+    })
+    return map
+  }, [decisions])
+
+  const items: { key: string; label: string; color: string }[] = [
+    { key: 'run_now', label: 'Run Now', color: 'text-emerald-400' },
+    { key: 'deny', label: 'Deny', color: 'text-rose-400' },
+    { key: 'reroute', label: 'Reroute', color: 'text-cyan-400' },
+    { key: 'delay', label: 'Delay', color: 'text-amber-400' },
+    { key: 'throttle', label: 'Throttle', color: 'text-violet-400' },
+  ]
+
+  return (
+    <div className="flex flex-wrap items-center gap-4 px-1 text-[11px] font-semibold uppercase tracking-[0.16em]">
+      {items.map((item) => (
+        <span key={item.key} className={item.color}>
+          {counts[item.key]} <span className="text-slate-400">{item.label}</span>
+        </span>
+      ))}
+    </div>
+  )
+}
+
 function GlobalCommandHeader({
   snapshot,
   selectedTrace,
@@ -349,12 +399,40 @@ function WorldExecutionGrid({
   model,
   selectedFrameId,
   onSelectFrame,
+  providers,
 }: {
   model: { nodes: WorldRegionState[]; flows: WorldRoutingFlow[] }
   selectedFrameId: string | null
   onSelectFrame: (decisionFrameId: string) => void
+  providers?: ControlSurfaceProviderNode[]
 }) {
   const nodeMap = new Map(model.nodes.map((node) => [node.region, node]))
+
+  const stateCounts = useMemo(() => {
+    const counts = { run: 0, guarded: 0, blocked: 0 }
+    model.nodes.forEach((node) => {
+      if (node.state === 'active') counts.run++
+      else if (node.state === 'blocked') counts.blocked++
+      else counts.guarded++
+    })
+    return counts
+  }, [model.nodes])
+
+  const providerStats = useMemo(() => {
+    const stats = { routes: 0, blocked: 0, healthy: 0, degraded: 0, offline: 0 }
+    if (providers) {
+      providers.forEach((p) => {
+        if (p.status === 'healthy') stats.healthy++
+        else if (p.status === 'degraded') stats.degraded++
+        else if (p.status === 'offline') stats.offline++
+      })
+    }
+    model.flows.forEach((f) => {
+      if (f.mode === 'route') stats.routes++
+      else stats.blocked++
+    })
+    return stats
+  }, [model.flows, providers])
 
   function buildPath(flow: WorldRoutingFlow) {
     const from = nodeMap.get(flow.fromRegion)
@@ -366,18 +444,39 @@ function WorldExecutionGrid({
   }
 
   return (
-    <div className="relative overflow-hidden rounded-[34px] border border-white/10 bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.08),transparent_35%),linear-gradient(180deg,rgba(2,6,23,0.96),rgba(2,8,23,0.88))] p-4 sm:p-6">
+    <div className="relative overflow-hidden rounded-[34px] border border-emerald-400/12 bg-[radial-gradient(circle_at_top,rgba(16,185,129,0.06),transparent_35%),linear-gradient(180deg,rgba(2,6,23,0.96),rgba(2,8,23,0.88))] p-4 sm:p-6">
+      {/* LIVE GRID THEATER header */}
       <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.2em] text-slate-400">World execution grid</div>
-          <div className="mt-1 text-lg font-semibold text-white">Live routing posture by region.</div>
+        <div className="flex items-center gap-2.5">
+          <Radio className="h-4 w-4 text-emerald-400" />
+          <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-300">Live Grid Theater</span>
         </div>
-        <div className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[10px] uppercase tracking-[0.24em] text-slate-300">
-          {model.nodes.length} live regions
+        <div className="rounded-full border border-emerald-400/25 bg-emerald-400/8 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-300">
+          Stream Healthy
         </div>
       </div>
 
-      <div className="relative min-h-[420px] rounded-[28px] border border-white/8 bg-slate-950/70">
+      {/* RUN / GUARDED / BLOCKED counters */}
+      <div className="mb-3 flex flex-wrap items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.16em]">
+        <div className="flex items-center gap-1.5 rounded-full border border-emerald-400/20 bg-emerald-400/8 px-3 py-1">
+          <div className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+          <span className="text-emerald-300">Run</span>
+          <span className="text-white">{stateCounts.run}</span>
+        </div>
+        <div className="flex items-center gap-1.5 rounded-full border border-amber-400/20 bg-amber-400/8 px-3 py-1">
+          <div className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+          <span className="text-amber-300">Guarded</span>
+          <span className="text-white">{stateCounts.guarded}</span>
+        </div>
+        <div className="flex items-center gap-1.5 rounded-full border border-rose-400/20 bg-rose-400/8 px-3 py-1">
+          <div className="h-1.5 w-1.5 rounded-full bg-rose-400" />
+          <span className="text-rose-300">Blocked</span>
+          <span className="text-white">{stateCounts.blocked}</span>
+        </div>
+      </div>
+
+      {/* Globe visualization */}
+      <div className="relative min-h-[420px] rounded-[28px] border border-emerald-400/8 bg-slate-950/70">
         <svg viewBox="0 0 100 60" className="absolute inset-0 h-full w-full">
           <defs>
             <linearGradient id="command-flow" x1="0%" x2="100%">
@@ -392,6 +491,14 @@ function WorldExecutionGrid({
             </linearGradient>
           </defs>
 
+          {/* Globe wireframe circles */}
+          <ellipse cx="50" cy="30" rx="42" ry="26" fill="none" stroke="rgba(16,185,129,0.08)" strokeWidth="0.3" />
+          <ellipse cx="50" cy="30" rx="30" ry="26" fill="none" stroke="rgba(16,185,129,0.06)" strokeWidth="0.25" />
+          <ellipse cx="50" cy="30" rx="16" ry="26" fill="none" stroke="rgba(16,185,129,0.05)" strokeWidth="0.2" />
+          <line x1="8" y1="30" x2="92" y2="30" stroke="rgba(16,185,129,0.06)" strokeWidth="0.2" />
+          <ellipse cx="50" cy="30" rx="42" ry="10" fill="none" stroke="rgba(16,185,129,0.05)" strokeWidth="0.2" />
+          <ellipse cx="50" cy="30" rx="42" ry="20" fill="none" stroke="rgba(16,185,129,0.04)" strokeWidth="0.2" />
+
           {Array.from({ length: 5 }).map((_, index) => (
             <line
               key={`lat-${index}`}
@@ -399,8 +506,8 @@ function WorldExecutionGrid({
               y1={10 + index * 10}
               x2={100}
               y2={10 + index * 10}
-              stroke="rgba(148,163,184,0.08)"
-              strokeWidth="0.22"
+              stroke="rgba(148,163,184,0.05)"
+              strokeWidth="0.18"
             />
           ))}
           {Array.from({ length: 6 }).map((_, index) => (
@@ -410,15 +517,15 @@ function WorldExecutionGrid({
               y1={0}
               x2={10 + index * 15}
               y2={60}
-              stroke="rgba(148,163,184,0.08)"
-              strokeWidth="0.22"
+              stroke="rgba(148,163,184,0.05)"
+              strokeWidth="0.18"
             />
           ))}
 
-          <path d="M8 18C13 14 24 13 31 17C34 19 34 24 28 26C20 29 10 28 7 24C5 22 5 20 8 18Z" fill="rgba(15,23,42,0.92)" stroke="rgba(56,189,248,0.09)" strokeWidth="0.4" />
-          <path d="M42 14C48 10 59 11 63 16C67 21 65 26 58 28C49 31 41 28 39 22C38 19 39 16 42 14Z" fill="rgba(15,23,42,0.92)" stroke="rgba(56,189,248,0.09)" strokeWidth="0.4" />
-          <path d="M69 18C74 15 84 16 88 20C91 23 89 28 84 30C78 33 70 32 67 27C65 24 66 20 69 18Z" fill="rgba(15,23,42,0.92)" stroke="rgba(56,189,248,0.09)" strokeWidth="0.4" />
-          <path d="M77 37C81 34 87 34 90 38C92 41 90 45 86 47C81 49 76 48 74 44C73 41 74 39 77 37Z" fill="rgba(15,23,42,0.92)" stroke="rgba(56,189,248,0.09)" strokeWidth="0.4" />
+          <path d="M8 18C13 14 24 13 31 17C34 19 34 24 28 26C20 29 10 28 7 24C5 22 5 20 8 18Z" fill="rgba(15,23,42,0.92)" stroke="rgba(16,185,129,0.07)" strokeWidth="0.35" />
+          <path d="M42 14C48 10 59 11 63 16C67 21 65 26 58 28C49 31 41 28 39 22C38 19 39 16 42 14Z" fill="rgba(15,23,42,0.92)" stroke="rgba(16,185,129,0.07)" strokeWidth="0.35" />
+          <path d="M69 18C74 15 84 16 88 20C91 23 89 28 84 30C78 33 70 32 67 27C65 24 66 20 69 18Z" fill="rgba(15,23,42,0.92)" stroke="rgba(16,185,129,0.07)" strokeWidth="0.35" />
+          <path d="M77 37C81 34 87 34 90 38C92 41 90 45 86 47C81 49 76 48 74 44C73 41 74 39 77 37Z" fill="rgba(15,23,42,0.92)" stroke="rgba(16,185,129,0.07)" strokeWidth="0.35" />
 
           {model.flows.map((flow) => {
             const path = buildPath(flow)
@@ -453,6 +560,9 @@ function WorldExecutionGrid({
                 onClick={() => node.decisionFrameId && onSelectFrame(node.decisionFrameId)}
                 className={clsx(node.decisionFrameId ? 'cursor-pointer' : 'pointer-events-none')}
               >
+                {/* Outer glow ring */}
+                <circle cx={node.x} cy={node.y} r={selected ? 5.5 : 4.5} fill="none" stroke={nodeTone} strokeWidth="0.15" opacity={selected ? 0.5 : 0.2} />
+                <circle cx={node.x} cy={node.y} r={selected ? 4.2 : 3.2} fill="none" stroke={nodeTone} strokeWidth="0.25" opacity={selected ? 0.75 : 0.34} />
                 <motion.circle
                   cx={node.x}
                   cy={node.y}
@@ -463,7 +573,6 @@ function WorldExecutionGrid({
                   animate={{ opacity: [0.65, 1, 0.65] }}
                   transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
                 />
-                <circle cx={node.x} cy={node.y} r={selected ? 4.2 : 3.2} fill="none" stroke={nodeTone} strokeWidth="0.25" opacity={selected ? 0.75 : 0.34} />
                 <text x={node.x + 1.6} y={node.y - 1.8} fill="rgba(226,232,240,0.88)" fontSize="2.5" fontWeight="600">
                   {node.label}
                 </text>
@@ -472,11 +581,55 @@ function WorldExecutionGrid({
           })}
         </svg>
 
-        <div className="pointer-events-none absolute inset-x-5 bottom-5 flex flex-wrap gap-2 text-[10px] uppercase tracking-[0.22em]">
-          <div className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-emerald-200">Green active</div>
-          <div className="rounded-full border border-amber-400/20 bg-amber-400/10 px-3 py-1 text-amber-100">Yellow marginal</div>
-          <div className="rounded-full border border-rose-400/20 bg-rose-400/10 px-3 py-1 text-rose-200">Red blocked</div>
+        {/* Color bar — green/yellow/red gradient at bottom */}
+        <div className="absolute inset-x-4 bottom-12 h-[3px] rounded-full bg-[linear-gradient(90deg,rgba(34,197,94,0.9)_0%,rgba(34,197,94,0.9)_60%,rgba(250,204,21,0.9)_75%,rgba(244,63,94,0.9)_100%)]" />
+
+        {/* WORLD STATE LIVE label */}
+        <div className="absolute bottom-4 left-4">
+          <span className="rounded border border-white/10 bg-white/[0.05] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-300">
+            World State Live
+          </span>
         </div>
+      </div>
+
+      {/* Region badges */}
+      <div className="mt-4 flex flex-wrap gap-2">
+        {model.nodes.map((node) => {
+          const dotColor =
+            node.state === 'active'
+              ? 'bg-emerald-400'
+              : node.state === 'blocked'
+                ? 'bg-rose-400'
+                : 'bg-amber-400'
+          return (
+            <button
+              key={node.region}
+              type="button"
+              onClick={() => node.decisionFrameId && onSelectFrame(node.decisionFrameId)}
+              className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.14em] text-slate-300 transition hover:bg-white/[0.08]"
+            >
+              <div className={clsx('h-1.5 w-1.5 rounded-full', dotColor)} />
+              {node.label}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Stats grid */}
+      <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-6">
+        {[
+          { label: 'Routes', value: providerStats.routes },
+          { label: 'Blocked', value: providerStats.blocked },
+          { label: 'Healthy', value: providerStats.healthy },
+          { label: 'Degraded', value: providerStats.degraded },
+          { label: 'Offline', value: providerStats.offline },
+          { label: 'Lag', value: null as number | null },
+        ].map((stat) => (
+          <div key={stat.label} className="rounded-[14px] border border-white/8 bg-white/[0.03] px-3 py-2.5">
+            <div className="text-[10px] uppercase tracking-[0.16em] text-slate-500">{stat.label}</div>
+            <div className="mt-1 text-lg font-bold text-white">{stat.value ?? '—'}</div>
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -838,6 +991,28 @@ function TraceEventStream({
   )
 }
 
+function deriveDecisionExplanation(item: CommandCenterDecisionItem): string {
+  const region = item.selectedRegion
+  const meta = resolveActionMeta(item.action)
+
+  if (item.action === 'run_now') {
+    return `Allowed immediately because ${region} stayed within policy, water, and SLA constraints under the default doctrine. Reason code: ${item.reasonCode}.`
+  }
+  if (item.action === 'delay') {
+    return `Delayed because no safe execution path in ${region} met policy thresholds. The system will retry when the clean window opens. Reason code: ${item.reasonCode}.`
+  }
+  if (item.action === 'deny') {
+    return `Blocked — ${region} violated policy constraints. Execution denied until conditions return to safe thresholds. Reason code: ${item.reasonCode}.`
+  }
+  if (item.action === 'reroute') {
+    return `Rerouted away from baseline to ${region} because a cleaner execution path was available under current signal conditions. Reason code: ${item.reasonCode}.`
+  }
+  if (item.action === 'throttle') {
+    return `Throughput reduced in ${region} under policy pressure. The system is rate-limiting execution to stay within constraints. Reason code: ${item.reasonCode}.`
+  }
+  return `${meta.label} decision issued for ${region}. Reason code: ${item.reasonCode}.`
+}
+
 function RecentDecisionQueue({
   items,
   selectedFrameId,
@@ -849,37 +1024,56 @@ function RecentDecisionQueue({
 }) {
   return (
     <section className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(4,10,24,0.96),rgba(3,9,20,0.92))] p-5">
-      <div className="flex items-center gap-3">
-        <Globe2 className="h-5 w-5 text-lime-300" />
+      {/* Decision Feed header */}
+      <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Recent decision queue</div>
-          <div className="mt-1 text-lg font-semibold text-white">Binding execution outcomes.</div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Decision Feed</div>
+          <div className="mt-1 text-sm text-slate-300">
+            Select a frame. The governed record opens instantly with trace, replay, and proof.
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-right text-xs text-slate-400">
+            <span className="text-white">{items.length}</span> Frames
+          </span>
+          <span className="rounded-full border border-emerald-400/25 bg-emerald-400/8 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-emerald-300">
+            Live
+          </span>
         </div>
       </div>
 
-      <div className="mt-4 space-y-2">
+      <div className="mt-1 h-px bg-white/8" />
+
+      <div className="mt-4 space-y-3">
         {items.length ? items.map((item) => {
           const actionMeta = resolveActionMeta(item.action)
+          const selected = item.decisionFrameId === selectedFrameId
           return (
             <button
               key={item.decisionFrameId}
               type="button"
               onClick={() => onSelect(item.decisionFrameId)}
               className={clsx(
-                'flex w-full items-center justify-between gap-3 rounded-[18px] border px-4 py-3 text-left transition',
-                item.decisionFrameId === selectedFrameId ? 'border-cyan-300/28 bg-cyan-300/7' : 'border-white/10 bg-white/[0.03]'
+                'w-full rounded-[18px] border p-4 text-left transition',
+                selected
+                  ? clsx('bg-white/[0.04]', actionMeta.border)
+                  : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.05]'
               )}
             >
-              <div className="min-w-0">
-                <div className={clsx('text-sm font-semibold', actionMeta.text)}>{actionMeta.label}</div>
-                <div className="mt-1 truncate text-xs text-slate-400">{item.selectedRegion} • {item.reasonCode}</div>
+              <div className="flex items-start justify-between gap-3">
+                <div className="font-mono text-[11px] text-slate-400">{item.decisionFrameId}</div>
+                <span className={clsx('shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em]', actionMeta.badge, actionMeta.border)}>
+                  {actionMeta.label}
+                </span>
               </div>
-              <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />
+              <p className="mt-2 text-sm leading-relaxed text-slate-200">
+                {deriveDecisionExplanation(item)}
+              </p>
             </button>
           )
         }) : (
           <div className="rounded-[18px] border border-white/10 bg-white/[0.03] px-4 py-4 text-sm leading-7 text-slate-300">
-            The decision queue shell is ready. The first live execution frame will attach here
+            The decision feed is ready. The first live execution frame will attach here
             without shifting the rest of the command center.
           </div>
         )}
@@ -1128,6 +1322,8 @@ export function CommandCenterShell() {
           </section>
         ) : null}
 
+        <ConsoleHeaderBar snapshot={snapshot} />
+        <ActionCountersStrip decisions={snapshot.decisionCore.recentDecisions} />
         <GlobalCommandHeader snapshot={snapshot} selectedTrace={selectedTrace} selectedReplay={selectedReplay} />
 
         <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1.25fr)_420px]">
@@ -1137,7 +1333,7 @@ export function CommandCenterShell() {
           </div>
 
           <div className="space-y-5">
-            <WorldExecutionGrid model={worldModel} selectedFrameId={selectedFrameId} onSelectFrame={handleSelectDecision} />
+            <WorldExecutionGrid model={worldModel} selectedFrameId={selectedFrameId} onSelectFrame={handleSelectDecision} providers={snapshot.health.providers} />
             <RecentDecisionQueue
               items={snapshot.decisionCore.recentDecisions}
               selectedFrameId={selectedFrameId}
