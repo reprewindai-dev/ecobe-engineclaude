@@ -1,10 +1,18 @@
 import { Router, Request, Response } from 'express'
 import { getCacheHealthStatus } from '../lib/cache-warmer'
+import { buildApiCatalogDocument } from '../lib/api-catalog'
+import { getDecisionProjectionFreshness } from '../lib/ci/decision-projection'
 import { redis } from '../lib/redis'
 import { prisma } from '../lib/db'
 import { GridSignalCache } from '../lib/grid-signals/grid-signal-cache'
 
 const router = Router()
+
+function resolveBaseUrl(req: Request) {
+  const protocol = req.headers['x-forwarded-proto']?.toString().split(',')[0] ?? req.protocol
+  const host = req.headers['x-forwarded-host']?.toString().split(',')[0] ?? req.get('host') ?? 'localhost'
+  return `${protocol}://${host}`
+}
 
 // Track worker status in memory
 type WorkerStatusEntry = { running: boolean; lastRun: string | null; nextRun: string | null }
@@ -18,6 +26,7 @@ let workerStatus: WorkerRegistry = {
   routingSignalWarmLoop: { running: false, lastRun: null as string | null, nextRun: null as string | null },
   runtimeSupervisor: { running: false, lastRun: null as string | null, nextRun: null as string | null },
   decisionEventDispatcher: { running: false, lastRun: null as string | null, nextRun: null as string | null },
+  decisionProjectionDispatcher: { running: false, lastRun: null as string | null, nextRun: null as string | null },
 }
 
 export function setWorkerStatus(worker: keyof WorkerRegistry, status: Partial<WorkerStatusEntry>) {
@@ -89,18 +98,67 @@ router.get('/status', async (req: Request, res: Response) => {
       deadLetter: number
       sent: number
     } = null
+    let decisionProjectionOutbox: null | {
+      pending: number
+      processing: number
+      processed: number
+      failed: number
+      deadLetter: number
+    } = null
+    let decisionProjection: null | {
+      latestProjectionAt: string | null
+      latestCanonicalAt: string | null
+      projectionLagSec: number | null
+      dataStatus: string
+      quality: {
+        suspectCount: number
+        invalidCount: number
+      }
+    } = null
 
     if (dbHealthy) {
       try {
-        const [pending, processing, failed, deadLetter, sent] = await Promise.all([
+        const [
+          pending,
+          processing,
+          failed,
+          deadLetter,
+          sent,
+          projectionPending,
+          projectionProcessing,
+          projectionProcessed,
+          projectionFailed,
+          projectionDeadLetter,
+          projectionFreshness,
+        ] = await Promise.all([
           prisma.decisionEventOutbox.count({ where: { status: 'PENDING' } }),
           prisma.decisionEventOutbox.count({ where: { status: 'PROCESSING' } }),
           prisma.decisionEventOutbox.count({ where: { status: 'FAILED' } }),
           prisma.decisionEventOutbox.count({ where: { status: 'DEAD_LETTER' } }),
           prisma.decisionEventOutbox.count({ where: { status: 'SENT' } }),
+          prisma.decisionProjectionOutbox.count({ where: { status: 'PENDING' } }),
+          prisma.decisionProjectionOutbox.count({ where: { status: 'PROCESSING' } }),
+          prisma.decisionProjectionOutbox.count({ where: { status: 'PROCESSED' } }),
+          prisma.decisionProjectionOutbox.count({ where: { status: 'FAILED' } }),
+          prisma.decisionProjectionOutbox.count({ where: { status: 'DEAD_LETTER' } }),
+          getDecisionProjectionFreshness(),
         ])
 
         decisionEventOutbox = { pending, processing, failed, deadLetter, sent }
+        decisionProjectionOutbox = {
+          pending: projectionPending,
+          processing: projectionProcessing,
+          processed: projectionProcessed,
+          failed: projectionFailed,
+          deadLetter: projectionDeadLetter,
+        }
+        decisionProjection = {
+          latestProjectionAt: projectionFreshness.latestProjectionAt?.toISOString() ?? null,
+          latestCanonicalAt: projectionFreshness.latestCanonicalAt?.toISOString() ?? null,
+          projectionLagSec: projectionFreshness.projectionLagSec,
+          dataStatus: projectionFreshness.dataStatus,
+          quality: projectionFreshness.quality,
+        }
       } catch (error) {
         console.warn('Failed to gather decision outbox health:', error)
       }
@@ -153,6 +211,8 @@ router.get('/status', async (req: Request, res: Response) => {
         statusCheckMs: totalTime
       },
       decisionEventOutbox,
+      decisionProjectionOutbox,
+      decisionProjection,
     })
   } catch (error) {
     console.error('Error in system status endpoint:', error)
@@ -162,6 +222,10 @@ router.get('/status', async (req: Request, res: Response) => {
       timestamp: new Date().toISOString()
     })
   }
+})
+
+router.get('/api-catalog', (req: Request, res: Response) => {
+  res.json(buildApiCatalogDocument(resolveBaseUrl(req)))
 })
 
 /**
