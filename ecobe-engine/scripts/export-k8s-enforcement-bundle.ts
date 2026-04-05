@@ -36,6 +36,20 @@ function ensureDir(target: string) {
   fs.mkdirSync(target, { recursive: true })
 }
 
+const YAML_BOOLEAN_OR_NULL = /^(?:true|false|null|~|yes|no|on|off)$/i
+const YAML_NUMBER = /^[-+]?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][-+]?\d+)?$/
+const YAML_DATEISH =
+  /^\d{4}-\d{2}-\d{2}(?:[Tt ][0-2]\d:[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-][0-2]\d:[0-5]\d)?)?$/
+
+function shouldQuoteString(value: string) {
+  if (value.length === 0) return true
+  if (!/^[A-Za-z0-9._/@:-]+$/.test(value)) return true
+  if (YAML_BOOLEAN_OR_NULL.test(value)) return true
+  if (YAML_NUMBER.test(value)) return true
+  if (YAML_DATEISH.test(value)) return true
+  return false
+}
+
 function toScalar(value: unknown) {
   if (value == null) {
     return 'null'
@@ -53,7 +67,7 @@ function toScalar(value: unknown) {
         .join('\n')}`
     }
 
-    if (/^[A-Za-z0-9._/@:-]+$/.test(value)) {
+    if (!shouldQuoteString(value)) {
       return value
     }
 

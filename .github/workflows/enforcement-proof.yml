@@ -329,13 +329,15 @@ jobs:
         shell: bash
         run: |
           kubectl apply -f .github-artifacts/gatekeeper-proof/deny/gatekeeper-template.yaml
-          for attempt in {1..60}; do
+          for attempt in {1..90}; do
             created=$(kubectl get constrainttemplate ecobedecisionguard -o jsonpath='{.status.created}' 2>/dev/null || true)
-            if [ "$created" = "true" ]; then
+            crd_established=$(kubectl get crd ecobedecisionguards.constraints.gatekeeper.sh -o jsonpath="{.status.conditions[?(@.type=='Established')].status}" 2>/dev/null || true)
+            if [ "$created" = "true" ] && [ "$crd_established" = "True" ]; then
               break
             fi
             sleep 2
           done
+          kubectl get constrainttemplate ecobedecisionguard -o yaml > .github-artifacts/gatekeeper-proof/deny/constrainttemplate-status.yaml
           kubectl apply -f .github-artifacts/gatekeeper-proof/deny/gatekeeper-constraint.yaml
           sleep 20
 
@@ -359,6 +361,7 @@ jobs:
         run: |
           kubectl get constrainttemplates > .github-artifacts/gatekeeper-proof/constrainttemplates.txt
           kubectl get constraints -A > .github-artifacts/gatekeeper-proof/constraints.txt || true
+          kubectl get constrainttemplate ecobedecisionguard -o yaml > .github-artifacts/gatekeeper-proof/constrainttemplate-status.txt || true
           kubectl logs -n gatekeeper-system deploy/gatekeeper-controller-manager --tail=200 > .github-artifacts/gatekeeper-proof/gatekeeper-controller.log || true
 
       - name: Upload Gatekeeper proof artifacts
