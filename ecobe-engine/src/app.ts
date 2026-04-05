@@ -59,16 +59,18 @@ function attachHealthRoutes(app: express.Express) {
       }
 
       const waterArtifacts = validateWaterArtifacts()
-      const ok = redisOk && waterArtifacts.healthy
+      const ok = waterArtifacts.healthy
+      const status = ok ? (redisOk ? 'ok' : 'degraded') : 'degraded'
 
       res.status(ok ? 200 : 503).json({
-        status: ok ? 'ok' : 'degraded',
+        status,
         engine: 'online',
         router: true,
         fingrid: Boolean(env.FINGRID_API_KEY),
         providers: {
           watttime: Boolean(env.WATTTIME_USERNAME && env.WATTTIME_PASSWORD),
-          gridstatus: Boolean(env.GRIDSTATUS_API_KEY || env.EIA_API_KEY),
+          gridstatus: Boolean(env.GRIDSTATUS_API_KEY),
+          eia930: Boolean(env.EIA_API_KEY),
           ember: Boolean(env.EMBER_API_KEY),
           gbCarbon: true,
           dkCarbon: true,
@@ -311,6 +313,8 @@ function attachApiRoutes(app: express.Express) {
   app.use('/api/v1/intelligence/grid', gridIntelligenceRoutes)
   app.use('/api/v1/integrations', integrationsRoutes)
   app.use('/api/v1/system', systemRoutes)
+  app.use('/api/v1', contactRoutes)
+  app.use('/api/v1', commerceRoutes)
   // DEKES SaaS integration endpoints (prospects, tenants, demos, handoffs, route, workloads)
   app.use('/api/v1', dekesHandoffRoutes)
   // Carbon Ledger — audit-grade accounting + reporting
