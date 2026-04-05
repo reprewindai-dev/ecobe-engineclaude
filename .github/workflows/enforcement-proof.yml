@@ -1,0 +1,373 @@
+name: Enforcement Proof
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - codex/**
+    paths:
+      - '.github/**'
+      - 'ecobe-engine/**'
+      - 'github-action/**'
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - '.github/**'
+      - 'ecobe-engine/**'
+      - 'github-action/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: enforcement-proof-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  engine-runtime-proof:
+    name: Engine Runtime Proof
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ecobe
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d ecobe"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      PORT: 3100
+      NODE_ENV: test
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ecobe?schema=public
+      DIRECT_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ecobe?schema=public
+      REDIS_URL: redis://localhost:6379
+      ECOBE_INTERNAL_API_KEY: test-internal-api-key
+      ENGINE_BACKGROUND_WORKERS_ENABLED: 'false'
+      FORECAST_REFRESH_ENABLED: 'false'
+      LEARNING_LOOP_ENABLED: 'false'
+      RUNTIME_SUPERVISOR_ENABLED: 'false'
+      DECISION_EVENT_DISPATCH_ENABLED: 'false'
+      DECISION_PROJECTION_ENABLED: 'false'
+      ROUTING_SIGNAL_REQUIRED_REGIONS: us-east-1,us-west-2,eu-west-1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ecobe-engine/package-lock.json
+
+      - name: Install engine dependencies
+        run: npm --prefix ecobe-engine ci
+
+      - name: Prisma migrate deploy
+        run: npm --prefix ecobe-engine run prisma:migrate:deploy
+
+      - name: Build engine
+        run: npm --prefix ecobe-engine run build
+
+      - name: Start engine
+        shell: bash
+        run: |
+          mkdir -p .github-artifacts/enforcement-proof
+          (
+            cd ecobe-engine
+            node dist/server.js > ../.github-artifacts/enforcement-proof/engine.log 2>&1
+          ) &
+          echo $! > .github-artifacts/enforcement-proof/engine.pid
+
+      - name: Wait for engine health
+        shell: bash
+        run: |
+          for attempt in {1..60}; do
+            if curl --fail --silent "http://127.0.0.1:${PORT}/health" > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Engine failed to become healthy"
+          cat .github-artifacts/enforcement-proof/engine.log || true
+          exit 1
+
+      - name: Verify live runtime proof
+        env:
+          ECOBE_ENGINE_URL: http://127.0.0.1:3100
+          ENFORCEMENT_PROOF_OUTPUT_PATH: .github-artifacts/enforcement-proof/runtime-proof.json
+        run: node .github/scripts/verify-enforcement-proof.mjs
+
+      - name: Upload runtime proof artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: enforcement-proof-runtime
+          path: .github-artifacts/enforcement-proof
+
+  github-actions-adapter-proof:
+    name: GitHub Actions Adapter Proof
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Start mock authorization server
+        shell: bash
+        run: |
+          mkdir -p .github-artifacts/github-action-proof
+          node .github/scripts/mock-authorization-server.mjs > .github-artifacts/github-action-proof/mock-auth.log 2>&1 &
+          echo $! > .github-artifacts/github-action-proof/mock-auth.pid
+
+      - name: Wait for mock authorization server
+        shell: bash
+        run: |
+          for attempt in {1..30}; do
+            if curl --fail --silent "http://127.0.0.1:4010/health" > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Mock authorization server failed to start"
+          cat .github-artifacts/github-action-proof/mock-auth.log || true
+          exit 1
+
+      - name: Run run_now case
+        id: run_now
+        uses: ./github-action
+        with:
+          engine-url: http://127.0.0.1:4010
+          api-key: test-internal-api-key
+          job-name: run-now-case
+          preferred-regions: us-east-1,us-west-2
+          decision-mode: runtime_authorization
+
+      - name: Assert run_now outputs
+        shell: bash
+        run: |
+          test "${{ steps.run_now.outputs.decision }}" = "run_now"
+          test "${{ steps.run_now.outputs.executable }}" = "true"
+          test "${{ steps.run_now.outputs.approved-region }}" = "us-east-1"
+
+      - name: Run reroute case
+        id: reroute
+        uses: ./github-action
+        with:
+          engine-url: http://127.0.0.1:4010
+          api-key: test-internal-api-key
+          job-name: reroute-case
+          preferred-regions: us-east-1,us-west-2
+          decision-mode: runtime_authorization
+
+      - name: Assert reroute outputs
+        shell: bash
+        run: |
+          test "${{ steps.reroute.outputs.decision }}" = "reroute"
+          test "${{ steps.reroute.outputs.approved-region }}" = "us-west-2"
+          test "${{ steps.reroute.outputs.executable }}" = "true"
+
+      - name: Run throttle case
+        id: throttle
+        uses: ./github-action
+        with:
+          engine-url: http://127.0.0.1:4010
+          api-key: test-internal-api-key
+          job-name: throttle-case
+          preferred-regions: us-east-1,us-west-2
+          decision-mode: runtime_authorization
+
+      - name: Assert throttle outputs
+        shell: bash
+        run: |
+          test "${{ steps.throttle.outputs.decision }}" = "throttle"
+          test "${{ steps.throttle.outputs.max-parallel }}" = "2"
+          test "${{ steps.throttle.outputs.executable }}" = "true"
+
+      - name: Run delay case
+        id: delay
+        continue-on-error: true
+        uses: ./github-action
+        with:
+          engine-url: http://127.0.0.1:4010
+          api-key: test-internal-api-key
+          job-name: delay-case
+          preferred-regions: us-east-1,us-west-2
+          decision-mode: runtime_authorization
+
+      - name: Assert delay fail-closed behavior
+        shell: bash
+        run: |
+          test "${{ steps.delay.outcome }}" = "failure"
+          test "${{ steps.delay.outputs.decision }}" = "delay"
+          test -n "${{ steps.delay.outputs.not-before }}"
+
+      - name: Run deny case
+        id: deny
+        continue-on-error: true
+        uses: ./github-action
+        with:
+          engine-url: http://127.0.0.1:4010
+          api-key: test-internal-api-key
+          job-name: deny-case
+          preferred-regions: us-east-1,us-west-2
+          decision-mode: runtime_authorization
+
+      - name: Assert deny fail-closed behavior
+        shell: bash
+        run: |
+          test "${{ steps.deny.outcome }}" = "failure"
+          test "${{ steps.deny.outputs.decision }}" = "deny"
+          test "${{ steps.deny.outputs.executable }}" = "false"
+
+      - name: Run non-executable scenario-planning case
+        id: non_exec
+        continue-on-error: true
+        uses: ./github-action
+        with:
+          engine-url: http://127.0.0.1:4010
+          api-key: test-internal-api-key
+          job-name: non-exec-case
+          preferred-regions: us-east-1,us-west-2
+          decision-mode: scenario_planning
+
+      - name: Assert non-executable fail-closed behavior
+        shell: bash
+        run: |
+          test "${{ steps.non_exec.outcome }}" = "failure"
+          test "${{ steps.non_exec.outputs.executable }}" = "false"
+
+      - name: Upload adapter proof artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: enforcement-proof-github-action
+          path: .github-artifacts/github-action-proof
+
+  gatekeeper-admission-proof:
+    name: Gatekeeper Admission Proof
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ecobe-engine/package-lock.json
+
+      - name: Install engine dependencies
+        run: npm --prefix ecobe-engine ci
+
+      - name: Install kind and helm
+        shell: bash
+        run: |
+          if ! command -v kind >/dev/null 2>&1; then
+            curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
+            chmod +x ./kind
+            sudo mv ./kind /usr/local/bin/kind
+          fi
+          if ! command -v helm >/dev/null 2>&1; then
+            curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          fi
+          kubectl version --client
+          kind version
+          helm version
+
+      - name: Create kind cluster
+        run: kind create cluster --wait 180s
+
+      - name: Install Gatekeeper
+        shell: bash
+        run: |
+          helm repo add gatekeeper https://open-policy-agent.github.io/gatekeeper/charts
+          helm repo update
+          helm install gatekeeper gatekeeper/gatekeeper --namespace gatekeeper-system --create-namespace
+          kubectl wait --namespace gatekeeper-system --for=condition=available deployment/gatekeeper-controller-manager --timeout=240s
+          kubectl wait --namespace gatekeeper-system --for=condition=available deployment/gatekeeper-audit --timeout=240s
+
+      - name: Generate deny bundle
+        shell: bash
+        run: |
+          mkdir -p .github-artifacts/gatekeeper-proof
+          npx --prefix ecobe-engine tsx ecobe-engine/scripts/export-k8s-enforcement-bundle.ts \
+            --decision-frame-id df-gatekeeper-deny-proof \
+            --decision deny \
+            --selected-region us-east-1 \
+            --proof-hash sha256:df-gatekeeper-deny-proof \
+            --output-dir .github-artifacts/gatekeeper-proof/deny
+
+      - name: Apply deny Gatekeeper bundle
+        shell: bash
+        run: |
+          kubectl apply -f .github-artifacts/gatekeeper-proof/deny/gatekeeper-template.yaml
+          kubectl apply -f .github-artifacts/gatekeeper-proof/deny/gatekeeper-constraint.yaml
+          sleep 25
+
+      - name: Assert denied workload is blocked at admission
+        shell: bash
+        run: |
+          set +e
+          kubectl apply -f .github-artifacts/gatekeeper-proof/deny/sample-workload.yaml > .github-artifacts/gatekeeper-proof/deny/stdout.log 2> .github-artifacts/gatekeeper-proof/deny/stderr.log
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo "Expected Gatekeeper denial, but workload was admitted."
+            cat .github-artifacts/gatekeeper-proof/deny/stdout.log || true
+            exit 1
+          fi
+          grep -E "blocked by ecobe authorization|violates ecobe authorization|missing ecobe labels" .github-artifacts/gatekeeper-proof/deny/stderr.log
+
+      - name: Capture Gatekeeper state
+        if: always()
+        shell: bash
+        run: |
+          kubectl get constrainttemplates > .github-artifacts/gatekeeper-proof/constrainttemplates.txt
+          kubectl get constraints -A > .github-artifacts/gatekeeper-proof/constraints.txt || true
+          kubectl logs -n gatekeeper-system deploy/gatekeeper-controller-manager --tail=200 > .github-artifacts/gatekeeper-proof/gatekeeper-controller.log || true
+
+      - name: Upload Gatekeeper proof artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: enforcement-proof-gatekeeper
+          path: .github-artifacts/gatekeeper-proof
+
+  enforcement-proof-status:
+    name: Enforcement Proof
+    runs-on: ubuntu-latest
+    needs: [engine-runtime-proof, github-actions-adapter-proof, gatekeeper-admission-proof]
+    if: always()
+    steps:
+      - name: Check proof job statuses
+        shell: bash
+        run: |
+          if [ "${{ needs.engine-runtime-proof.result }}" != "success" ] || \
+             [ "${{ needs.github-actions-adapter-proof.result }}" != "success" ] || \
+             [ "${{ needs.gatekeeper-admission-proof.result }}" != "success" ]; then
+            echo "Enforcement proof failed"
+            exit 1
+          fi
+          echo "Enforcement proof passed"

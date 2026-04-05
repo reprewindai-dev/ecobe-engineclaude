@@ -446,5 +446,96 @@ describe('ProviderRouter', () => {
       expect(wattTime.getCurrentMOER).not.toHaveBeenCalled()
       expect(wattTime.getMOERForecast).not.toHaveBeenCalled()
     })
+
+    it('carries forward disagreement provenance when degraded-safe output is derived from cached state', async () => {
+      const { GridSignalCache } = require('../lib/grid-signals/grid-signal-cache')
+
+      GridSignalCache.getCachedRoutingSignalWithSource.mockResolvedValue({
+        source: 'redis',
+        record: {
+          signal: {
+            carbonIntensity: 210,
+            source: 'watttime',
+            isForecast: false,
+            confidence: 0.41,
+            signalMode: 'fallback',
+            accountingMethod: 'average',
+            provenance: {
+              sourceUsed: 'REDIS_CACHE_WATTTIME_MOER',
+              contributingSources: ['watttime', 'ember'],
+              referenceTime: new Date().toISOString(),
+              fetchedAt: new Date().toISOString(),
+              fallbackUsed: true,
+              disagreementFlag: true,
+              disagreementPct: 28,
+              validationNotes: 'High provider disagreement',
+            },
+          },
+          fetchedAt: new Date().toISOString(),
+          stalenessSec: 91,
+          lastLatencyMs: 14,
+          degraded: true,
+          cacheSource: 'redis',
+        },
+      })
+      GridSignalCache.getLastKnownGoodRoutingSignalWithSource.mockResolvedValue(null)
+
+      const record = await router.getHotPathRoutingSignalRecord('us-east-1', new Date())
+
+      expect(record.cacheSource).toBe('degraded-safe')
+      expect(record.signal.provenance.sourceUsed.startsWith('DEGRADED_SAFE_')).toBe(true)
+      expect(record.signal.provenance.disagreementFlag).toBe(true)
+      expect(record.signal.provenance.disagreementPct).toBe(28)
+      expect(record.signal.provenance.validationNotes).toContain('deterministic degraded-safe fallback')
+    })
+  })
+
+  describe('degraded-safe quality posture', () => {
+    it('marks deterministic degraded-safe sources as low quality with an explicit reason', async () => {
+      const result = await router.validateSignalQuality({
+        carbonIntensity: 450,
+        source: 'fallback',
+        isForecast: false,
+        confidence: 0.05,
+        signalMode: 'fallback',
+        accountingMethod: 'average',
+        provenance: {
+          sourceUsed: 'DEGRADED_SAFE_WATTTIME_MOER',
+          contributingSources: ['watttime'],
+          referenceTime: new Date().toISOString(),
+          fetchedAt: new Date().toISOString(),
+          fallbackUsed: true,
+          disagreementFlag: false,
+          disagreementPct: 0,
+        }
+      })
+
+      expect(result.qualityTier).toBe('low')
+      expect(result.reasons).toContain('Deterministic degraded-safe fallback active')
+      expect(result.meetsRequirements).toBe(true)
+    })
+
+    it('marks last-known-good fallback with an explicit safety-margin reason', async () => {
+      const result = await router.validateSignalQuality({
+        carbonIntensity: 275,
+        source: 'watttime',
+        isForecast: false,
+        confidence: 0.62,
+        signalMode: 'fallback',
+        accountingMethod: 'average',
+        provenance: {
+          sourceUsed: 'LKG_WATTTIME_MOER',
+          contributingSources: ['watttime'],
+          referenceTime: new Date().toISOString(),
+          fetchedAt: new Date().toISOString(),
+          fallbackUsed: true,
+          disagreementFlag: false,
+          disagreementPct: 0,
+        }
+      })
+
+      expect(result.qualityTier).toBe('low')
+      expect(result.reasons).toContain('Using last-known-good safety margin')
+    })
   })
 })

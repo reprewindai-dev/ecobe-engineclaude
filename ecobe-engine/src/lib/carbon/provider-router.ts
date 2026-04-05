@@ -8,7 +8,7 @@ import { CachedRoutingSignalRecord, GridSignalCache } from '../grid-signals/grid
 import { GridSignalAudit } from '../grid-signals/grid-signal-audit'
 import { getRegionMapping } from '../grid-signals/region-mapping'
 import { FuelMixParser } from '../grid-signals/fuel-mix-parser'
-import { gridStatus } from '../grid-signals/gridstatus-client'
+import { eia930 } from '../grid-signals/eia-client'
 import { EmberStructuralProfile, type EmberData, type RegionStructuralProfile } from '../ember/structural-profile'
 
 
@@ -32,7 +32,7 @@ export interface ProviderDisagreement {
 
 export interface RoutingSignal {
   carbonIntensity: number
-  source: 'watttime' | 'electricity_maps' | 'ember' | 'gb_carbon_intensity' | 'dk_carbon' | 'fi_carbon' | 'gridstatus_fuel_mix' | 'fallback'
+  source: 'watttime' | 'electricity_maps' | 'ember' | 'gb_carbon_intensity' | 'dk_carbon' | 'fi_carbon' | 'eia_930' | 'gridstatus_fuel_mix' | 'fallback'
   isForecast: boolean
   confidence: number
   signalMode: 'marginal' | 'average' | 'fallback'
@@ -271,12 +271,12 @@ export class ProviderRouter {
     // ── TIER 2: EIA-930 fuel mix — US backbone / predictive telemetry ──
     // Used when WattTime is unavailable. Provides average intensity from
     // real fuel mix data using IPCC emission factors.
-    const fuelMixCI = await this.getGridStatusFuelMixCI(region)
+    const fuelMixCI = await this.getEiaFuelMixCI(region)
     if (fuelMixCI !== null) {
       const primarySignal: ProviderSignal = {
         carbonIntensity: fuelMixCI,
         isForecast: false,
-        source: 'gridstatus_fuel_mix',
+        source: 'eia_930',
         timestamp: new Date().toISOString(),
         estimatedFlag: false,
         syntheticFlag: false,
@@ -287,7 +287,7 @@ export class ProviderRouter {
 
       return {
         carbonIntensity: fuelMixCI,
-        source: 'gridstatus_fuel_mix',
+        source: 'eia_930',
         isForecast: false,
         confidence: validation.adjustedConfidence,
         signalMode: 'average',
@@ -520,8 +520,8 @@ export class ProviderRouter {
     return null
   }
 
-  // Cloud regions with GridStatus EIA-930 fuel mix coverage (US only)
-  private static GRIDSTATUS_BA_MAP: Record<string, string> = {
+  // Cloud regions with official EIA-930 fuel mix coverage (US only)
+  private static EIA_BA_MAP: Record<string, string> = {
     'us-east-1': 'PJM', 'us-east-2': 'PJM',
     'us-west-1': 'CISO', 'us-west-2': 'BPAT',
     'us-central1': 'MISO',
@@ -535,11 +535,11 @@ export class ProviderRouter {
   private fuelMixCICache = new Map<string, { ci: number; expiry: number }>()
 
   /**
-   * Get carbon intensity derived from real GridStatus EIA-930 fuel mix data
+   * Get carbon intensity derived from official EIA-930 fuel mix data
    * Returns gCO2/kWh computed from actual hourly generation by fuel type
    */
-  private async getGridStatusFuelMixCI(region: string): Promise<number | null> {
-    const ba = ProviderRouter.GRIDSTATUS_BA_MAP[region]
+  private async getEiaFuelMixCI(region: string): Promise<number | null> {
+    const ba = ProviderRouter.EIA_BA_MAP[region]
     if (!ba) return null
 
     // Check cache
@@ -547,11 +547,11 @@ export class ProviderRouter {
     if (cached && cached.expiry > Date.now()) return cached.ci
 
     try {
-      if (!gridStatus.isAvailable) return null
+      if (!eia930.isAvailable) return null
 
       const now = new Date()
       const start = new Date(now.getTime() - 6 * 60 * 60 * 1000) // Last 6 hours
-      const fuelMix = await gridStatus.getFuelMix(ba, start, now)
+      const fuelMix = await eia930.getFuelMix(ba, start, now)
 
       if (fuelMix.length === 0) return null
 
@@ -564,7 +564,7 @@ export class ProviderRouter {
       this.fuelMixCICache.set(ba, { ci, expiry: Date.now() + 15 * 60 * 1000 })
       return ci
     } catch (error) {
-      console.warn(`GridStatus fuel-mix CI failed for ${region}/${ba}:`, error)
+      console.warn(`EIA-930 fuel-mix CI failed for ${region}/${ba}:`, error)
       return null
     }
   }
@@ -620,7 +620,7 @@ export class ProviderRouter {
       // GB Carbon Intensity is authoritative real-time — its deviation from yearly baseline is expected
       const isAuthoritativeRealtime = disagreementSignals.some(s =>
         s.source === 'gb_carbon_intensity' || s.source === 'electricity_maps' ||
-        s.source === 'dk_carbon' || s.source === 'fi_carbon' || s.source === 'gridstatus_fuel_mix'
+        s.source === 'dk_carbon' || s.source === 'fi_carbon' || s.source === 'eia_930' || s.source === 'gridstatus_fuel_mix'
       )
 
       if (isWattTimePercentile) {
@@ -811,6 +811,15 @@ export class ProviderRouter {
             source === 'lkg'
               ? record.signal.provenance.sourceUsed
               : `${provenanceSourcePrefix}_${record.signal.provenance.sourceUsed}`,
+          validationNotes:
+            source === 'lkg'
+              ? record.signal.provenance.validationNotes
+              : [
+                  record.signal.provenance.validationNotes,
+                  `Hot path served ${source} cached routing signal`,
+                ]
+                  .filter(Boolean)
+                  .join('; '),
         },
       },
       degraded: source === 'lkg' ? true : record.degraded,
@@ -933,6 +942,7 @@ export class ProviderRouter {
   }> {
     const reasons: string[] = []
     let qualityTier: 'high' | 'medium' | 'low' = 'high'
+    const sourceUsed = signal.provenance.sourceUsed.toUpperCase()
 
     // Check confidence
     if (signal.confidence < 0.3) {
@@ -946,12 +956,21 @@ export class ProviderRouter {
     // Check for fallback usage
     if (signal.provenance.fallbackUsed) {
       qualityTier = 'low'
-      reasons.push('Using fallback signal')
+      if (sourceUsed.includes('DEGRADED_SAFE')) {
+        reasons.push('Deterministic degraded-safe fallback active')
+      } else if (sourceUsed.startsWith('LKG_')) {
+        reasons.push('Using last-known-good safety margin')
+      } else {
+        reasons.push('Using fallback signal')
+      }
     }
 
     // Check for provider disagreement
     if (signal.provenance.disagreementFlag) {
-      if (signal.provenance.disagreementPct > 25) {
+      if (signal.provenance.disagreementPct > 50) {
+        qualityTier = 'low'
+        reasons.push('Severe provider disagreement')
+      } else if (signal.provenance.disagreementPct > 25) {
         qualityTier = 'low'
         reasons.push('High provider disagreement')
       } else if (signal.provenance.disagreementPct > 10) {
@@ -961,8 +980,7 @@ export class ProviderRouter {
     }
 
     // Check for estimated/synthetic data
-    if (signal.provenance.sourceUsed.includes('ESTIMATED') || 
-        signal.provenance.sourceUsed.includes('SYNTHETIC')) {
+    if (sourceUsed.includes('ESTIMATED') || sourceUsed.includes('SYNTHETIC')) {
       qualityTier = 'low'
       reasons.push('Using estimated or synthetic data')
     }
@@ -1073,3 +1091,4 @@ export class ProviderRouter {
 }
 
 export const providerRouter = new ProviderRouter()
+

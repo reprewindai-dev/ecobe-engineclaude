@@ -4,10 +4,39 @@ import { z } from 'zod'
 import { processDecisionEventOutboxBatch, createTestEventForSink } from '../lib/ci/decision-events'
 import { env } from '../config/env'
 import { prisma } from '../lib/db'
+import {
+  buildDekesArtifactLinks,
+  parseDekesHandoffNotes,
+  toDekesForecastStability,
+  toDekesHandoffClassification,
+  toDekesHandoffEventType,
+  toDekesHandoffSeverity,
+  toDekesHandoffStatus,
+  toDekesQualityTier,
+} from '../lib/dekes/canonical'
 import { recordTelemetryMetric, telemetryMetricNames } from '../lib/observability/telemetry'
 import { internalServiceGuard } from '../middleware/internal-auth'
 
 const router = Router()
+
+function parseJsonRecord(value: unknown): Record<string, any> {
+  if (!value) return {}
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value)
+      return parsed && typeof parsed === 'object' ? (parsed as Record<string, any>) : {}
+    } catch {
+      return {}
+    }
+  }
+  return typeof value === 'object' ? (value as Record<string, any>) : {}
+}
+
+function toIsoString(value: Date | string | null | undefined) {
+  if (!value) return null
+  if (typeof value === 'string') return value
+  return value.toISOString()
+}
 
 /**
  * GET /api/v1/integrations/dekes/summary
@@ -245,74 +274,405 @@ router.get('/dekes/metrics', async (req, res) => {
 
 router.get('/dekes/handoffs', async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit as string) || 20
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit as string) || 20))
     const days = parseInt(req.query.days as string) || 30
+    const handoffId =
+      typeof req.query.handoffId === 'string' && req.query.handoffId.length > 0
+        ? req.query.handoffId
+        : null
+    const externalLeadId =
+      typeof req.query.externalLeadId === 'string' && req.query.externalLeadId.length > 0
+        ? req.query.externalLeadId
+        : null
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+    const handoffWhere: Record<string, unknown> = {}
 
-    const [handoffs, prospects] = await Promise.all([
-      prisma.dekesHandoffEvent.findMany({
-        where: { createdAt: { gte: since } },
-        orderBy: { createdAt: 'desc' },
-        take: limit,
-      }),
-      prisma.dekesProspect.findMany({
-        where: { createdAt: { gte: since } },
-        select: {
-          id: true,
-          externalLeadId: true,
-          orgName: true,
-          orgDomain: true,
-          orgRegion: true,
-          intentScore: true,
-          status: true,
-        },
-      }),
+    if (handoffId) {
+      handoffWhere.id = handoffId
+    } else if (externalLeadId) {
+      handoffWhere.externalLeadId = externalLeadId
+    } else {
+      handoffWhere.createdAt = { gte: since }
+    }
+
+    const handoffs = await prisma.dekesHandoffEvent.findMany({
+      where: handoffWhere,
+      orderBy: { createdAt: 'desc' },
+      take: handoffId ? 1 : limit,
+    })
+
+    const parsedHandoffs: Array<{
+      handoff: any
+      parsedNotes: ReturnType<typeof parseDekesHandoffNotes>
+    }> = handoffs.map((handoff: any) => ({
+      handoff,
+      parsedNotes: parseDekesHandoffNotes(handoff.notes),
+    }))
+    const prospectIds = Array.from(
+      new Set(
+        parsedHandoffs
+          .map(({ handoff }: { handoff: any }) => handoff.prospectId)
+          .filter((value: string | null | undefined): value is string => Boolean(value))
+      )
+    )
+    const externalLeadIds = Array.from(
+      new Set(
+        parsedHandoffs
+          .map(({ handoff }: { handoff: any }) => handoff.externalLeadId)
+          .filter((value: string | null | undefined): value is string => Boolean(value))
+      )
+    )
+    const decisionFrameIds = Array.from(
+      new Set(
+        parsedHandoffs
+          .map(
+            ({ parsedNotes }: { parsedNotes: ReturnType<typeof parseDekesHandoffNotes> }) =>
+              parsedNotes.decisionFrameId
+          )
+          .filter((value: string | null | undefined): value is string => Boolean(value))
+      )
+    )
+    const outboxWhere = handoffId || externalLeadId ? {} : { createdAt: { gte: since } }
+
+    const [prospects, decisions, outcomes, workloads, outboxItems] = await Promise.all([
+      prospectIds.length > 0 || externalLeadIds.length > 0
+        ? prisma.dekesProspect.findMany({
+            where: {
+              OR: [
+                ...(prospectIds.length > 0 ? [{ id: { in: prospectIds } }] : []),
+                ...(externalLeadIds.length > 0
+                  ? [{ externalLeadId: { in: externalLeadIds } }]
+                  : []),
+              ],
+            },
+            select: {
+              id: true,
+              externalLeadId: true,
+              orgName: true,
+              orgDomain: true,
+              orgRegion: true,
+              intentScore: true,
+              status: true,
+            },
+          })
+        : Promise.resolve([]),
+      decisionFrameIds.length > 0
+        ? prisma.cIDecision.findMany({
+            where: {
+              decisionFrameId: { in: decisionFrameIds },
+            },
+            select: {
+              id: true,
+              decisionFrameId: true,
+              selectedRunner: true,
+              baselineRegion: true,
+              selectedRegion: true,
+              carbonIntensity: true,
+              baseline: true,
+              recommendation: true,
+              decisionAction: true,
+              decisionMode: true,
+              reasonCode: true,
+              signalConfidence: true,
+              policyTrace: true,
+              proofHash: true,
+              fallbackUsed: true,
+              lowConfidence: true,
+              chosenCo2G: true,
+              co2DeltaG: true,
+              metadata: true,
+              createdAt: true,
+            },
+          })
+        : Promise.resolve([]),
+      decisionFrameIds.length > 0
+        ? prisma.workloadDecisionOutcome.findMany({
+            where: {
+              workloadId: { in: decisionFrameIds },
+            },
+            orderBy: { createdAt: 'desc' },
+          })
+        : Promise.resolve([]),
+      decisionFrameIds.length > 0 || externalLeadIds.length > 0
+        ? prisma.dekesWorkload.findMany({
+            where: {
+              OR: [
+                ...(decisionFrameIds.length > 0 ? [{ id: { in: decisionFrameIds } }] : []),
+                ...(decisionFrameIds.length > 0
+                  ? [{ dekesQueryId: { in: decisionFrameIds } }]
+                  : []),
+                ...(externalLeadIds.length > 0
+                  ? [{ dekesQueryId: { in: externalLeadIds } }]
+                  : []),
+              ],
+            },
+            orderBy: { createdAt: 'desc' },
+          })
+        : Promise.resolve([]),
+      decisionFrameIds.length > 0
+        ? prisma.decisionEventOutbox.findMany({
+            where: outboxWhere,
+            orderBy: { createdAt: 'desc' },
+            take: 500,
+            select: {
+              status: true,
+              payload: true,
+              createdAt: true,
+            },
+          })
+        : Promise.resolve([]),
     ])
 
-    const prospectMap = new Map<string, (typeof prospects)[number]>(
+    const prospectById = new Map<string, (typeof prospects)[number]>(
       prospects.map((prospect: (typeof prospects)[number]) => [prospect.id, prospect])
+    )
+    const prospectByLeadId = new Map<string, (typeof prospects)[number]>(
+      prospects
+        .filter((prospect: any) => prospect.externalLeadId)
+        .map((prospect: any) => [prospect.externalLeadId as string, prospect])
+    )
+    const decisionByFrameId = new Map<string, (typeof decisions)[number]>(
+      decisions.map((decision: (typeof decisions)[number]) => [decision.decisionFrameId, decision])
+    )
+    const outcomeByWorkloadId = new Map<string, (typeof outcomes)[number]>(
+      outcomes.map((outcome: (typeof outcomes)[number]) => [outcome.workloadId, outcome])
+    )
+    const workloadByLookup = new Map<string, (typeof workloads)[number]>()
+    for (const workload of workloads as any[]) {
+      workloadByLookup.set(workload.id, workload)
+      if (workload.dekesQueryId) {
+        workloadByLookup.set(workload.dekesQueryId, workload)
+      }
+    }
+    const outboxByFrameId = new Map<string, any[]>()
+    for (const item of outboxItems as any[]) {
+      const payload = parseJsonRecord(item.payload)
+      const payloadFrameId =
+        typeof payload.decisionFrameId === 'string' ? payload.decisionFrameId : null
+      if (!payloadFrameId || !decisionFrameIds.includes(payloadFrameId)) continue
+      const group = outboxByFrameId.get(payloadFrameId) ?? []
+      group.push(item)
+      outboxByFrameId.set(payloadFrameId, group)
+    }
+
+    const hydratedHandoffs = parsedHandoffs.map(
+      ({
+        handoff,
+        parsedNotes,
+      }: {
+        handoff: any
+        parsedNotes: ReturnType<typeof parseDekesHandoffNotes>
+      }) => {
+      const prospect =
+        (handoff.prospectId ? prospectById.get(handoff.prospectId) : null) ??
+        (handoff.externalLeadId ? prospectByLeadId.get(handoff.externalLeadId) : null) ??
+        null
+      const decision = parsedNotes.decisionFrameId
+        ? decisionByFrameId.get(parsedNotes.decisionFrameId) ?? null
+        : null
+      const decisionResponse = parseJsonRecord(parseJsonRecord(decision?.metadata).response)
+      const artifactLinks = buildDekesArtifactLinks(parsedNotes.decisionFrameId)
+      const workload =
+        (parsedNotes.decisionFrameId
+          ? workloadByLookup.get(parsedNotes.decisionFrameId) ?? null
+          : null) ??
+        (handoff.externalLeadId ? workloadByLookup.get(handoff.externalLeadId) ?? null : null)
+      const executionOutcome = parsedNotes.decisionFrameId
+        ? outcomeByWorkloadId.get(parsedNotes.decisionFrameId) ?? null
+        : null
+      const action =
+        parsedNotes.action ??
+        ((decision?.decisionAction as string | null | undefined) ?? null) ??
+        (typeof decisionResponse.decision === 'string' ? decisionResponse.decision : null)
+      const signalConfidence =
+        decision?.signalConfidence ??
+        (typeof decisionResponse.signalConfidence === 'number'
+          ? decisionResponse.signalConfidence
+          : null)
+      const baselineCarbonIntensity =
+        decision?.baseline ??
+        (typeof decisionResponse.baseline?.carbonIntensity === 'number'
+          ? decisionResponse.baseline.carbonIntensity
+          : null)
+      const selectedCarbonIntensity =
+        decision?.carbonIntensity ??
+        (typeof decisionResponse.selected?.carbonIntensity === 'number'
+          ? decisionResponse.selected.carbonIntensity
+          : null)
+      const eventType = toDekesHandoffEventType({
+        action,
+        fallbackUsed: decision?.fallbackUsed ?? false,
+        lowConfidence: decision?.lowConfidence ?? false,
+        signalConfidence,
+        baselineCarbonIntensity,
+        selectedCarbonIntensity,
+      })
+      const severity = toDekesHandoffSeverity(eventType, action)
+      const dekesClassification = toDekesHandoffClassification(eventType)
+      const selectedRegion =
+        parsedNotes.selectedRegion ??
+        decision?.selectedRegion ??
+        (typeof decisionResponse.selectedRegion === 'string'
+          ? decisionResponse.selectedRegion
+          : null) ??
+        workload?.selectedRegion ??
+        prospect?.orgRegion ??
+        'unassigned'
+      const baselineRegion =
+        decision?.baselineRegion ??
+        (typeof decisionResponse.baseline?.region === 'string'
+          ? decisionResponse.baseline.region
+          : null) ??
+        selectedRegion
+      const carbonDeltaGPerKwh =
+        baselineCarbonIntensity != null && selectedCarbonIntensity != null
+          ? Number((baselineCarbonIntensity - selectedCarbonIntensity).toFixed(6))
+          : typeof decisionResponse.carbonDelta === 'number'
+            ? decisionResponse.carbonDelta
+            : 0
+      const score =
+        baselineCarbonIntensity != null &&
+        selectedCarbonIntensity != null &&
+        baselineCarbonIntensity > 0
+          ? Math.max(
+              0,
+              Math.min(
+                1,
+                Number(
+                  ((baselineCarbonIntensity - selectedCarbonIntensity) / baselineCarbonIntensity).toFixed(6)
+                )
+              )
+            )
+          : 0
+      const outbox = parsedNotes.decisionFrameId
+        ? outboxByFrameId.get(parsedNotes.decisionFrameId) ?? []
+        : []
+      const eventDelivery = {
+        sinkCount: outbox.length,
+        sentCount: outbox.filter((item) => item.status === 'SENT').length,
+        pendingCount: outbox.filter((item) => item.status === 'PENDING').length,
+        failedCount: outbox.filter((item) => item.status === 'FAILED').length,
+        deadLetterCount: outbox.filter((item) => item.status === 'DEAD_LETTER').length,
+      }
+      const chosenCo2G =
+        typeof decision?.chosenCo2G === 'number'
+          ? decision.chosenCo2G
+          : typeof workload?.actualCO2 === 'number'
+            ? workload.actualCO2 * 1000
+            : null
+      const budget =
+        workload?.carbonBudget != null || chosenCo2G != null
+          ? {
+              status:
+                workload?.carbonBudget != null && chosenCo2G != null
+                  ? chosenCo2G > workload.carbonBudget
+                    ? 'exceeded'
+                    : chosenCo2G > workload.carbonBudget * 0.8
+                      ? 'warning'
+                      : 'ok'
+                  : 'ok',
+              usedCO2Grams: chosenCo2G ?? 0,
+              remainingCO2Grams:
+                workload?.carbonBudget != null
+                  ? Math.max(0, workload.carbonBudget - (chosenCo2G ?? 0))
+                  : 0,
+            }
+          : null
+
+        return {
+        handoffId: handoff.id,
+        organizationId:
+          prospect?.orgDomain ??
+          prospect?.orgName ??
+          handoff.externalLeadId ??
+          parsedNotes.decisionFrameId ??
+          'dekes',
+        decisionId: decision?.id ?? null,
+        decisionFrameId: parsedNotes.decisionFrameId,
+        eventType,
+        severity,
+        timestamp: handoff.createdAt.toISOString(),
+        status: toDekesHandoffStatus(handoff.status),
+        qualificationScore: handoff.qualificationScore ?? prospect?.intentScore ?? null,
+        dekesClassification,
+        dekesActionType: parsedNotes.legacyAction ?? action,
+        dekesActionId: parsedNotes.proofId ?? parsedNotes.decisionFrameId,
+        processedAt:
+          toIsoString(executionOutcome?.createdAt) ??
+          toIsoString(workload?.completedAt) ??
+          handoff.updatedAt.toISOString(),
+        routing: {
+          selectedRegion,
+          baselineRegion,
+          carbonIntensity: selectedCarbonIntensity ?? 0,
+          carbonDeltaGPerKwh,
+          qualityTier: toDekesQualityTier(signalConfidence),
+          forecastStability: toDekesForecastStability({
+            fallbackUsed: decision?.fallbackUsed ?? false,
+            lowConfidence: decision?.lowConfidence ?? false,
+            signalConfidence,
+          }),
+          score,
+        },
+        budget,
+        policy: {
+          policyName:
+            (typeof parseJsonRecord(decision?.policyTrace).policyVersion === 'string'
+              ? parseJsonRecord(decision?.policyTrace).policyVersion
+              : null) ??
+            (typeof decisionResponse.decisionEnvelope?.policyVersion === 'string'
+              ? decisionResponse.decisionEnvelope.policyVersion
+              : null),
+          actionTaken: action,
+        },
+        explanation:
+          (typeof decisionResponse.decisionExplanation?.headline === 'string'
+            ? decisionResponse.decisionExplanation.headline
+            : null) ??
+          (typeof decision?.recommendation === 'string' ? decision.recommendation : null),
+        replayUrl: parsedNotes.decisionFrameId
+          ? `/control-surface?tab=routing&decisionFrameId=${encodeURIComponent(parsedNotes.decisionFrameId)}`
+          : null,
+        prospect: prospect
+          ? {
+              id: prospect.id,
+              orgName: prospect.orgName,
+              orgDomain: prospect.orgDomain,
+              orgRegion: prospect.orgRegion,
+              intentScore: prospect.intentScore,
+              status: prospect.status,
+            }
+          : null,
+        evidence: {
+          proofHash:
+            parsedNotes.proofHash ??
+            decision?.proofHash ??
+            (typeof decisionResponse.proofHash === 'string' ? decisionResponse.proofHash : null) ??
+            null,
+          traceUrl: artifactLinks?.trace ?? null,
+          rawTraceUrl: artifactLinks?.rawTrace ?? null,
+          replayUrl: artifactLinks?.replay ?? null,
+          replayPacketUrl: artifactLinks?.replayPacketJson ?? null,
+          proofPacketJsonUrl: artifactLinks?.proofPacketJson ?? null,
+          proofPacketPdfUrl: artifactLinks?.proofPacketPdf ?? null,
+        },
+        execution: {
+          success: executionOutcome?.success ?? null,
+          region: executionOutcome?.region ?? selectedRegion ?? null,
+          latencyMs:
+            typeof executionOutcome?.latency === 'number' ? executionOutcome.latency : null,
+          recordedAt:
+            toIsoString(executionOutcome?.createdAt) ?? toIsoString(workload?.completedAt) ?? null,
+        },
+        eventDelivery,
+        }
+      }
     )
 
     return res.json({
-      handoffs: handoffs.map((handoff: any) => {
-        const prospect = handoff.prospectId ? prospectMap.get(handoff.prospectId) ?? null : null
-        let notes: Record<string, unknown> = {}
-        try {
-          notes = handoff.notes ? JSON.parse(handoff.notes) : {}
-        } catch {
-          notes = {}
-        }
-
-        return {
-          id: handoff.id,
-          status: handoff.status,
-          qualificationScore: handoff.qualificationScore,
-          externalLeadId: handoff.externalLeadId,
-          createdAt: handoff.createdAt.toISOString(),
-          updatedAt: handoff.updatedAt.toISOString(),
-          prospect: prospect
-            ? {
-                id: prospect.id,
-                orgName: prospect.orgName,
-                orgDomain: prospect.orgDomain,
-                orgRegion: prospect.orgRegion,
-                intentScore: prospect.intentScore,
-                status: prospect.status,
-              }
-            : null,
-          decisionFrameId: notes.decisionFrameId ?? null,
-          proofId: notes.proofId ?? null,
-          action: notes.action ?? null,
-          reasonCode: notes.reasonCode ?? null,
-          selectedRegion: notes.selectedRegion ?? null,
-          selectedRunner: notes.selectedRunner ?? null,
-          carbonReductionPct: notes.carbonReductionPct ?? null,
-          waterImpactDeltaLiters: notes.waterImpactDeltaLiters ?? null,
-          latencyMs: notes.latencyMs ?? null,
-        }
-      }),
-      total: handoffs.length,
-      timeRange: `${days}d`,
+      handoffs: hydratedHandoffs,
+      total: hydratedHandoffs.length,
+      timeRange: handoffId || externalLeadId ? 'single lookup' : `${days}d`,
     })
   } catch (error) {
     console.error('DEKES integration handoffs error:', error)

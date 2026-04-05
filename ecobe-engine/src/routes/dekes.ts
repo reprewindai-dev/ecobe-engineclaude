@@ -1,8 +1,12 @@
 import { Router } from 'express'
 import { z } from 'zod'
-import { routeGreen } from '../lib/green-routing'
 import { prisma } from '../lib/db'
 import { env } from '../config/env'
+import { createDecision, persistCiDecisionResult } from './ci'
+import {
+  buildDekesDecisionSurface,
+  estimateDekesEnergyKwh,
+} from '../lib/dekes/canonical'
 
 const router = Router()
 
@@ -32,35 +36,88 @@ const optimizeRequestSchema = z.object({
   regions: z.array(z.string()).min(1),
 })
 
+const scheduleRequestSchema = z.object({
+  queries: z
+    .array(
+      z.object({
+        id: z.string(),
+        query: z.string().optional(),
+        estimatedResults: z.number().optional(),
+        estimatedKwh: z.number().optional(),
+      })
+    )
+    .min(1),
+  carbonBudget: z.number().optional(),
+  preferredRegions: z.array(z.string()).min(1).optional(),
+  regions: z.array(z.string()).min(1).optional(),
+})
+
 router.post('/optimize', requireApiKey, async (req, res) => {
   try {
     const data = optimizeRequestSchema.parse(req.body)
-
-    // Map DEKES request to green routing request
-    const routingResult = await routeGreen({
+    const estimatedKwh = estimateDekesEnergyKwh({
+      estimatedResults: data.query.estimatedResults,
+    })
+    const started = Date.now()
+    const decision = await createDecision({
       preferredRegions: data.regions,
-      maxCarbonGPerKwh: data.carbonBudget,
       carbonWeight: 0.5,
+      waterWeight: 0.2,
       latencyWeight: 0.2,
-      costWeight: 0.3,
+      costWeight: 0.1,
+      workloadClass: 'interactive',
+      jobType: 'light',
+      criticality: 'standard',
+      allowDelay: true,
+      decisionMode: 'scenario_planning',
+      estimatedEnergyKwh: estimatedKwh,
+      metadata: {
+        source: 'dekes_optimize',
+        queryId: data.query.id,
+        query: data.query.query,
+        estimatedResults: data.query.estimatedResults,
+        carbonBudget: data.carbonBudget,
+      },
+    })
+    const totalMs = Date.now() - started
+    const canonicalResponse = await persistCiDecisionResult(decision, {
+      total: totalMs,
+      compute: totalMs,
     })
 
-    // Estimate kWh from query characteristics:
-    // ~0.001 kWh per estimated result (typical DB + network cost)
-    const estimatedKwh = Math.max(0.01, data.query.estimatedResults * 0.001)
-
-    // Return DEKES-compatible response
     const response = {
-      selectedRegion: routingResult.selectedRegion,
-      estimatedCO2: Math.round(routingResult.carbonIntensity * estimatedKwh * 1000) / 1000, // gCO2eq = gCO2/kWh * kWh
+      estimatedCO2: Number((canonicalResponse.selected.carbonIntensity * estimatedKwh).toFixed(6)),
       scheduledTime: new Date().toISOString(),
-      score: routingResult.score,
-      alternatives: routingResult.alternatives.map((alt) => ({
-        region: alt.region,
-        estimatedCO2: Math.round(alt.carbonIntensity * estimatedKwh * 1000) / 1000,
-        score: alt.score,
+      score:
+        typeof canonicalResponse.candidateEvaluations?.[0]?.score === 'number'
+          ? canonicalResponse.candidateEvaluations[0].score
+          : 0,
+      alternatives: (canonicalResponse.candidateEvaluations ?? []).slice(0, 3).map((candidate) => ({
+        region: candidate.region,
+        estimatedCO2: Number((candidate.carbonIntensity * estimatedKwh).toFixed(6)),
+        score: candidate.score,
       })),
+      budgetStatus:
+        canonicalResponse.selected.carbonIntensity > data.carbonBudget ? 'exceeded' : 'within_budget',
+      ...buildDekesDecisionSurface(canonicalResponse),
     }
+
+    await prisma.integrationEvent
+      .create({
+        data: {
+          source: 'DEKES_INTEGRATION',
+          eventType: 'OPTIMIZE_DECISION',
+          message: JSON.stringify({
+            decisionFrameId: response.decisionFrameId,
+            queryId: data.query.id,
+            selectedRegion: response.selectedRegion,
+            action: response.action,
+            proofHash: response.proofHash,
+          }),
+          success: true,
+        },
+      })
+      .catch(() => {})
 
     res.json(response)
   } catch (error: any) {
@@ -170,34 +227,59 @@ router.get('/analytics', requireApiKey, async (req, res) => {
  */
 router.post('/schedule', requireApiKey, async (req, res) => {
   try {
-    const { queries, carbonBudget, preferredRegions } = req.body
+    const data = scheduleRequestSchema.parse(req.body)
+    const preferredRegions =
+      data.preferredRegions ?? data.regions ?? ['us-east-1', 'us-west-2', 'eu-west-1']
 
-    if (!Array.isArray(queries) || queries.length === 0) {
-      return res.status(400).json({ error: 'queries array is required and must not be empty' })
-    }
-
-    // For each query, route it using the green routing logic
-    const { routeGreen } = await import('../lib/green-routing')
     const scheduledQueries = await Promise.all(
-      queries.map(async (query: any) => {
+      data.queries.map(async (query) => {
         try {
-          const routing = await routeGreen({
-            preferredRegions: preferredRegions || ['us-east-1', 'us-west-2', 'eu-west-1'],
-            maxCarbonGPerKwh: carbonBudget || 500,
-            carbonWeight: 0.7,
-            latencyWeight: 0.2,
+          const estimatedKwh = estimateDekesEnergyKwh({
+            estimatedResults: query.estimatedResults,
+            estimatedKwh: query.estimatedKwh,
+          })
+          const started = Date.now()
+          const decision = await createDecision({
+            preferredRegions,
+            carbonWeight: 0.6,
+            waterWeight: 0.2,
+            latencyWeight: 0.1,
             costWeight: 0.1,
+            workloadClass: 'batch',
+            jobType: 'light',
+            criticality: 'batch',
+            allowDelay: true,
+            decisionMode: 'scenario_planning',
+            estimatedEnergyKwh: estimatedKwh,
+            metadata: {
+              source: 'dekes_schedule',
+              queryId: query.id,
+              query: query.query ?? null,
+              estimatedResults: query.estimatedResults ?? null,
+              carbonBudget: data.carbonBudget ?? null,
+            },
+          })
+          const response = await persistCiDecisionResult(decision, {
+            total: Date.now() - started,
+            compute: Date.now() - started,
           })
 
           return {
             queryId: query.id,
-            selectedRegion: routing.selectedRegion,
-            estimatedCO2: routing.carbonIntensity * (query.estimatedKwh || 0.05),
-            score: routing.score,
-            recommendations: routing.alternatives.slice(0, 2).map((alt: any) => ({
-              region: alt.region,
-              estimatedCO2: alt.carbonIntensity * (query.estimatedKwh || 0.05),
+            estimatedCO2: Number((response.selected.carbonIntensity * estimatedKwh).toFixed(6)),
+            score:
+              typeof response.candidateEvaluations?.[0]?.score === 'number'
+                ? response.candidateEvaluations[0].score
+                : 0,
+            recommendations: (response.candidateEvaluations ?? []).slice(0, 2).map((candidate) => ({
+              region: candidate.region,
+              estimatedCO2: Number((candidate.carbonIntensity * estimatedKwh).toFixed(6)),
             })),
+            budgetStatus:
+              data.carbonBudget != null && response.selected.carbonIntensity > data.carbonBudget
+                ? 'exceeded'
+                : 'within_budget',
+            ...buildDekesDecisionSurface(response),
           }
         } catch (error) {
           return { queryId: query.id, error: 'Routing failed' }
@@ -205,10 +287,25 @@ router.post('/schedule', requireApiKey, async (req, res) => {
       })
     )
 
+    await prisma.integrationEvent
+      .create({
+        data: {
+          source: 'DEKES_INTEGRATION',
+          eventType: 'SCHEDULE_DECISION_BATCH',
+          message: JSON.stringify({
+            totalQueries: data.queries.length,
+            scheduled: scheduledQueries.filter((query) => !('error' in query)).length,
+            failed: scheduledQueries.filter((query) => 'error' in query).length,
+          }),
+          success: true,
+        },
+      })
+      .catch(() => {})
+
     return res.json({
-      totalQueries: queries.length,
-      scheduled: scheduledQueries.filter((q: any) => !q.error).length,
-      failed: scheduledQueries.filter((q: any) => q.error).length,
+      totalQueries: data.queries.length,
+      scheduled: scheduledQueries.filter((query) => !('error' in query)).length,
+      failed: scheduledQueries.filter((query) => 'error' in query).length,
       queries: scheduledQueries,
     })
   } catch (error: any) {

@@ -742,6 +742,62 @@ export interface DesignPartnerApplicationResponse {
   remainingRequestsThisWindow: number
 }
 
+export type BillingLane = 'pilot' | 'ci' | 'control_surface' | 'enterprise'
+export type BillingSegment = 'small' | 'mid' | 'large'
+export type BillingInterval = 'one_time_30d' | 'monthly' | 'annual'
+
+export interface CommerceCheckoutSessionRequest {
+  lane: BillingLane
+  segment?: BillingSegment | null
+}
+
+export interface CommerceCheckoutSessionResponse {
+  success: boolean
+  sessionId: string
+  url: string | null
+  lane: BillingLane
+  segment: BillingSegment | null
+  interval: BillingInterval
+}
+
+export interface CommerceCheckoutSessionStatusResponse {
+  success: boolean
+  sessionId: string
+  lane: BillingLane
+  segment: BillingSegment | null
+  interval: BillingInterval | null
+  paymentStatus: string | null
+  checkoutStatus: string | null
+  priceLabel: string | null
+  buyerEmail: string | null
+  buyerName: string | null
+  organization: {
+    id: string
+    name: string
+    slug: string
+    planTier: string
+    activatedAt: string | null
+    accessExpiresAt: string | null
+  } | null
+}
+
+export interface ContactSubmissionInput {
+  category: 'sales' | 'support' | 'security'
+  name: string
+  email: string
+  company?: string
+  message: string
+  executionFootprint?: string
+  integrationSurface?: string
+  website?: string
+}
+
+export interface ContactSubmissionResponse {
+  success: boolean
+  message: string
+  remainingRequestsThisWindow?: number
+}
+
 export type CarbonLevel = 'low' | 'medium' | 'high'
 
 export function getCarbonLevel(intensity: number): CarbonLevel {
@@ -849,6 +905,37 @@ export interface DekesHandoff {
   } | null
   explanation: string | null
   replayUrl: string | null
+  qualificationScore?: number | null
+  prospect?: {
+    id: string
+    orgName: string | null
+    orgDomain: string | null
+    orgRegion: string | null
+    intentScore: number | null
+    status: string | null
+  } | null
+  evidence?: {
+    proofHash: string | null
+    traceUrl: string | null
+    rawTraceUrl: string | null
+    replayUrl: string | null
+    replayPacketUrl: string | null
+    proofPacketJsonUrl: string | null
+    proofPacketPdfUrl: string | null
+  } | null
+  execution?: {
+    success: boolean | null
+    region: string | null
+    latencyMs: number | null
+    recordedAt: string | null
+  } | null
+  eventDelivery?: {
+    sinkCount: number
+    sentCount: number
+    pendingCount: number
+    failedCount: number
+    deadLetterCount: number
+  } | null
 }
 
 export interface DekesIntegrationSummary {

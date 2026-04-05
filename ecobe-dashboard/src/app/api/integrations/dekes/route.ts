@@ -40,12 +40,18 @@ export async function GET(request: Request) {
     const endpoint = searchParams.get('endpoint') || 'summary'
     const days = searchParams.get('days') || '30'
     const hours = searchParams.get('hours') || '168'
+    const limit = searchParams.get('limit') || '20'
+    const handoffId = searchParams.get('handoffId')
+    const externalLeadId = searchParams.get('externalLeadId')
 
     let path = `/integrations/dekes/${endpoint}`
 
     const params = new URLSearchParams()
     if (endpoint === 'summary' && days) params.set('days', days)
     if (endpoint === 'metrics' && hours) params.set('hours', hours)
+    if ((endpoint === 'events' || endpoint === 'handoffs') && limit) params.set('limit', limit)
+    if (endpoint === 'handoffs' && handoffId) params.set('handoffId', handoffId)
+    if (endpoint === 'handoffs' && externalLeadId) params.set('externalLeadId', externalLeadId)
 
     if (params.toString()) {
       path += `?${params.toString()}`

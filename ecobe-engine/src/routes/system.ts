@@ -5,6 +5,7 @@ import { getDecisionProjectionFreshness } from '../lib/ci/decision-projection'
 import { redis } from '../lib/redis'
 import { prisma } from '../lib/db'
 import { GridSignalCache } from '../lib/grid-signals/grid-signal-cache'
+import { getProviderFreshness } from '../lib/routing'
 
 const router = Router()
 
@@ -115,6 +116,20 @@ router.get('/status', async (req: Request, res: Response) => {
         invalidCount: number
       }
     } = null
+    let providerFreshnessSummary: null | {
+      healthy: number
+      degraded: number
+      offline: number
+      stale: number
+      maxFreshnessSec: number | null
+      providers: Array<{
+        provider: string
+        status: 'healthy' | 'degraded' | 'offline'
+        freshnessSec: number
+        statusReasonCode: string
+        lastLatencyMs: number | null
+      }>
+    } = null
 
     if (dbHealthy) {
       try {
@@ -130,6 +145,7 @@ router.get('/status', async (req: Request, res: Response) => {
           projectionFailed,
           projectionDeadLetter,
           projectionFreshness,
+          providerFreshness,
         ] = await Promise.all([
           prisma.decisionEventOutbox.count({ where: { status: 'PENDING' } }),
           prisma.decisionEventOutbox.count({ where: { status: 'PROCESSING' } }),
@@ -142,6 +158,7 @@ router.get('/status', async (req: Request, res: Response) => {
           prisma.decisionProjectionOutbox.count({ where: { status: 'FAILED' } }),
           prisma.decisionProjectionOutbox.count({ where: { status: 'DEAD_LETTER' } }),
           getDecisionProjectionFreshness(),
+          getProviderFreshness().catch(() => []),
         ])
 
         decisionEventOutbox = { pending, processing, failed, deadLetter, sent }
@@ -158,6 +175,28 @@ router.get('/status', async (req: Request, res: Response) => {
           projectionLagSec: projectionFreshness.projectionLagSec,
           dataStatus: projectionFreshness.dataStatus,
           quality: projectionFreshness.quality,
+        }
+        providerFreshnessSummary = {
+          healthy: providerFreshness.filter((provider) => provider.status === 'healthy').length,
+          degraded: providerFreshness.filter((provider) => provider.status === 'degraded').length,
+          offline: providerFreshness.filter((provider) => provider.status === 'offline').length,
+          stale: providerFreshness.filter((provider) => provider.isStale).length,
+          maxFreshnessSec:
+            providerFreshness.length > 0
+              ? providerFreshness.reduce<number | null>((max, provider) => {
+                  if (!Number.isFinite(provider.freshnessSec) || provider.freshnessSec < 0) {
+                    return max
+                  }
+                  return max === null ? provider.freshnessSec : Math.max(max, provider.freshnessSec)
+                }, null)
+              : null,
+          providers: providerFreshness.map((provider) => ({
+            provider: provider.provider,
+            status: provider.status,
+            freshnessSec: provider.freshnessSec,
+            statusReasonCode: provider.statusReasonCode,
+            lastLatencyMs: provider.lastLatencyMs,
+          })),
         }
       } catch (error) {
         console.warn('Failed to gather decision outbox health:', error)
@@ -212,7 +251,17 @@ router.get('/status', async (req: Request, res: Response) => {
       },
       decisionEventOutbox,
       decisionProjectionOutbox,
+      decisionProjectionBacklog: decisionProjectionOutbox
+        ? {
+            pending: decisionProjectionOutbox.pending,
+            processing: decisionProjectionOutbox.processing,
+            active: decisionProjectionOutbox.pending + decisionProjectionOutbox.processing,
+            failed: decisionProjectionOutbox.failed,
+            deadLetter: decisionProjectionOutbox.deadLetter,
+          }
+        : null,
       decisionProjection,
+      providerFreshness: providerFreshnessSummary,
     })
   } catch (error) {
     console.error('Error in system status endpoint:', error)

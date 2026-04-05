@@ -51,6 +51,7 @@ const RegionDetailSchema = z.object({
   balancingAuthority: z.string().nullable(),
   latest: z.object({
     timestamp: z.string(),
+    carbonIntensity: z.number().nullable().optional(),
     demandRampPct: z.number().nullable(),
     renewableRatio: z.number().nullable(),
     fossilRatio: z.number().nullable(),
@@ -62,6 +63,7 @@ const RegionDetailSchema = z.object({
   }),
   history: z.array(z.object({
     timestamp: z.string(),
+    carbonIntensity: z.number().nullable().optional(),
     demandRampPct: z.number().nullable(),
     renewableRatio: z.number().nullable(),
     fossilRatio: z.number().nullable(),
@@ -83,6 +85,174 @@ const HeroMetricsSchema = z.object({
 
 // Default cloud regions that the dashboard and cache warmer use
 const CLOUD_REGIONS = ['us-east-1', 'us-west-2', 'eu-west-1', 'eu-central-1', 'ap-southeast-1', 'ap-northeast-1']
+const GRID_INTELLIGENCE_REGIONS = ['PJM', 'ERCOT', 'CAISO', 'MISO', 'NYISO', 'ISO-NE', 'SPP']
+
+type GridSignalQuality = z.infer<typeof GridSummarySchema>['regions'][number]['signalQuality']
+type GridSummaryRegion = z.infer<typeof GridSummarySchema>['regions'][number]
+type GridRegionDetail = z.infer<typeof RegionDetailSchema>
+type GridRegionHistoryPoint = GridRegionDetail['history'][number]
+
+function parseRegionQuery(value: unknown, fallback: readonly string[]) {
+  const raw = Array.isArray(value) ? value : typeof value === 'string' ? [value] : []
+  const regions = raw
+    .flatMap((entry) => entry.split(','))
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+
+  return regions.length > 0 ? Array.from(new Set(regions)) : [...fallback]
+}
+
+function parseHoursQuery(value: unknown, fallbackHours: number, maxHours = 168) {
+  const parsed = Number.parseInt(typeof value === 'string' ? value : '', 10)
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallbackHours
+  return Math.min(parsed, maxHours)
+}
+
+export function normalizeGridSignalQuality(value: unknown): GridSignalQuality {
+  if (value === 'high' || value === 'medium' || value === 'low') return value
+  if (typeof value !== 'string') return 'medium'
+
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'high' || normalized === 'medium' || normalized === 'low') return normalized
+  return 'medium'
+}
+
+function gridSignalQualityFromConfidence(confidence: number): GridSignalQuality {
+  if (confidence >= 0.7) return 'high'
+  if (confidence >= 0.4) return 'medium'
+  return 'low'
+}
+
+export function toIsoTimestamp(value: string | Date | null | undefined) {
+  if (value instanceof Date) return value.toISOString()
+  if (typeof value === 'string') {
+    const parsed = new Date(value)
+    if (Number.isFinite(parsed.getTime())) return parsed.toISOString()
+  }
+  return new Date().toISOString()
+}
+
+export function buildGridSummaryRegionFromSnapshot(input: {
+  region: string
+  balancingAuthority: string | null
+  snapshot: {
+    balancingAuthority?: string | null
+    demandChangePct?: number | null
+    renewableRatio?: number | null
+    fossilRatio?: number | null
+    carbonSpikeProbability?: number | null
+    curtailmentProbability?: number | null
+    importCarbonLeakageScore?: number | null
+    signalQuality?: string | null
+  }
+}): GridSummaryRegion {
+  return {
+    region: input.region,
+    balancingAuthority: input.snapshot.balancingAuthority ?? input.balancingAuthority,
+    carbonIntensity: null,
+    source: 'eia-930',
+    demandRampPct: input.snapshot.demandChangePct ?? null,
+    renewableRatio: input.snapshot.renewableRatio ?? null,
+    fossilRatio: input.snapshot.fossilRatio ?? null,
+    carbonSpikeProbability: input.snapshot.carbonSpikeProbability ?? null,
+    curtailmentProbability: input.snapshot.curtailmentProbability ?? null,
+    importCarbonLeakageScore: input.snapshot.importCarbonLeakageScore ?? null,
+    signalQuality: normalizeGridSignalQuality(input.snapshot.signalQuality),
+  }
+}
+
+export function buildGridSummaryRegionFromRoutingSignal(input: {
+  region: string
+  balancingAuthority: string | null
+  signal: {
+    carbonIntensity: number
+    confidence: number
+    provenance: {
+      sourceUsed: string
+    }
+  }
+}): GridSummaryRegion {
+  return {
+    region: input.region,
+    balancingAuthority: input.balancingAuthority,
+    carbonIntensity: input.signal.carbonIntensity,
+    source: input.signal.provenance.sourceUsed,
+    demandRampPct: null,
+    renewableRatio: null,
+    fossilRatio: null,
+    carbonSpikeProbability: null,
+    curtailmentProbability: null,
+    importCarbonLeakageScore: null,
+    signalQuality: gridSignalQualityFromConfidence(input.signal.confidence),
+  }
+}
+
+export function buildGridRegionHistoryPointFromSnapshot(snapshot: {
+  timestamp: string | Date
+  carbonIntensity?: number | null
+  demandChangePct?: number | null
+  renewableRatio?: number | null
+  fossilRatio?: number | null
+  carbonSpikeProbability?: number | null
+  curtailmentProbability?: number | null
+  importCarbonLeakageScore?: number | null
+  signalQuality?: string | null
+}): GridRegionHistoryPoint {
+  return {
+    timestamp: toIsoTimestamp(snapshot.timestamp),
+    carbonIntensity: snapshot.carbonIntensity ?? null,
+    demandRampPct: snapshot.demandChangePct ?? null,
+    renewableRatio: snapshot.renewableRatio ?? null,
+    fossilRatio: snapshot.fossilRatio ?? null,
+    carbonSpikeProbability: snapshot.carbonSpikeProbability ?? null,
+    curtailmentProbability: snapshot.curtailmentProbability ?? null,
+    importCarbonLeakageScore: snapshot.importCarbonLeakageScore ?? null,
+    signalQuality: normalizeGridSignalQuality(snapshot.signalQuality),
+  }
+}
+
+export function buildGridRegionDetailFromRoutingSignal(input: {
+  region: string
+  balancingAuthority: string | null
+  signal: {
+    carbonIntensity: number
+    confidence: number
+    provenance: {
+      referenceTime: string
+    }
+  }
+}): GridRegionDetail {
+  const latest: GridRegionDetail['latest'] = {
+    timestamp: toIsoTimestamp(input.signal.provenance.referenceTime),
+    carbonIntensity: input.signal.carbonIntensity,
+    demandRampPct: null,
+    renewableRatio: null,
+    fossilRatio: null,
+    netInterchangeMwh: null,
+    carbonSpikeProbability: null,
+    curtailmentProbability: null,
+    importCarbonLeakageScore: null,
+    signalQuality: gridSignalQualityFromConfidence(input.signal.confidence),
+  }
+
+  return {
+    region: input.region,
+    balancingAuthority: input.balancingAuthority,
+    latest,
+    history: [latest],
+  }
+}
+
+export function parseGridAuditRecord(message: string | null | undefined) {
+  if (!message) return null
+
+  try {
+    const parsed = JSON.parse(message)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
+}
 
 /**
  * GET /api/v1/intelligence/grid/summary
@@ -92,8 +262,7 @@ const CLOUD_REGIONS = ['us-east-1', 'us-west-2', 'eu-west-1', 'eu-central-1', 'a
  */
 router.get('/summary', async (req, res) => {
   try {
-    const regions = req.query.regions as string[] | undefined
-    const targetRegions = regions || CLOUD_REGIONS
+    const targetRegions = parseRegionQuery(req.query.regions, CLOUD_REGIONS)
 
     const summaryData = await Promise.all(
       targetRegions.map(async (region) => {
@@ -115,19 +284,11 @@ router.get('/summary', async (req, res) => {
 
         if (snapshots.length > 0) {
           const latest = snapshots[0]
-          return {
-            region,  // Always return the cloud region, not the BA code
-            balancingAuthority: latest.balancingAuthority || baCode,
-            carbonIntensity: null as number | null,
-            source: 'eia-930' as string | null,
-            demandRampPct: latest.demandChangePct,
-            renewableRatio: latest.renewableRatio,
-            fossilRatio: latest.fossilRatio,
-            carbonSpikeProbability: latest.carbonSpikeProbability,
-            curtailmentProbability: latest.curtailmentProbability,
-            importCarbonLeakageScore: latest.importCarbonLeakageScore,
-            signalQuality: (latest.signalQuality?.toLowerCase() || 'medium') as 'high' | 'medium' | 'low'
-          }
+          return buildGridSummaryRegionFromSnapshot({
+            region,
+            balancingAuthority: baCode,
+            snapshot: latest,
+          })
         }
 
         // Fallback: get live routing signal from provider-router (uses cache-warmed data)
@@ -135,19 +296,11 @@ router.get('/summary', async (req, res) => {
           const { providerRouter } = await import('../../lib/carbon/provider-router')
           const signal = await providerRouter.getRoutingSignal(region, new Date())
           if (signal) {
-            return {
+            return buildGridSummaryRegionFromRoutingSignal({
               region,
-              balancingAuthority: null,
-              carbonIntensity: signal.carbonIntensity,
-              source: signal.provenance.sourceUsed,
-              demandRampPct: null,
-              renewableRatio: null,
-              fossilRatio: null,
-              carbonSpikeProbability: null,
-              curtailmentProbability: null,
-              importCarbonLeakageScore: null,
-              signalQuality: (signal.confidence >= 0.7 ? 'high' : signal.confidence >= 0.4 ? 'medium' : 'low') as 'high' | 'medium' | 'low'
-            }
+              balancingAuthority: baCode,
+              signal,
+            })
           }
         } catch (err) {
           console.warn(`Grid summary: provider-router fallback failed for ${region}:`, err)
@@ -177,8 +330,7 @@ router.get('/summary', async (req, res) => {
  */
 router.get('/opportunities', async (req, res) => {
   try {
-    const regions = req.query.regions as string[] | undefined
-    const targetRegions = regions || ['PJM', 'ERCOT', 'CAISO', 'MISO', 'NYISO', 'ISO-NE', 'SPP']
+    const targetRegions = parseRegionQuery(req.query.regions, GRID_INTELLIGENCE_REGIONS)
 
     // Fetch recent snapshots for all regions
     const allSnapshots = await Promise.all(
@@ -194,8 +346,8 @@ router.get('/opportunities', async (req, res) => {
 
     const flatSnapshots = allSnapshots.flat().map(s => ({
       ...s,
-      timestamp: typeof s.timestamp === 'string' ? s.timestamp : s.timestamp.toISOString(),
-      signalQuality: (s.signalQuality as any)?.toLowerCase?.() || 'medium'
+      timestamp: toIsoTimestamp(s.timestamp),
+      signalQuality: normalizeGridSignalQuality(s.signalQuality)
     }))
 
     // Detect curtailment windows
@@ -239,7 +391,7 @@ router.get('/opportunities', async (req, res) => {
 router.get('/region/:region', async (req, res) => {
   try {
     const { region } = req.params
-    const hours = parseInt(req.query.hours as string) || 24
+    const hours = parseHoursQuery(req.query.hours, 24)
 
     // Map cloud region → BA code for EIA lookup
     const { getRegionMapping } = await import('../../lib/grid-signals/region-mapping')
@@ -259,46 +411,41 @@ router.get('/region/:region', async (req, res) => {
       })
     }
 
-    if (!latestSnapshot) {
-      return res.status(404).json({ error: 'Region not found' })
-    }
+    let response: GridRegionDetail
 
-    // Fetch historical data
-    const history = await prisma.gridSignalSnapshot.findMany({
-      where: {
-        region: queryRegion,
-        timestamp: {
-          gte: new Date(Date.now() - hours * 60 * 60 * 1000)
-        }
-      },
-      orderBy: { timestamp: 'desc' },
-      take: 48
-    })
+    if (latestSnapshot) {
+      const history = await prisma.gridSignalSnapshot.findMany({
+        where: {
+          region: queryRegion,
+          timestamp: {
+            gte: new Date(Date.now() - hours * 60 * 60 * 1000)
+          }
+        },
+        orderBy: { timestamp: 'desc' },
+        take: 48
+      })
 
-    const response = {
-      region,  // Return cloud region, not BA code
-      balancingAuthority: latestSnapshot.balancingAuthority,
-      latest: {
-        timestamp: latestSnapshot.timestamp.toISOString(),
-        demandRampPct: latestSnapshot.demandChangePct,
-        renewableRatio: latestSnapshot.renewableRatio,
-        fossilRatio: latestSnapshot.fossilRatio,
-        netInterchangeMwh: latestSnapshot.netInterchangeMwh,
-        carbonSpikeProbability: latestSnapshot.carbonSpikeProbability,
-        curtailmentProbability: latestSnapshot.curtailmentProbability,
-        importCarbonLeakageScore: latestSnapshot.importCarbonLeakageScore,
-        signalQuality: latestSnapshot.signalQuality
-      },
-      history: history.map((snapshot: any) => ({
-        timestamp: typeof snapshot.timestamp === 'string' ? snapshot.timestamp : snapshot.timestamp.toISOString(),
-        demandRampPct: snapshot.demandChangePct,
-        renewableRatio: snapshot.renewableRatio,
-        fossilRatio: snapshot.fossilRatio,
-        carbonSpikeProbability: snapshot.carbonSpikeProbability,
-        curtailmentProbability: snapshot.curtailmentProbability,
-        importCarbonLeakageScore: snapshot.importCarbonLeakageScore,
-        signalQuality: snapshot.signalQuality
-      }))
+      response = {
+        region,
+        balancingAuthority: latestSnapshot.balancingAuthority,
+        latest: {
+          ...buildGridRegionHistoryPointFromSnapshot(latestSnapshot),
+          netInterchangeMwh: latestSnapshot.netInterchangeMwh ?? null,
+        },
+        history: history.map((snapshot: any) => buildGridRegionHistoryPointFromSnapshot(snapshot))
+      }
+    } else {
+      const { providerRouter } = await import('../../lib/carbon/provider-router')
+      const signal = await providerRouter.getRoutingSignal(region, new Date())
+      if (!signal) {
+        return res.status(404).json({ error: 'Region not found' })
+      }
+
+      response = buildGridRegionDetailFromRoutingSignal({
+        region,
+        balancingAuthority: baCode,
+        signal,
+      })
     }
 
     const validated = RegionDetailSchema.parse(response)
@@ -359,7 +506,8 @@ router.get('/hero-metrics', async (req, res) => {
       sum + (cmd.estimatedEmissionsKgCo2e || 0), 0
     )
 
-    const carbonReductionMultiplier = baselineEmissions > 0 ? baselineEmissions / optimizedEmissions : 1
+    const carbonReductionMultiplier =
+      baselineEmissions > 0 && optimizedEmissions > 0 ? baselineEmissions / optimizedEmissions : 1
 
     // Calculate confidence metrics
     const highConfidenceCount = totalCommands.filter((cmd: any) =>
@@ -419,8 +567,7 @@ router.get('/hero-metrics', async (req, res) => {
  */
 router.get('/import-leakage', async (req, res) => {
   try {
-    const regions = req.query.regions as string[] | undefined
-    const targetRegions = regions || ['PJM', 'ERCOT', 'CAISO', 'MISO', 'NYISO', 'ISO-NE', 'SPP']
+    const targetRegions = parseRegionQuery(req.query.regions, GRID_INTELLIGENCE_REGIONS)
 
     // Fetch recent snapshots for all regions
     const allSnapshots = await Promise.all(
@@ -436,8 +583,8 @@ router.get('/import-leakage', async (req, res) => {
 
     const flatSnapshots = allSnapshots.flat().map(s => ({
       ...s,
-      timestamp: typeof s.timestamp === 'string' ? s.timestamp : s.timestamp.toISOString(),
-      signalQuality: (s.signalQuality as any)?.toLowerCase?.() || 'medium'
+      timestamp: toIsoTimestamp(s.timestamp),
+      signalQuality: normalizeGridSignalQuality(s.signalQuality)
     }))
 
     // Fetch real provider carbon intensities for neighbor regions
@@ -477,7 +624,7 @@ router.get('/import-leakage', async (req, res) => {
 router.get('/audit/:region', async (req, res) => {
   try {
     const { region } = req.params
-    const hours = parseInt(req.query.hours as string) || 24
+    const hours = parseHoursQuery(req.query.hours, 24)
 
     const startTime = new Date(Date.now() - hours * 60 * 60 * 1000)
     const endTime = new Date()
@@ -493,11 +640,7 @@ router.get('/audit/:region', async (req, res) => {
 
     const auditRecords = auditHistory
       .map((event: any) => {
-        try {
-          return JSON.parse(event.message || '{}')
-        } catch {
-          return null
-        }
+        return parseGridAuditRecord(event.message)
       })
       .filter((record: any): record is any => record !== null)
 

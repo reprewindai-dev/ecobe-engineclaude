@@ -1,9 +1,14 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/db'
-import { routeGreen } from '../lib/green-routing'
 import { env } from '../config/env'
 import { createDecision, persistCiDecisionResult } from './ci'
+import {
+  buildDekesArtifactLinks,
+  buildDekesDecisionSurface,
+  estimateDekesEnergyKwh,
+  parseDekesHandoffNotes,
+} from '../lib/dekes/canonical'
 
 const router = Router()
 
@@ -15,7 +20,10 @@ const DEFAULT_HANDOFF_REGIONS = ['us-east-1', 'us-west-2', 'eu-west-1', 'ap-sout
 
 type AutoHandoffPayload = {
   decisionFrameId: string
+  proofHash: string
+  decisionMode: string
   action: string
+  legacyAction: string
   reasonCode: string
   selectedRegion: string
   selectedRunner: string
@@ -23,6 +31,8 @@ type AutoHandoffPayload = {
   policyTrace: Record<string, unknown>
   carbonReductionPct: number
   waterImpactDeltaLiters: number
+  estimatedEnergyKwh: number
+  artifactLinks: ReturnType<typeof buildDekesArtifactLinks>
   latencyMs: {
     total: number
     compute: number
@@ -65,6 +75,7 @@ async function maybeCreateAutoHandoff(prospect: {
 
   const candidateRegions = buildCandidateRegions(prospect.orgRegion)
   const started = Date.now()
+  const estimatedEnergyKwh = 0.6
   const decisionResult = await createDecision({
     preferredRegions: candidateRegions,
     carbonWeight: 0.55,
@@ -78,7 +89,7 @@ async function maybeCreateAutoHandoff(prospect: {
     policyVersion: 'water_policy_v1',
     allowDelay: true,
     signalPolicy: 'marginal_first',
-    estimatedEnergyKwh: 0.6,
+    estimatedEnergyKwh,
     metadata: {
       source: 'dekes_auto_handoff',
       prospectId: prospect.id,
@@ -91,10 +102,14 @@ async function maybeCreateAutoHandoff(prospect: {
     total: totalMs,
     compute: totalMs,
   })
+  const decisionSurface = buildDekesDecisionSurface(response)
 
   const payload: AutoHandoffPayload = {
     decisionFrameId: response.decisionFrameId,
+    proofHash: response.proofHash,
+    decisionMode: response.decisionMode,
     action: response.decision,
+    legacyAction: decisionSurface.legacyAction,
     reasonCode: response.reasonCode,
     selectedRegion: response.selectedRegion,
     selectedRunner: response.selectedRunner,
@@ -102,6 +117,8 @@ async function maybeCreateAutoHandoff(prospect: {
     policyTrace: response.policyTrace,
     carbonReductionPct: response.savings.carbonReductionPct,
     waterImpactDeltaLiters: response.savings.waterImpactDeltaLiters,
+    estimatedEnergyKwh,
+    artifactLinks: buildDekesArtifactLinks(response.decisionFrameId),
     latencyMs: {
       total: totalMs,
       compute: totalMs,
@@ -117,7 +134,9 @@ async function maybeCreateAutoHandoff(prospect: {
       carbonBudget: response.baseline.carbonIntensity,
       scheduledTime: new Date(),
       selectedRegion: response.selectedRegion,
-      actualCO2: response.selected.carbonIntensity,
+      actualCO2: Number(
+        ((response.selected.carbonIntensity * estimatedEnergyKwh) / 1000).toFixed(6)
+      ),
       status: 'ROUTED',
       completedAt: new Date(),
     },
@@ -380,22 +399,37 @@ router.get('/handoffs/:externalId', requireApiKey, async (req, res) => {
   try {
     const { externalId } = req.params
 
-    // Look up the prospect by external lead ID
-    const prospect = await prisma.dekesProspect.findFirst({
-      where: { externalLeadId: externalId },
-      orderBy: { createdAt: 'desc' },
-    })
+    const [prospect, handoff] = await Promise.all([
+      prisma.dekesProspect.findFirst({
+        where: { externalLeadId: externalId },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.dekesHandoffEvent.findFirst({
+        where: { externalLeadId: externalId },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ])
 
     if (!prospect) {
       return res.status(404).json({ error: 'Handoff not found' })
     }
 
+    const parsedNotes = parseDekesHandoffNotes(handoff?.notes)
+
     return res.json({
-      status: prospect.status,
+      status: handoff?.status ?? prospect.status,
       externalLeadId: prospect.externalLeadId,
       externalOrgId: prospect.externalOrgId,
       convertedAt: prospect.status === 'CONVERTED' ? prospect.updatedAt.toISOString() : undefined,
-      notes: prospect.notes,
+      decisionFrameId: parsedNotes.decisionFrameId,
+      proofHash: parsedNotes.proofHash,
+      action: parsedNotes.action,
+      selectedRegion: parsedNotes.selectedRegion,
+      selectedRunner: parsedNotes.selectedRunner,
+      artifactLinks: parsedNotes.decisionFrameId
+        ? buildDekesArtifactLinks(parsedNotes.decisionFrameId)
+        : null,
+      notes: handoff?.notes ?? prospect.notes,
     })
   } catch (error: any) {
     console.error('Get handoff status error:', error)
@@ -425,30 +459,81 @@ router.post('/route', requireApiKey, async (req, res) => {
     const data = routeSchema.parse(req.body)
 
     // Map candidateRegions → preferredRegions for internal routing
-    const regions = data.candidateRegions ?? data.preferredRegions ?? ['us-east-1', 'us-west-2', 'eu-west-1']
-
-    const routingResult = await routeGreen({
+    const regions =
+      data.candidateRegions ?? data.preferredRegions ?? ['us-east-1', 'us-west-2', 'eu-west-1']
+    const estimatedEnergyKwh = estimateDekesEnergyKwh({
+      durationMinutes: data.durationMinutes ?? null,
+    })
+    const started = Date.now()
+    const decision = await createDecision({
       preferredRegions: regions,
-      maxCarbonGPerKwh: data.maxCarbonGPerKwh ?? 500,
       carbonWeight: data.carbonWeight ?? 0.6,
+      waterWeight: 0.2,
       latencyWeight: data.latencyWeight ?? 0.2,
       costWeight: data.costWeight ?? 0.2,
+      workloadClass: 'interactive',
+      jobType: 'light',
+      criticality: 'standard',
+      allowDelay: true,
+      maxDelayMinutes:
+        data.delayToleranceMinutes != null
+          ? Math.max(0, Math.round(data.delayToleranceMinutes))
+          : undefined,
+      decisionMode: 'runtime_authorization',
+      estimatedEnergyKwh,
+      metadata: {
+        source: 'dekes_route',
+        organizationId: data.organizationId ?? null,
+        dekesSource: data.source ?? null,
+        workloadType: data.workloadType ?? null,
+        maxCarbonGPerKwh: data.maxCarbonGPerKwh ?? null,
+        durationMinutes: data.durationMinutes ?? null,
+      },
     })
-
-    // Determine action based on routing result
-    const isPolicyDelay = 'action' in routingResult && (routingResult as any).action === 'delay'
-
+    const canonicalResponse = await persistCiDecisionResult(decision, {
+      total: Date.now() - started,
+      compute: Date.now() - started,
+    })
     const response = {
-      decisionId: routingResult.decisionFrameId ?? `dec_${Date.now()}`,
-      action: isPolicyDelay ? 'delay' : 'execute',
-      selectedRegion: routingResult.selectedRegion,
-      target: routingResult.selectedRegion,
-      predicted_clean_window: routingResult.predicted_clean_window ?? null,
-      carbonDelta: routingResult.carbon_delta_g_per_kwh ?? null,
-      qualityTier: routingResult.qualityTier,
-      policyAction: isPolicyDelay ? 'delay' : null,
-      timestamp: new Date().toISOString(),
+      qualityTier:
+        canonicalResponse.signalConfidence >= 0.85
+          ? 'high'
+          : canonicalResponse.signalConfidence >= 0.68
+            ? 'medium'
+            : 'low',
+      estimatedEnergyKwh,
+      ...buildDekesDecisionSurface(canonicalResponse),
     }
+
+    await prisma.dekesWorkload.upsert({
+      where: { id: canonicalResponse.decisionFrameId },
+      update: {
+        dekesRunId: data.source ?? null,
+        queryString: data.workloadType ?? 'dekes_runtime_route',
+        carbonBudget: data.maxCarbonGPerKwh ?? null,
+        scheduledTime: new Date(),
+        selectedRegion: canonicalResponse.selectedRegion,
+        actualCO2: Number(
+          ((canonicalResponse.selected.carbonIntensity * estimatedEnergyKwh) / 1000).toFixed(6)
+        ),
+        status: 'ROUTED',
+      },
+      create: {
+        id: canonicalResponse.decisionFrameId,
+        dekesQueryId: canonicalResponse.decisionFrameId,
+        dekesRunId: data.source ?? null,
+        queryString: data.workloadType ?? 'dekes_runtime_route',
+        estimatedQueries: 1,
+        estimatedResults: 1,
+        carbonBudget: data.maxCarbonGPerKwh ?? null,
+        scheduledTime: new Date(),
+        selectedRegion: canonicalResponse.selectedRegion,
+        actualCO2: Number(
+          ((canonicalResponse.selected.carbonIntensity * estimatedEnergyKwh) / 1000).toFixed(6)
+        ),
+        status: 'ROUTED',
+      },
+    })
 
     // Record integration event
     await prisma.integrationEvent.create({
@@ -457,10 +542,12 @@ router.post('/route', requireApiKey, async (req, res) => {
         eventType: 'ROUTING_DECISION',
         message: JSON.stringify({
           decisionId: response.decisionId,
+          decisionFrameId: response.decisionFrameId,
           source: data.source,
           workloadType: data.workloadType,
           selectedRegion: response.selectedRegion,
           action: response.action,
+          proofHash: response.proofHash,
         }),
         success: true,
       },
@@ -488,16 +575,50 @@ const completeSchema = z.object({
 router.post('/workloads/complete', requireApiKey, async (req, res) => {
   try {
     const data = completeSchema.parse(req.body)
+    const decision = await prisma.cIDecision.findFirst({
+      where: {
+        OR: [{ decisionFrameId: data.decision_id }, { id: data.decision_id }],
+      },
+      select: {
+        decisionFrameId: true,
+        selectedRunner: true,
+        selectedRegion: true,
+        chosenCo2G: true,
+        co2DeltaG: true,
+        proofHash: true,
+      },
+    })
+    const workloadId = decision?.decisionFrameId ?? data.decision_id
+    const success = data.status === 'success'
 
-    // Record the workload outcome
     await prisma.workloadDecisionOutcome.create({
       data: {
-        workloadId: data.decision_id,
+        workloadId,
         region: data.executionRegion,
-        carbonSaved: 0, // Will be populated from actual routing delta
-        latency: data.durationMinutes * 60 * 1000, // Convert to ms
+        carbonSaved: decision?.co2DeltaG ?? 0,
+        latency: data.durationMinutes * 60 * 1000,
         cost: 0,
-        success: data.status === 'success',
+        success,
+      },
+    })
+
+    await prisma.dekesWorkload.updateMany({
+      where: {
+        OR: [{ id: workloadId }, { dekesQueryId: workloadId }],
+      },
+      data: {
+        selectedRegion: data.executionRegion,
+        actualCO2:
+          typeof decision?.chosenCo2G === 'number'
+            ? Number((decision.chosenCo2G / 1000).toFixed(6))
+            : undefined,
+        status:
+          data.status === 'success'
+            ? 'COMPLETED'
+            : data.status === 'partial'
+              ? 'PARTIAL'
+              : 'FAILED',
+        completedAt: new Date(),
       },
     })
 
@@ -507,16 +628,25 @@ router.post('/workloads/complete', requireApiKey, async (req, res) => {
         source: 'DEKES_INTEGRATION',
         eventType: 'WORKLOAD_COMPLETED',
         message: JSON.stringify({
-          decisionId: data.decision_id,
+          decisionId: workloadId,
+          decisionFrameId: workloadId,
+          selectedRunner: decision?.selectedRunner ?? null,
           region: data.executionRegion,
           status: data.status,
           durationMinutes: data.durationMinutes,
+          proofHash: decision?.proofHash ?? null,
         }),
-        success: data.status !== 'failed',
+        success,
       },
     }).catch(() => {})
 
-    return res.json({ received: true, decisionId: data.decision_id })
+    return res.json({
+      received: true,
+      decisionId: workloadId,
+      selectedRunner: decision?.selectedRunner ?? null,
+      selectedRegion: decision?.selectedRegion ?? data.executionRegion,
+      proofHash: decision?.proofHash ?? null,
+    })
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid request', details: error.errors })

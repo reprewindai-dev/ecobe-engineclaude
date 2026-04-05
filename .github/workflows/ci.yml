@@ -115,7 +115,7 @@ jobs:
           DIRECT_DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
 
       - name: Run targeted tests
-        run: npm test -- --runInBand --passWithNoTests ci-authorization ci-response-v2-contract ci-replay-determinism ci-trace provider-router routing-contract seked-internal grid-signal-cache-bucket
+        run: npm test -- --runInBand --passWithNoTests ci-authorization ci-response-v2-contract ci-replay-determinism ci-trace dekes-canonical github-actions-policy grid-intelligence k8s-policy provider-router routing-contract seked-internal system-status grid-signal-cache-bucket
         env:
           DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
           DIRECT_DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder

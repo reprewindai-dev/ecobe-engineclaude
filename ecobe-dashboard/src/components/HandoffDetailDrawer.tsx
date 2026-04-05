@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { X, Copy, CheckCheck, ArrowUpRight, ShieldCheck, AlertTriangle, Leaf } from 'lucide-react'
+import { X, Copy, CheckCheck, ArrowUpRight, ShieldCheck, AlertTriangle, Leaf, Activity } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { getQualityTierBadge, getStabilityColor } from '@/types'
 import type {
@@ -306,6 +306,67 @@ export function HandoffDetailDrawer({ handoff, onClose }: HandoffDetailDrawerPro
                 {h.processedAt && (
                   <Row label="Processed at">{fmt(h.processedAt)}</Row>
                 )}
+              </div>
+            </section>
+          )}
+
+          {(h.execution || h.eventDelivery) && (
+            <section>
+              <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                <Activity className="w-3.5 h-3.5 text-cyan-300" />
+                Execution + Delivery
+              </h4>
+              <div className="bg-slate-900/60 rounded-lg border border-slate-800 divide-y divide-slate-800/60">
+                {h.execution && (
+                  <>
+                    <Row label="Execution status">
+                      <Badge
+                        className={
+                          h.execution.success == null
+                            ? 'bg-slate-700/60 text-slate-400 border border-slate-600/30'
+                            : h.execution.success
+                              ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                              : 'bg-red-500/15 text-red-400 border border-red-500/30'
+                        }
+                      >
+                        {h.execution.success == null ? 'UNRECORDED' : h.execution.success ? 'SUCCESS' : 'FAILED'}
+                      </Badge>
+                    </Row>
+                    {h.execution.region && <Row label="Execution region">{h.execution.region}</Row>}
+                    {h.execution.latencyMs != null && <Row label="Execution latency">{Math.round(h.execution.latencyMs)} ms</Row>}
+                    {h.execution.recordedAt && <Row label="Recorded at">{fmt(h.execution.recordedAt)}</Row>}
+                  </>
+                )}
+                {h.eventDelivery && (
+                  <>
+                    <Row label="Webhook sinks">{h.eventDelivery.sinkCount}</Row>
+                    <Row label="Sent">{h.eventDelivery.sentCount}</Row>
+                    <Row label="Pending">{h.eventDelivery.pendingCount}</Row>
+                    <Row label="Failed">{h.eventDelivery.failedCount}</Row>
+                    <Row label="Dead letter">{h.eventDelivery.deadLetterCount}</Row>
+                  </>
+                )}
+              </div>
+            </section>
+          )}
+
+          {h.evidence && (
+            <section>
+              <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                Evidence Links
+              </h4>
+              <div className="bg-slate-900/60 rounded-lg border border-slate-800 divide-y divide-slate-800/60">
+                {h.evidence.proofHash && (
+                  <Row label="Proof hash">
+                    <code className="font-mono text-[11px] break-all text-slate-300">{h.evidence.proofHash}</code>
+                  </Row>
+                )}
+                {h.evidence.traceUrl && <Row label="Trace">{h.evidence.traceUrl}</Row>}
+                {h.evidence.rawTraceUrl && <Row label="Raw trace">{h.evidence.rawTraceUrl}</Row>}
+                {h.evidence.replayPacketUrl && <Row label="Replay packet">{h.evidence.replayPacketUrl}</Row>}
+                {h.evidence.proofPacketJsonUrl && <Row label="Proof packet JSON">{h.evidence.proofPacketJsonUrl}</Row>}
+                {h.evidence.proofPacketPdfUrl && <Row label="Proof packet PDF">{h.evidence.proofPacketPdfUrl}</Row>}
               </div>
             </section>
           )}
