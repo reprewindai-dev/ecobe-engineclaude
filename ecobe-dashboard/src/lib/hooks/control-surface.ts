@@ -7,6 +7,8 @@ import type {
   CommandCenterSnapshot,
   ControlSurfaceOverview,
   DecisionTraceRawRecord,
+  HallOGridFrameDetail,
+  HallOGridSnapshot,
   LiveSystemSnapshot,
   ReplayBundle,
   SimulationMode,
@@ -99,5 +101,30 @@ export function useSimulation(mode: SimulationMode = 'fast') {
         method: 'POST',
         body: JSON.stringify(payload),
       }),
+  })
+}
+
+export function useHallOGridSnapshot() {
+  return useQuery<HallOGridSnapshot>({
+    queryKey: ['hallogrid-snapshot'],
+    queryFn: () => getJson<HallOGridSnapshot>('/api/control-surface/hallogrid'),
+    staleTime: 15_000,
+    refetchInterval: 15_000,
+  })
+}
+
+export function useHallOGridFrame(
+  decisionFrameId: string | null,
+  options?: { enabled?: boolean; refetchInterval?: number | false }
+) {
+  return useQuery<HallOGridFrameDetail>({
+    queryKey: ['hallogrid-frame', decisionFrameId],
+    queryFn: () =>
+      getJson<HallOGridFrameDetail>(
+        `/api/control-surface/hallogrid/frame/${encodeURIComponent(decisionFrameId!)}`
+      ),
+    enabled: Boolean(decisionFrameId) && (options?.enabled ?? true),
+    staleTime: REFRESH_INTERVAL_MS,
+    refetchInterval: options?.refetchInterval,
   })
 }
