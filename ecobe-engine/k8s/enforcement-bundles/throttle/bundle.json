@@ -1,0 +1,122 @@
+{
+  "admission": {
+    "allow": true,
+    "reason": "EXPORT_THROTTLE"
+  },
+  "labels": {
+    "ecobe.io/decision-frame": "df-1775361884310",
+    "ecobe.io/region": "ap-south-1",
+    "ecobe.io/policy-profile": "default",
+    "ecobe.io/decision": "throttle",
+    "ecobe.io/water-authority": "basin",
+    "ecobe.io/water-scenario": "current"
+  },
+  "annotations": {
+    "ecobe.io/reason-code": "EXPORT_THROTTLE",
+    "ecobe.io/generated-at": "2026-04-05T04:04:44.310Z",
+    "ecobe.io/enforcement": "deterministic",
+    "ecobe.io/decision-mode": "runtime_authorization",
+    "ecobe.io/proof-hash": "sha256:df-1775361884310",
+    "ecobe.io/throttle-factor": "0.35"
+  },
+  "nodeSelector": {
+    "topology.kubernetes.io/region": "ap-south-1",
+    "ecobe.io/region": "ap-south-1"
+  },
+  "nodeAffinity": {
+    "requiredRegion": "ap-south-1",
+    "preferredRegions": [
+      "ap-south-1"
+    ]
+  },
+  "tolerations": [
+    {
+      "key": "ecobe.io/policy-profile",
+      "operator": "Equal",
+      "value": "default",
+      "effect": "NoSchedule"
+    }
+  ],
+  "scaling": {
+    "mode": "throttled",
+    "targetReplicaFactor": 0.35,
+    "maxReplicaFactor": 0.5
+  },
+  "execution": {
+    "mode": "immediate",
+    "notBefore": null
+  },
+  "gatekeeper": {
+    "constraintTemplateName": "ecobedecisionguard",
+    "constraintName": "ecobe-df-1775361884310",
+    "requiredLabels": [
+      "ecobe.io/decision-frame",
+      "ecobe.io/region",
+      "ecobe.io/decision"
+    ],
+    "parameters": {
+      "decisionFrameId": "df-1775361884310",
+      "selectedRegion": "ap-south-1",
+      "notBefore": null,
+      "minReplicaFactor": 0.35,
+      "maxReplicaFactor": 0.5,
+      "blocked": false
+    },
+    "template": {
+      "apiVersion": "templates.gatekeeper.sh/v1beta1",
+      "kind": "ConstraintTemplate",
+      "metadata": {
+        "name": "ecobedecisionguard"
+      },
+      "spec": {
+        "crd": {
+          "spec": {
+            "names": {
+              "kind": "EcobeDecisionGuard"
+            }
+          }
+        },
+        "targets": [
+          {
+            "target": "admission.k8s.gatekeeper.sh",
+            "rego": "\npackage ecobedecisionguard\n\nviolation[{\"msg\": msg}] {\n  required := {\"ecobe.io/decision-frame\", \"ecobe.io/region\", \"ecobe.io/decision\"}\n  provided := {key | input.review.object.metadata.labels[key]}\n  missing := required - provided\n  count(missing) > 0\n  msg := sprintf(\"missing ecobe labels: %v\", [missing])\n}\n\nviolation[{\"msg\": msg}] {\n  expected := input.parameters.selectedRegion\n  actual := input.review.object.metadata.labels[\"ecobe.io/region\"]\n  expected != actual\n  msg := sprintf(\"region %v violates ecobe authorization region %v\", [actual, expected])\n}\n\nviolation[{\"msg\": msg}] {\n  input.parameters.blocked\n  msg := \"workload is blocked by ecobe authorization\"\n}\n"
+          }
+        ]
+      }
+    },
+    "constraint": {
+      "apiVersion": "constraints.gatekeeper.sh/v1beta1",
+      "kind": "EcobeDecisionGuard",
+      "metadata": {
+        "name": "ecobe-df-1775361884310"
+      },
+      "spec": {
+        "match": {
+          "kinds": [
+            {
+              "apiGroups": [
+                ""
+              ],
+              "kinds": [
+                "Pod"
+              ]
+            }
+          ],
+          "labelSelector": {
+            "matchLabels": {
+              "ecobe.io/decision-frame": "df-1775361884310"
+            }
+          }
+        },
+        "parameters": {
+          "decisionFrameId": "df-1775361884310",
+          "selectedRegion": "ap-south-1",
+          "notBefore": null,
+          "minReplicaFactor": 0.35,
+          "maxReplicaFactor": 0.5,
+          "blocked": false
+        }
+      }
+    }
+  }
+}

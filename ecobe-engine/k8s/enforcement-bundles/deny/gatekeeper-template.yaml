@@ -1,0 +1,34 @@
+apiVersion: templates.gatekeeper.sh/v1beta1
+kind: ConstraintTemplate
+metadata:
+  name: ecobedecisionguard
+spec:
+  crd:
+    spec:
+      names:
+        kind: EcobeDecisionGuard
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+          
+          package ecobedecisionguard
+          
+          violation[{"msg": msg}] {
+            required := {"ecobe.io/decision-frame", "ecobe.io/region", "ecobe.io/decision"}
+            provided := {key | input.review.object.metadata.labels[key]}
+            missing := required - provided
+            count(missing) > 0
+            msg := sprintf("missing ecobe labels: %v", [missing])
+          }
+          
+          violation[{"msg": msg}] {
+            expected := input.parameters.selectedRegion
+            actual := input.review.object.metadata.labels["ecobe.io/region"]
+            expected != actual
+            msg := sprintf("region %v violates ecobe authorization region %v", [actual, expected])
+          }
+          
+          violation[{"msg": msg}] {
+            input.parameters.blocked
+            msg := "workload is blocked by ecobe authorization"
+          }

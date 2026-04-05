@@ -1,0 +1,21 @@
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: EcobeDecisionGuard
+metadata:
+  name: ecobe-df-1775361884182
+spec:
+  match:
+    kinds:
+      - apiGroups:
+          - ""
+        kinds:
+          - Pod
+    labelSelector:
+      matchLabels:
+        ecobe.io/decision-frame: df-1775361884182
+  parameters:
+    decisionFrameId: df-1775361884182
+    selectedRegion: us-west-2
+    notBefore: 2026-04-05T04:24:44.182Z
+    minReplicaFactor: 0
+    maxReplicaFactor: 0
+    blocked: false

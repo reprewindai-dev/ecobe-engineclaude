@@ -1,0 +1,82 @@
+name: CO2 Router Full Doctrine Enforcement
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  authorize:
+    name: Authorize Before Runner Spend
+    runs-on: [self-hosted, linux, x64, do, ecobe, general]
+    outputs:
+      decision: ${{ steps.ecobe.outputs.decision }}
+      executable: ${{ steps.ecobe.outputs.executable }}
+      approved_runs_on_json: ${{ steps.ecobe.outputs.approved-runs-on-json }}
+      approved_region: ${{ steps.ecobe.outputs.approved-region }}
+      max_parallel: ${{ steps.ecobe.outputs.max-parallel }}
+      not_before: ${{ steps.ecobe.outputs.not-before }}
+      decision_frame_id: ${{ steps.ecobe.outputs.decision-frame-id }}
+      proof_hash: ${{ steps.ecobe.outputs.proof-hash }}
+      environment: ${{ steps.ecobe.outputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: CO2 Router authorization
+        id: ecobe
+        continue-on-error: true
+        uses: ./github-action
+        with:
+          engine-url: ${{ secrets.ECOBE_ENGINE_URL }}
+          api-key: ${{ secrets.ECOBE_INTERNAL_API_KEY }}
+          workload-id: full-doctrine-example
+          job-name: governed-matrix
+          preferred-regions: us-east-1,us-west-2,eu-west-1
+          workload-class: interactive
+          job-type: standard
+          criticality: standard
+          decision-mode: runtime_authorization
+          water-policy-profile: default
+          allow-delay: true
+          max-delay-minutes: 30
+          fail-on-deny: false
+          fail-on-delay: false
+
+      - name: Hard-stop deny and delay
+        shell: bash
+        run: |
+          decision="${{ steps.ecobe.outputs.decision }}"
+          if [ "$decision" = "deny" ]; then
+            echo "Denied by CO2 Router before main runner spend."
+            exit 1
+          fi
+          if [ "$decision" = "delay" ]; then
+            echo "Deferred until ${{ steps.ecobe.outputs.not-before }}."
+            exit 1
+          fi
+
+  governed-matrix:
+    name: Governed Workload
+    needs: authorize
+    if: ${{ needs.authorize.result == 'success' && needs.authorize.outputs.executable == 'true' && needs.authorize.outputs.decision != 'deny' && needs.authorize.outputs.decision != 'delay' }}
+    runs-on: ${{ fromJson(needs.authorize.outputs.approved_runs_on_json) }}
+    environment: ${{ needs.authorize.outputs.environment }}
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJson(needs.authorize.outputs.max_parallel) }}
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record governed execution
+        shell: bash
+        run: |
+          echo "Decision: ${{ needs.authorize.outputs.decision }}"
+          echo "Approved region: ${{ needs.authorize.outputs.approved_region }}"
+          echo "Decision frame: ${{ needs.authorize.outputs.decision_frame_id }}"
+          echo "Proof hash: ${{ needs.authorize.outputs.proof_hash }}"
+
+      - name: Execute governed shard
+        run: echo "Run shard ${{ matrix.shard }} in approved lane"
