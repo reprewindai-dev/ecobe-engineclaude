@@ -34,26 +34,26 @@ function shellSceneTop(mobile: boolean) {
 }
 
 const P = {
-  bg0: '#050608',
-  bg1: '#0b0d14',
-  bg2: '#10131c',
-  glass: 'rgba(12,14,22,0.68)',
-  glass2: 'rgba(20,23,34,0.82)',
-  border: 'rgba(255,255,255,0.08)',
-  borderLit: 'rgba(255,255,255,0.14)',
-  t0: '#eef0fa',
-  t1: '#b4bad0',
-  t2: '#687294',
-  t3: '#3a4168',
-  accent: '#4d8dff',
+  bg0: '#030712',
+  bg1: '#0b1120',
+  bg2: '#111827',
+  glass: 'rgba(11, 17, 32, 0.78)',
+  glass2: 'rgba(17, 24, 39, 0.88)',
+  border: 'rgba(148, 163, 184, 0.18)',
+  borderLit: 'rgba(148, 163, 184, 0.35)',
+  t0: '#ffffff',
+  t1: '#cbd5e1',
+  t2: '#94a3b8',
+  t3: '#64748b',
+  accent: '#3b82f6',
 }
 
 const A: Record<HallOGridFrame['action'], string> = {
-  run_now: '#00e68a',
-  reroute: '#ffb833',
-  delay: '#a78bfa',
-  throttle: '#7c9dff',
-  deny: '#ff4d6a',
+  run_now: '#00ff9d',
+  reroute: '#ffb800',
+  delay: '#b388ff',
+  throttle: '#82b1ff',
+  deny: '#ff2a5f',
 }
 
 const TABS = [
@@ -124,9 +124,9 @@ function regionRingDash(node: WorldRegionState) {
 }
 
 function regionRingOpacity(node: WorldRegionState) {
-  if (node.confidenceTier === 'high') return 0.9
-  if (node.confidenceTier === 'medium') return 0.65
-  return 0.45
+  if (node.confidenceTier === 'high') return 0.95
+  if (node.confidenceTier === 'medium') return 0.75
+  return 0.55
 }
 
 function regionPulse(node: WorldRegionState, reducedMotion: boolean) {
@@ -140,9 +140,9 @@ function regionPulse(node: WorldRegionState, reducedMotion: boolean) {
 }
 
 function pressureGlow(node: WorldRegionState) {
-  if (node.pressureLevel === 'high') return 0.24
-  if (node.pressureLevel === 'medium') return 0.16
-  return 0.1
+  if (node.pressureLevel === 'high') return 0.3
+  if (node.pressureLevel === 'medium') return 0.2
+  return 0.12
 }
 
 function worldStateColor(node: WorldRegionState) {
@@ -180,7 +180,7 @@ function BackgroundGrid({ active, color, mousePos }: { active: boolean; color: s
           height: '150%',
           backgroundSize: '50px 50px',
           backgroundImage:
-            'linear-gradient(to right, rgba(100,140,255,0.04) 1px, transparent 1px), linear-gradient(to bottom, rgba(100,140,255,0.04) 1px, transparent 1px)',
+            `linear-gradient(to right, ${P.border} 1px, transparent 1px), linear-gradient(to bottom, ${P.border} 1px, transparent 1px)`,
           transform: `rotateX(65deg) scale(2) translate(${mx * -30}px, ${my * -30}px)`,
           transformOrigin: 'top center',
           opacity: active ? 0.9 : 0.35,
@@ -192,7 +192,7 @@ function BackgroundGrid({ active, color, mousePos }: { active: boolean; color: s
         style={{
           position: 'absolute',
           inset: 0,
-          background: `radial-gradient(ellipse 70% 40% at 50% 0%, ${hex(P.accent, 0.07)} 0%, transparent 70%), radial-gradient(ellipse 50% 50% at 80% 90%, ${hex(A.run_now, 0.04)} 0%, transparent 50%), radial-gradient(ellipse 40% 40% at 15% 70%, ${hex(A.delay, 0.03)} 0%, transparent 50%)`,
+          background: `radial-gradient(ellipse 70% 40% at 50% 0%, ${hex(P.accent, 0.08)} 0%, transparent 70%), radial-gradient(ellipse 50% 50% at 80% 90%, ${hex(A.run_now, 0.05)} 0%, transparent 50%), radial-gradient(ellipse 40% 40% at 15% 70%, ${hex(A.delay, 0.04)} 0%, transparent 50%)`,
           opacity: active ? 1.1 : 0.72,
         }}
       />
@@ -201,7 +201,7 @@ function BackgroundGrid({ active, color, mousePos }: { active: boolean; color: s
           style={{
             position: 'absolute',
             inset: 0,
-            background: `radial-gradient(ellipse 60% 40% at 50% 50%, ${hex(color, 0.06)} 0%, transparent 60%)`,
+            background: `radial-gradient(ellipse 60% 40% at 50% 50%, ${hex(color, 0.08)} 0%, transparent 60%)`,
           }}
         />
       ) : null}
@@ -212,7 +212,7 @@ function BackgroundGrid({ active, color, mousePos }: { active: boolean; color: s
           height: '180vh',
           top: '-40%',
           left: '-40%',
-          background: `radial-gradient(circle at 50% 50%, ${hex(P.accent, 0.03)} 0%, transparent 35%)`,
+          background: `radial-gradient(circle at 50% 50%, ${hex(P.accent, 0.04)} 0%, transparent 35%)`,
           animation: 'hallogrid-breathe 14s ease-in-out infinite',
         }}
       />
@@ -246,7 +246,7 @@ function HeaderBar({
         background: `linear-gradient(180deg, ${P.bg1}f2 0%, ${P.bg1}cf 100%)`,
         backdropFilter: 'blur(18px)',
         WebkitBackdropFilter: 'blur(18px)',
-        borderBottom: `1px solid ${P.border}`,
+        borderBottom: `1px solid ${P.borderLit}`,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -263,15 +263,15 @@ function HeaderBar({
               position: 'absolute',
               inset: -4,
               borderRadius: '999px',
-              background: hex(A.run_now, 0.35),
+              background: hex(A.run_now, 0.45),
               animation: 'hallogrid-pulse 2.5s ease-in-out infinite',
             }}
           />
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'var(--m)', fontSize: mobile ? 10 : 11, letterSpacing: '0.12em', flexWrap: mobile ? 'wrap' : 'nowrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'var(--m)', fontSize: mobile ? 11 : 12, letterSpacing: '0.12em', flexWrap: mobile ? 'wrap' : 'nowrap' }}>
             <span style={{ color: P.t0, fontWeight: 700 }}>CO2 ROUTER</span>
-            <span style={{ padding: '3px 9px', borderRadius: 999, border: `1px solid ${hex(P.accent, 0.28)}`, background: hex(P.accent, 0.08), color: '#dbeafe' }}>CONSOLE</span>
+            <span style={{ padding: '3px 9px', borderRadius: 999, border: `1px solid ${hex(P.accent, 0.4)}`, background: hex(P.accent, 0.15), color: '#ffffff' }}>CONSOLE</span>
             {!mobile ? <span style={{ color: P.accent }}>HALLOGRID</span> : null}
           </div>
           <div style={{ color: P.t1, fontSize: mobile ? 11 : 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -280,12 +280,12 @@ function HeaderBar({
         </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: mobile ? 8 : 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 999, border: `1px solid ${streamHealthy ? hex(A.run_now, 0.24) : hex(A.reroute, 0.28)}`, background: streamHealthy ? hex(A.run_now, 0.08) : hex(A.reroute, 0.1), color: streamHealthy ? '#d1fae5' : '#fde68a', fontFamily: 'var(--m)', fontSize: 10, letterSpacing: '0.08em' }}>
-          <Radar size={12} />
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 999, border: `1px solid ${streamHealthy ? A.run_now : A.reroute}`, background: streamHealthy ? hex(A.run_now, 0.15) : hex(A.reroute, 0.15), color: '#ffffff', fontFamily: 'var(--m)', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em' }}>
+          <Radar size={12} color={streamHealthy ? A.run_now : A.reroute} />
           {streamHealthy ? 'LIVE MIRROR' : 'FALLBACK PATH'}
         </div>
         {!mobile ? (
-          <div style={{ color: P.t2, fontFamily: 'var(--m)', fontSize: 10, letterSpacing: '0.06em' }}>
+          <div style={{ color: P.t1, fontFamily: 'var(--m)', fontSize: 10, letterSpacing: '0.06em' }}>
             REFRESHED {ago(generatedAt)}
           </div>
         ) : null}
@@ -338,7 +338,7 @@ function TelemetryStrip({ frames, mobile }: { frames: HallOGridFrame[]; mobile: 
         alignItems: 'center',
         justifyContent: 'space-between',
         gap: mobile ? 10 : 16,
-        borderBottom: `1px solid ${P.border}`,
+        borderBottom: `1px solid ${P.borderLit}`,
         background: `linear-gradient(180deg, ${P.bg2}ed 0%, ${P.bg1}cf 100%)`,
         backdropFilter: 'blur(18px)',
         WebkitBackdropFilter: 'blur(18px)',
@@ -346,20 +346,20 @@ function TelemetryStrip({ frames, mobile }: { frames: HallOGridFrame[]; mobile: 
         marginRight: mobile ? -12 : 0,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: mobile ? 12 : 16, overflowX: 'auto', scrollbarWidth: 'none', fontFamily: 'var(--m)', fontSize: 10, letterSpacing: '0.1em', whiteSpace: 'nowrap', minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: mobile ? 12 : 20, overflowX: 'auto', scrollbarWidth: 'none', fontFamily: 'var(--m)', fontSize: 11, letterSpacing: '0.1em', whiteSpace: 'nowrap', minWidth: 0 }}>
         {items.map((item) => {
           const active = item.value > 0
           return (
-            <div key={item.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: active ? item.color : hex(item.color, 0.56), textShadow: item.pulse ? `0 0 12px ${hex(item.color, 0.42)}` : 'none' }}>
-              <span style={{ fontWeight: 700, animation: item.pulse ? 'hallogrid-pulse-soft 2.6s ease-in-out infinite' : 'none' }}>{item.value}</span>
-              <span style={{ color: active ? P.t1 : P.t3 }}>{item.label}</span>
+            <div key={item.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: active ? item.color : hex(item.color, 0.4), textShadow: item.pulse ? `0 0 12px ${hex(item.color, 0.6)}` : 'none' }}>
+              <span style={{ fontWeight: 800, fontSize: 12, animation: item.pulse ? 'hallogrid-pulse-soft 2.6s ease-in-out infinite' : 'none' }}>{item.value}</span>
+              <span style={{ color: active ? P.t0 : P.t2 }}>{item.label}</span>
             </div>
           )
         })}
       </div>
       {!mobile ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0, color: P.t2, fontFamily: 'var(--m)', fontSize: 10, letterSpacing: '0.08em' }}>
-          <span style={{ color: '#dbeafe' }}>{s.latency != null ? `${s.latency}MS` : 'LAT N/A'}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0, color: P.t1, fontFamily: 'var(--m)', fontSize: 11, letterSpacing: '0.08em' }}>
+          <span style={{ color: '#ffffff' }}>{s.latency != null ? `${s.latency}MS` : 'LAT N/A'}</span>
           <span style={{ color: confidenceColor(s.confidence), fontWeight: 700 }}>
             CONF {s.confidence != null ? s.confidence.toFixed(1) : '--'}
           </span>
@@ -375,12 +375,14 @@ function FeedCard({
   anyActive,
   onTap,
   priority,
+  mergedBottom,
 }: {
   f: HallOGridFrame
   active: boolean
   anyActive: boolean
   onTap: (id: string) => void
   priority: boolean
+  mergedBottom?: boolean
 }) {
   const c = A[f.action]
   const meta = ACTION_META[f.action]
@@ -398,49 +400,49 @@ function FeedCard({
         position: 'relative',
         overflow: 'hidden',
         textAlign: 'left',
-        background: active ? `linear-gradient(145deg, ${hex(c, 0.14)} 0%, ${P.glass2} 100%)` : P.glass,
+        background: active ? `linear-gradient(145deg, ${hex(c, 0.1)} 0%, ${P.bg1} 100%)` : P.glass,
         backdropFilter: 'blur(14px)',
         WebkitBackdropFilter: 'blur(14px)',
-        border: `1px solid ${active ? hex(c, 0.42) : priority ? hex(c, 0.18) : P.border}`,
-        borderRadius: 14,
-        boxShadow: active ? `0 0 18px ${hex(c, 0.16)}, 0 10px 28px rgba(0,0,0,0.48), inset 0 1px 0 ${hex(c, 0.12)}` : priority ? `0 4px 16px ${hex(c, 0.08)}` : '0 4px 16px rgba(0,0,0,0.34)',
-        transform: active ? 'scale(1.018) translateZ(34px)' : anyActive ? 'scale(0.985)' : priority ? 'scale(1.004)' : 'scale(1)',
-        opacity: anyActive && !active ? 0.56 : priority || active ? 1 : 0.86,
-        transition: 'all 0.35s cubic-bezier(0.16,1,0.3,1)',
+        border: `1px solid ${active ? hex(c, 0.6) : priority ? hex(c, 0.25) : P.borderLit}`,
+        borderRadius: mergedBottom ? '14px 14px 0 0' : 14,
+        borderBottom: mergedBottom ? 'none' : undefined,
+        boxShadow: active ? `0 0 24px ${hex(c, 0.15)}, 0 10px 28px rgba(0,0,0,0.48)` : priority ? `0 4px 16px ${hex(c, 0.08)}` : '0 4px 16px rgba(0,0,0,0.34)',
+        transform: active ? 'scale(1.01)' : anyActive ? 'scale(0.99)' : 'scale(1)',
+        opacity: anyActive && !active ? 0.6 : 1,
+        transition: 'all 0.25s cubic-bezier(0.16,1,0.3,1)',
       }}
       aria-expanded={active}
     >
-      <div style={{ position: 'absolute', left: 0, top: 10, bottom: 10, width: 3, borderRadius: 999, background: c, boxShadow: active ? `0 0 10px ${hex(c, 0.55)}` : priority ? `0 0 6px ${hex(c, 0.24)}` : 'none' }} />
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 10, marginBottom: 10 }}>
-        <span style={{ fontFamily: 'var(--m)', fontSize: 10, color: P.t2, letterSpacing: '0.05em' }}>{f.id}</span>
-        <div style={{ fontFamily: 'var(--m)', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: c, padding: '3px 12px', borderRadius: 999, background: hex(c, 0.12), border: `1px solid ${hex(c, 0.25)}` }}>{meta.label.toUpperCase()}</div>
+      <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: active ? 5 : 3, background: active ? c : hex(c, 0.4), boxShadow: active ? `0 0 12px ${hex(c, 0.6)}` : 'none' }} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingLeft: 12, marginBottom: 12 }}>
+        <span style={{ fontFamily: 'var(--m)', fontSize: 11, color: P.t2, letterSpacing: '0.05em' }}>{f.id}</span>
+        <div style={{ fontFamily: 'var(--m)', fontSize: 10, fontWeight: 800, letterSpacing: '0.12em', color: active ? '#000000' : c, padding: '4px 12px', borderRadius: 999, background: active ? c : hex(c, 0.15), border: `1px solid ${active ? c : hex(c, 0.4)}` }}>{meta.label.toUpperCase()}</div>
       </div>
-      <div style={{ paddingLeft: 10, marginBottom: 12 }}>
-        <div style={{ fontSize: 16, fontWeight: 700, color: P.t0, letterSpacing: '-0.01em' }}>{f.explanation.headline}</div>
-        <div style={{ fontSize: 11, color: P.t2, marginTop: 3 }}>
-          {f.region} | {f.workloadClass}
-          {f.trust.degraded ? <span style={{ color: A.reroute, marginLeft: 8 }}>guarded</span> : null}
+      <div style={{ paddingLeft: 12, marginBottom: 14 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: P.t0, letterSpacing: '-0.01em', lineHeight: 1.3 }}>{f.explanation.headline}</div>
+        <div style={{ fontSize: 12, color: P.t1, marginTop: 4, fontFamily: 'var(--m)' }}>
+          {f.region} <span style={{ color: P.t3 }}>|</span> {f.workloadClass}
+          {f.trust.degraded ? <span style={{ color: A.reroute, marginLeft: 8, padding: '2px 6px', background: hex(A.reroute, 0.15), borderRadius: 4 }}>guarded</span> : null}
         </div>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, paddingLeft: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, paddingLeft: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: `radial-gradient(circle at 30% 30%, ${hex(confColor, 0.24)} 0%, ${hex(confColor, 0.08)} 100%)`, border: `1.5px solid ${hex(confColor, 0.45)}`, boxShadow: `0 0 12px ${hex(confColor, 0.2)}` }}>
-            <span style={{ fontFamily: 'var(--m)', fontSize: 10, fontWeight: 700, color: confColor }}>{confidenceGrade(conf)}</span>
+          <div style={{ width: 34, height: 34, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: `radial-gradient(circle at 30% 30%, ${hex(confColor, 0.3)} 0%, ${hex(confColor, 0.08)} 100%)`, border: `2px solid ${hex(confColor, 0.6)}`, boxShadow: `0 0 12px ${hex(confColor, 0.3)}` }}>
+            <span style={{ fontFamily: 'var(--m)', fontSize: 12, fontWeight: 800, color: confColor }}>{confidenceGrade(conf)}</span>
           </div>
           <div>
-            <span style={{ fontFamily: 'var(--m)', fontSize: 13, fontWeight: 700, color: confColor }}>{conf != null ? conf.toFixed(1) : '--'}</span>
-            <span style={{ fontFamily: 'var(--m)', fontSize: 9, color: P.t3, marginLeft: 4 }}>CONF</span>
+            <span style={{ fontFamily: 'var(--m)', fontSize: 14, fontWeight: 800, color: P.t0 }}>{conf != null ? conf.toFixed(1) : '--'}</span>
+            <span style={{ fontFamily: 'var(--m)', fontSize: 10, color: P.t2, marginLeft: 5 }}>CONF</span>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
             {[f.traceState === 'locked', f.proofState === 'available', f.replayState === 'verified'].map((ok, index) => (
-              <div key={index} style={{ width: 5, height: 5, borderRadius: '50%', background: ok ? A.run_now : A.deny, boxShadow: `0 0 5px ${hex(ok ? A.run_now : A.deny, 0.5)}` }} />
+              <div key={index} style={{ width: 6, height: 6, borderRadius: '50%', background: ok ? A.run_now : A.deny, boxShadow: `0 0 6px ${hex(ok ? A.run_now : A.deny, 0.6)}` }} />
             ))}
-            <span style={{ fontFamily: 'var(--m)', fontSize: 9, color: P.t3, marginLeft: 2 }}>proof</span>
+            <span style={{ fontFamily: 'var(--m)', fontSize: 10, color: P.t2, marginLeft: 4 }}>proof</span>
           </div>
-          <span style={{ fontFamily: 'var(--m)', fontSize: 10, color: P.t3 }}>{ms(f.metrics.totalLatencyMs)}</span>
-          <span style={{ fontFamily: 'var(--m)', fontSize: 10, color: P.t3 }}>{ago(f.createdAt)}</span>
+          <span style={{ fontFamily: 'var(--m)', fontSize: 11, color: P.t1, fontWeight: 600 }}>{ms(f.metrics.totalLatencyMs)}</span>
         </div>
       </div>
     </button>
@@ -1294,17 +1296,10 @@ export function CommandCenterShell() {
 
   const selectRegion = (node: WorldRegionState) => {
     setFocusedRegion(node.region)
-
-    const directFrameId =
-      node.decisionFrameId != null && snapshot?.frames.some((item) => item.id === node.decisionFrameId)
-        ? node.decisionFrameId
-        : null
-
-    const regionFrameId =
+    const targetFrameId =
+      node.decisionFrameId ??
       snapshot?.frames.find((item) => item.region === node.region)?.id ??
       null
-
-    const targetFrameId = directFrameId ?? regionFrameId
 
     if (targetFrameId) {
       setPanel('trace')
@@ -1330,13 +1325,13 @@ export function CommandCenterShell() {
 
   return (
     <div onMouseMove={handleGlobalMouseMove} style={{ background: P.bg0, color: P.t1, minHeight: '100vh', fontFamily: "'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif", position: 'relative', overflow: 'hidden' }}>
-      <style jsx global>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');:root{--m:'JetBrains Mono',monospace;}@keyframes hallogrid-breathe{0%,100%{transform:translate(0,0) scale(1);opacity:.5;}50%{transform:translate(-2%,1.5%) scale(1.04);opacity:.75;}}@keyframes hallogrid-pulse{0%,100%{opacity:.35;transform:scale(1);}50%{opacity:0;transform:scale(2.5);}}@keyframes hallogrid-pulse-soft{0%,100%{opacity:1;}50%{opacity:.65;}}@keyframes hallogrid-beacon-fast{0%,100%{opacity:.15;transform:scale(.85);}50%{opacity:1;transform:scale(1.2);}}@keyframes hallogrid-beacon-slow{0%,100%{opacity:.2;transform:scale(.9);}50%{opacity:.75;transform:scale(1.08);}}@keyframes hallogrid-beacon-irregular{0%,20%,60%,100%{opacity:.18;transform:scale(.88);}10%,32%,74%{opacity:.95;transform:scale(1.12);}45%{opacity:.38;transform:scale(.96);}}@keyframes hallogrid-inspector-in{from{opacity:0;transform:translateX(28px);}to{opacity:1;transform:translateX(0);}}@keyframes hallogrid-sheet-up{from{transform:translateY(100%);}to{transform:translateY(0);}}@keyframes hallogrid-flow-travel{to{stroke-dashoffset:-80;}}@keyframes hallogrid-flow-comet{0%{stroke-dashoffset:100;opacity:0;}15%{opacity:1;}85%{opacity:1;}100%{stroke-dashoffset:0;opacity:0;}}@keyframes hallogrid-shockwave{0%{r:0;opacity:1;stroke-width:3;}100%{r:50px;opacity:0;stroke-width:0;}}::-webkit-scrollbar{width:3px;height:3px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:${P.borderLit};border-radius:2px;}button{font-family:inherit;}button:focus-visible{outline:2px solid ${P.accent};outline-offset:2px;}`}</style>
+      <style jsx global>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');:root{--m:'JetBrains Mono',monospace;}@keyframes hallogrid-breathe{0%,100%{transform:translate(0,0) scale(1);opacity:.5;}50%{transform:translate(-2%,1.5%) scale(1.04);opacity:.75;}}@keyframes hallogrid-pulse{0%,100%{opacity:.45;transform:scale(1);}50%{opacity:0;transform:scale(2.5);}}@keyframes hallogrid-pulse-soft{0%,100%{opacity:1;}50%{opacity:.65;}}@keyframes hallogrid-beacon-fast{0%,100%{opacity:.2;transform:scale(.85);}50%{opacity:1;transform:scale(1.2);}}@keyframes hallogrid-beacon-slow{0%,100%{opacity:.3;transform:scale(.9);}50%{opacity:.8;transform:scale(1.08);}}@keyframes hallogrid-beacon-irregular{0%,20%,60%,100%{opacity:.2;transform:scale(.88);}10%,32%,74%{opacity:.95;transform:scale(1.12);}45%{opacity:.4;transform:scale(.96);}}@keyframes hallogrid-inspector-in{from{opacity:0;transform:translateY(-10px);}to{opacity:1;transform:translateY(0);}}@keyframes hallogrid-sheet-up{from{transform:translateY(100%);}to{transform:translateY(0);}}@keyframes hallogrid-flow-travel{to{stroke-dashoffset:-80;}}@keyframes hallogrid-flow-comet{0%{stroke-dashoffset:100;opacity:0;}15%{opacity:1;}85%{opacity:1;}100%{stroke-dashoffset:0;opacity:0;}}@keyframes hallogrid-shockwave{0%{r:0;opacity:1;stroke-width:4;}100%{r:52px;opacity:0;stroke-width:0;}}::-webkit-scrollbar{width:4px;height:4px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:${P.borderLit};border-radius:2px;}button{font-family:inherit;}button:focus-visible{outline:2px solid ${P.accent};outline-offset:2px;}`}</style>
       <BackgroundGrid active={Boolean(sel)} color={activeColor} mousePos={mousePos} />
       <HeaderBar title={snapshot.title} subtitle={snapshot.subtitle} streamHealthy={snapshot.transport.streamHealthy} generatedAt={snapshot.generatedAt} mobile={mobile} />
       <TelemetryStrip frames={snapshot.frames} mobile={mobile} />
 
-      <div style={{ position: 'relative', zIndex: 1, minHeight: '100vh', paddingTop: 12, paddingBottom: 18, paddingLeft: mobile ? 12 : 18, paddingRight: mobile ? 12 : 18 }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'stretch', width: '100%', maxWidth: mobile ? '100%' : 1180, margin: '0 auto' }}>
+      <div style={{ position: 'relative', zIndex: 1, minHeight: '100vh', paddingTop: 16, paddingBottom: 24, paddingLeft: mobile ? 12 : 24, paddingRight: mobile ? 12 : 24 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, alignItems: 'stretch', width: '100%', maxWidth: mobile ? '100%' : 1200, margin: '0 auto' }}>
           <HallOGridTheater
             nodes={snapshot.world.nodes}
             flows={snapshot.world.flows}
@@ -1353,54 +1348,74 @@ export function CommandCenterShell() {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: mobile ? '1fr' : 'minmax(0, 0.98fr) minmax(400px, 0.92fr)',
-              gap: mobile ? 16 : 18,
+              gridTemplateColumns: mobile ? '1fr' : 'minmax(0, 0.98fr) minmax(420px, 0.92fr)',
+              gap: mobile ? 16 : 24,
               alignItems: 'start',
             }}
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minHeight: `calc(100vh - ${sceneTop + 18}px)`, transformStyle: 'preserve-3d', minWidth: 0 }}>
-              <div style={{ padding: '0 6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `1px solid ${P.border}`, paddingBottom: 12 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minHeight: `calc(100vh - ${sceneTop + 24}px)`, minWidth: 0 }}>
+              <div style={{ padding: '0 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `1px solid ${P.borderLit}`, paddingBottom: 14 }}>
                 <div>
-                  <div style={{ fontFamily: 'var(--m)', fontSize: 10, color: P.t3, letterSpacing: '0.12em' }}>DECISION FEED</div>
+                  <div style={{ fontFamily: 'var(--m)', fontSize: 11, color: P.t2, letterSpacing: '0.12em', fontWeight: 700 }}>DECISION FEED</div>
                   <div style={{ marginTop: 6, fontSize: 13, color: P.t1 }}>Lock a governed record. Trace, replay, and proof open on the right.</div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontFamily: 'var(--m)', fontSize: 10, color: P.t3 }}>{snapshot.frames.length} FRAMES</span>
-                  <span style={{ fontFamily: 'var(--m)', fontSize: 10, color: A.run_now, letterSpacing: '0.1em', fontWeight: 700 }}>LIVE</span>
+                  <span style={{ fontFamily: 'var(--m)', fontSize: 11, color: P.t2, fontWeight: 700 }}>{snapshot.frames.length} FRAMES</span>
+                  <span style={{ fontFamily: 'var(--m)', fontSize: 11, color: A.run_now, letterSpacing: '0.1em', fontWeight: 800 }}>LIVE</span>
                 </div>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {snapshot.frames.map((item) => (
-                  <FeedCard key={item.id} f={item} active={sel === item.id} anyActive={Boolean(sel)} onTap={selectFrame} priority={item.id === snapshot.selectedFrameId || (!snapshot.selectedFrameId && item.id === snapshot.frames[0]?.id)} />
-                ))}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {snapshot.frames.map((item) => {
+                  const isActive = sel === item.id
+                  const showInlineInspector = mobile && isActive && Boolean(frame)
+                  const activeFrame = showInlineInspector ? frame : null
+
+                  return (
+                    <div key={item.id} style={{ display: 'flex', flexDirection: 'column' }}>
+                      <FeedCard
+                        f={item}
+                        active={isActive}
+                        anyActive={Boolean(sel)}
+                        onTap={selectFrame}
+                        priority={item.id === snapshot.selectedFrameId || (!snapshot.selectedFrameId && item.id === snapshot.frames[0]?.id)}
+                        mergedBottom={showInlineInspector}
+                      />
+                      {showInlineInspector && activeFrame ? (
+                        <div style={{
+                          background: hex(P.bg1, 0.95),
+                          border: `1px solid ${hex(A[activeFrame.action], 0.6)}`,
+                          borderTop: 'none',
+                          borderBottomLeftRadius: 14,
+                          borderBottomRightRadius: 14,
+                          boxShadow: `0 16px 32px rgba(0,0,0,0.5)`,
+                          animation: 'hallogrid-inspector-in 0.25s ease-out forwards',
+                          overflow: 'hidden',
+                        }}>
+                          <Inspector f={activeFrame} detail={detail} panel={panel} setPanel={setPanel} close={clearSelection} mobile={true} loading={!detail && detailQuery.isLoading} />
+                        </div>
+                      ) : null}
+                    </div>
+                  )
+                })}
               </div>
             </div>
 
             {!mobile && frame ? (
-              <div style={{ minHeight: `calc(100vh - ${sceneTop + 18}px)`, position: 'sticky', top: sceneTop, borderLeft: `1px solid ${P.border}`, boxShadow: `-6px 0 22px ${hex('#000000', 0.18)}`, animation: 'hallogrid-inspector-in 0.35s cubic-bezier(0.16,1,0.3,1)', overflow: 'hidden', borderRadius: 24, minWidth: 0 }}>
+              <div style={{ minHeight: `calc(100vh - ${sceneTop + 24}px)`, position: 'sticky', top: sceneTop, borderLeft: `3px solid ${A[frame.action]}`, boxShadow: `-8px 0 30px ${hex('#000000', 0.4)}`, animation: 'hallogrid-inspector-in 0.35s cubic-bezier(0.16,1,0.3,1)', overflow: 'hidden', borderRadius: '0 24px 24px 0', minWidth: 0, background: P.bg1 }}>
                 <Inspector f={frame} detail={detail} panel={panel} setPanel={setPanel} close={clearSelection} mobile={false} loading={Boolean(frame) && !detail && detailQuery.isLoading} />
               </div>
             ) : !mobile ? (
-              <div style={{ minHeight: `calc(100vh - ${sceneTop + 18}px)`, position: 'sticky', top: sceneTop, padding: '24px', borderRadius: 24, border: `1px solid ${P.border}`, background: `linear-gradient(180deg, ${P.glass2} 0%, ${P.glass} 100%)`, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: P.t2, minWidth: 0 }}>
+              <div style={{ minHeight: `calc(100vh - ${sceneTop + 24}px)`, position: 'sticky', top: sceneTop, padding: '32px', borderRadius: 24, border: `1px solid ${P.borderLit}`, background: `linear-gradient(180deg, ${P.glass2} 0%, ${P.glass} 100%)`, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: P.t2, minWidth: 0 }}>
                 <div>
-                  <div style={{ fontFamily: 'var(--m)', fontSize: 11, letterSpacing: '0.12em', color: '#dbeafe' }}>SELECT A FRAME</div>
-                  <div style={{ marginTop: 10, fontSize: 14, lineHeight: 1.7 }}>The governed record will lock on the right with direct trace, replay, and proof sections.</div>
+                  <div style={{ fontFamily: 'var(--m)', fontSize: 12, fontWeight: 700, letterSpacing: '0.12em', color: '#ffffff' }}>SELECT A FRAME</div>
+                  <div style={{ marginTop: 12, fontSize: 15, lineHeight: 1.7, color: P.t1 }}>The governed record will lock on the right with direct trace, replay, and proof sections.</div>
                 </div>
               </div>
             ) : null}
           </div>
         </div>
       </div>
-
-      {mobile && frame ? (
-        <div onClick={(event) => { if (event.target === event.currentTarget) clearSelection() }} style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.7)', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
-          <div style={{ borderRadius: '18px 18px 0 0', maxHeight: '90vh', overflow: 'hidden', animation: 'hallogrid-sheet-up 0.3s cubic-bezier(0.16,1,0.3,1)', boxShadow: `0 -12px 50px ${hex('#000000', 0.6)}` }}>
-            <div style={{ display: 'flex', justifyContent: 'center', padding: '12px 0 6px', background: `${P.bg1}f8` }}><div style={{ width: 40, height: 4, borderRadius: 2, background: P.borderLit }} /></div>
-            <Inspector f={frame} detail={detail} panel={panel} setPanel={setPanel} close={clearSelection} mobile loading={Boolean(frame) && !detail && detailQuery.isLoading} />
-          </div>
-        </div>
-      ) : null}
     </div>
   )
 }
