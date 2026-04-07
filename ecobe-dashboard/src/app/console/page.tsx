@@ -4,12 +4,13 @@ import { CommandCenterShell } from '@/components/command-center/CommandCenterShe
 import { createPageMetadata } from '@/lib/seo'
 
 export const metadata: Metadata = createPageMetadata({
-  title: 'Control Surface',
+  title: 'Preview Console',
   description:
-    'Live execution authority, SAIQ governance, trace, replay, provenance, and proof across the CO2 Router command center.',
+    'Public HallOGrid live mirror showing governed execution, world state, and decision infrastructure without exposing tenant operator authority.',
   path: '/console',
   keywords: [
-    'CO2 Router control surface',
+    'CO2 Router preview console',
+    'HallOGrid live mirror',
     'execution control plane',
     'trace replay provenance',
     'SAIQ governance',

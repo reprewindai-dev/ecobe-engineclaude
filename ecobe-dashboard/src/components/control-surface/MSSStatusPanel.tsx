@@ -12,6 +12,12 @@ export function MSSStatusPanel({
   health: CiHealthSnapshot
   outbox: OutboxMetrics | null
 }) {
+  const providerStatusClass = (status: ControlSurfaceProviderNode['status']) => {
+    if (status === 'healthy') return 'text-emerald-300'
+    if (status === 'offline') return 'text-rose-300'
+    return 'text-amber-300'
+  }
+
   return (
     <section className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
       <div className="text-[11px] uppercase tracking-[0.26em] text-slate-500">Signal fabric / MSS</div>
@@ -43,7 +49,7 @@ export function MSSStatusPanel({
                   ) : null}
                 </div>
                 <div className="text-right">
-                  <div className={`text-sm font-semibold ${provider.status === 'healthy' ? 'text-emerald-300' : 'text-amber-300'}`}>
+                  <div className={`text-sm font-semibold ${providerStatusClass(provider.status)}`}>
                     {provider.status}
                   </div>
                   <div className="mt-1 text-xs text-slate-500">{formatFreshness(provider.freshnessSec)}</div>

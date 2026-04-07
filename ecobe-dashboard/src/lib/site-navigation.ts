@@ -11,7 +11,8 @@ export interface SiteLinkSection {
 export const primaryNavLinks: SiteLink[] = [
   { href: '/', label: 'Overview' },
   { href: '/design-partners', label: 'Design Partners' },
-  { href: '/console', label: 'Control Surface' },
+  { href: '/console', label: 'Live Mirror' },
+  { href: '/purchase', label: 'HallOGrid Pro' },
   { href: '/assurance', label: 'Assurance' },
   { href: '/status', label: 'Status' },
   { href: '/methodology', label: 'Methodology' },
@@ -24,7 +25,8 @@ export const footerLinkSections: SiteLinkSection[] = [
     links: [
       { href: '/', label: 'Overview' },
       { href: '/design-partners', label: 'Design Partners' },
-      { href: '/console', label: 'Control Surface' },
+      { href: '/console', label: 'Live Mirror' },
+      { href: '/purchase', label: 'HallOGrid Pro' },
       { href: '/assurance', label: 'Assurance' },
       { href: '/status', label: 'Status' },
       { href: '/methodology', label: 'Methodology' },

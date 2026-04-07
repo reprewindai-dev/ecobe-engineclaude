@@ -10,78 +10,40 @@ import { SignalDoctrineSection } from '@/components/landing/SignalDoctrineSectio
 import { PricingOrControlSection } from '@/components/landing/PricingOrControlSection'
 import { FinalCTASection } from '@/components/landing/FinalCTASection'
 import { LiveSystemSection } from '@/components/landing/LiveSystemSection'
-import { FALLBACK_OVERVIEW } from '@/lib/control-surface/fallbacks'
-import { useControlSurfaceOverview } from '@/lib/hooks/control-surface'
+import { FALLBACK_LANDING_SNAPSHOT } from '@/lib/control-surface/fallbacks'
+import { useLandingSnapshot } from '@/lib/hooks/control-surface'
 
 export default function LandingPage() {
-  const overviewQuery = useControlSurfaceOverview()
-  const overview = overviewQuery.data
-
-  const decisions = overview?.decisions ?? []
-  const providers = overview?.providers ?? FALLBACK_OVERVIEW.providers
-  const replay = overview?.replay ?? FALLBACK_OVERVIEW.replay
-  const actionDistribution = overview?.actionDistribution ?? FALLBACK_OVERVIEW.actionDistribution
-  const liveStrip = [...decisions]
-    .sort(
-      (a, b) =>
-        b.carbonReductionPct + b.waterImpactDeltaLiters - (a.carbonReductionPct + a.waterImpactDeltaLiters)
-    )
-    .slice(0, 3)
-  const heroDecision =
-    overview?.featuredDecision &&
-    'decisionFrameId' in overview.featuredDecision &&
-    !('decision' in overview.featuredDecision)
-      ? overview.featuredDecision
-      : decisions[0] ?? null
-  const featuredDecision =
-    overview?.featuredDecision && 'decision' in overview.featuredDecision
-      ? overview.featuredDecision
-      : overview?.liveDecision ?? null
-  const waterProviders = providers.filter((provider) => provider.providerType === 'water')
-  const verifiedWaterDatasets = waterProviders.filter(
-    (provider) => provider.provenanceStatus === 'verified'
-  ).length
-  const proofContext = {
-    proofRef: featuredDecision?.proofHash ?? null,
-    governance:
-      featuredDecision && 'policyTrace' in featuredDecision
-        ? featuredDecision.policyTrace.profile ??
-          featuredDecision.policyTrace.policyVersion ??
-          'SAIQ policy trace attached'
-        : 'SAIQ policy trace attaches with the live decision frame.',
-    traceRef: replay?.decisionFrameId ?? featuredDecision?.decisionFrameId ?? null,
-    replay:
-      replay == null
-        ? 'live proof sample'
-        : replay.deterministicMatch
-          ? 'deterministic match'
-          : 'replay available',
-    provenance:
-      waterProviders.length > 0
-        ? `${verifiedWaterDatasets}/${waterProviders.length} datasets verified`
-        : 'verified datasets will attach with live provenance',
-  }
+  const landingQuery = useLandingSnapshot()
+  const landing = landingQuery.data ?? FALLBACK_LANDING_SNAPSHOT
+  const overview = landing.overview
+  const liveStatus = landing.liveStatus
 
   return (
     <div className="space-y-8 pb-8">
-      {overviewQuery.error ? (
+      {landingQuery.error ? (
         <section className="rounded-[24px] border border-amber-300/20 bg-amber-300/10 px-5 py-4 text-sm text-amber-100">
           Live control data is temporarily unavailable. The public surface stays resolved while the
           live decision and proof chain reconnect.
         </section>
       ) : null}
 
-      <HeroMotionSurface liveDecision={heroDecision} />
+      <HeroMotionSurface liveDecision={overview.featuredDecision} />
 
       <section className="grid gap-3 lg:grid-cols-3">
-        {liveStrip.length > 0
-          ? liveStrip.map((decision) => (
+        {overview.liveStrip.length > 0
+          ? overview.liveStrip.map((decision) => (
               <div
                 key={decision.decisionFrameId}
                 className="rounded-[24px] border border-white/8 bg-white/[0.03] p-4"
               >
-                <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                  live decision
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                    live decision
+                  </div>
+                  <div className="rounded-full border border-emerald-400/20 bg-emerald-400/8 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-200">
+                    live {liveStatus.lastUpdatedLabel}
+                  </div>
                 </div>
                 <div className="mt-2 text-lg font-semibold text-white">
                   {decision.workloadLabel ?? 'Current execution frame'}
@@ -143,7 +105,7 @@ export default function LandingPage() {
           </p>
         </div>
         <div className="mt-8">
-          <ActionStrip distribution={actionDistribution} />
+          <ActionStrip distribution={overview.actionDistribution} />
         </div>
       </section>
 
@@ -151,15 +113,15 @@ export default function LandingPage() {
         <DecisionFlowDiagram />
       </section>
 
-      <DecisionExampleCard decision={featuredDecision} proofContext={proofContext} />
+      <DecisionExampleCard decision={overview.featuredDecision} proofContext={overview.proofContext} />
 
       <CategoryDifferenceSection />
 
-      <ProofMoatSection replay={replay} />
-      <SignalDoctrineSection providers={providers} />
+      <ProofMoatSection proofContext={overview.proofContext} />
+      <SignalDoctrineSection providers={overview.providers} />
       <PricingOrControlSection />
       <FinalCTASection />
-      <LiveSystemSection />
+      <LiveSystemSection snapshot={landing.liveSystem} liveStatus={liveStatus} />
     </div>
   )
 }

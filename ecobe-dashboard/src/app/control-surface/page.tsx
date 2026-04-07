@@ -4,6 +4,7 @@ import {
   formatPct,
   getControlPlaneSnapshot,
 } from '@/lib/ecobe'
+import { resolveHallOGridAccessFromServer } from '@/lib/control-surface/access'
 
 const actionTone: Record<string, string> = {
   run_now: 'border-emerald-300/25 bg-emerald-400/10 text-emerald-100',
@@ -14,6 +15,39 @@ const actionTone: Record<string, string> = {
 }
 
 export default async function ControlSurfacePage() {
+  const access = resolveHallOGridAccessFromServer()
+
+  if (access.isReadOnlyPreview) {
+    return (
+      <div className="space-y-8 pb-10">
+        <section className="surface-card-strong p-8">
+          <div className="eyebrow">Operator control surface</div>
+          <h1 className="mt-3 text-4xl font-semibold text-white sm:text-5xl">
+            This lane is restricted to the operator console.
+          </h1>
+          <p className="mt-4 max-w-3xl text-base leading-7 text-slate-300">
+            Public visitors should see the preview mirror, not raw command-center state,
+            assurance detail, adapters, or proof internals.
+          </p>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <a
+              href="/console"
+              className="rounded-2xl border border-cyan-300/20 bg-cyan-300/8 px-5 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-cyan-100 transition hover:border-cyan-300/40 hover:bg-cyan-300/12"
+            >
+              Open Preview Console
+            </a>
+            <a
+              href={access.upgradeUrl}
+              className="rounded-2xl bg-gradient-to-r from-emerald-300 via-cyan-300 to-sky-400 px-5 py-3 text-sm font-bold uppercase tracking-[0.18em] text-slate-950 transition hover:brightness-105"
+            >
+              Unlock Operator Access
+            </a>
+          </div>
+        </section>
+      </div>
+    )
+  }
+
   const snapshot = await getControlPlaneSnapshot()
 
   return (
