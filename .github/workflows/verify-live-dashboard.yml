@@ -8,6 +8,7 @@ on:
       - '.github/**'
       - 'ecobe-engine/**'
       - 'ecobe-dashboard/**'
+      - 'co2router-site/**'
       - 'docs/public/**'
       - 'docs/private/design-partner-program/**'
   pull_request:
@@ -17,6 +18,7 @@ on:
       - '.github/**'
       - 'ecobe-engine/**'
       - 'ecobe-dashboard/**'
+      - 'co2router-site/**'
       - 'docs/public/**'
       - 'docs/private/design-partner-program/**'
   workflow_dispatch:
@@ -29,7 +31,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  DEFAULT_DASHBOARD_URL: https://co2-router-dashboard-production.up.railway.app
+  DEFAULT_DASHBOARD_URL: https://co2router.tech
   DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
 
 jobs:

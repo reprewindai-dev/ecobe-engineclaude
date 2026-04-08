@@ -26,7 +26,7 @@ export class GridStatusClient {
   }
 
   get isAvailable(): boolean {
-    return !!this.apiKey
+    return true
   }
 
   private async logSuccess(latencyMs?: number) {
@@ -54,17 +54,12 @@ export class GridStatusClient {
     startTime?: Date,
     endTime?: Date
   ): Promise<EIABalanceData[]> {
-    if (!this.apiKey) {
-      await this.logFailure('Missing GridStatus API key')
-      return []
-    }
-
     const startedAt = Date.now()
     try {
       const params: Record<string, string> = {
-        api_key: this.apiKey,
         limit: '5000',
       }
+      if (this.apiKey) params.api_key = this.apiKey
 
       if (startTime) params.start_time = startTime.toISOString().slice(0, 10)
       if (endTime) params.end_time = endTime.toISOString().slice(0, 10)
@@ -139,17 +134,12 @@ export class GridStatusClient {
     startTime?: Date,
     endTime?: Date
   ): Promise<EIAInterchangeData[]> {
-    if (!this.apiKey) {
-      await this.logFailure('Missing GridStatus API key')
-      return []
-    }
-
     const startedAt = Date.now()
     try {
       const baseParams: Record<string, string> = {
-        api_key: this.apiKey,
         limit: '5000',
       }
+      if (this.apiKey) baseParams.api_key = this.apiKey
 
       if (startTime) baseParams.start_time = startTime.toISOString().slice(0, 10)
       if (endTime) baseParams.end_time = endTime.toISOString().slice(0, 10)
@@ -213,17 +203,12 @@ export class GridStatusClient {
     startTime?: Date,
     endTime?: Date
   ): Promise<GridStatusFuelMixData[]> {
-    if (!this.apiKey) {
-      await this.logFailure('Missing GridStatus API key')
-      return []
-    }
-
     const startedAt = Date.now()
     try {
       const params: Record<string, string> = {
-        api_key: this.apiKey,
         limit: '5000',
       }
+      if (this.apiKey) params.api_key = this.apiKey
 
       if (startTime) params.start_time = startTime.toISOString().slice(0, 10)
       if (endTime) params.end_time = endTime.toISOString().slice(0, 10)

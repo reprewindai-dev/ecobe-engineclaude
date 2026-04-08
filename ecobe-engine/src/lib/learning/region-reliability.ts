@@ -1,3 +1,4 @@
+import { env } from '../../config/env'
 import { redis } from '../redis'
 
 export const REGION_RELIABILITY_HASH_KEY = 'ci:region-reliability:v1'
@@ -13,6 +14,25 @@ export interface RegionLearningStats {
   fallbackRate: number
   avgSavingsPct: number
   avgSignalConfidence: number
+}
+
+const CLIMATE_PHASE_REGION_MULTIPLIERS: Record<string, Record<string, number>> = {
+  neutral: {},
+  el_nino: {
+    'us-west-2': 0.9,
+  },
+  super_el_nino: {
+    'us-west-2': 0.82,
+  },
+  la_nina: {
+    'us-west-2': 1.04,
+  },
+}
+
+function applyClimatePhaseMultiplier(region: string, baseMultiplier: number) {
+  const phaseMultipliers = CLIMATE_PHASE_REGION_MULTIPLIERS[env.CLIMATE_PHASE] ?? {}
+  const climateMultiplier = phaseMultipliers[region] ?? 1
+  return Number(clamp(baseMultiplier * climateMultiplier, 0.8, 1.2).toFixed(4))
 }
 
 export function computeRegionReliabilityMultiplier(stats: RegionLearningStats): number {
@@ -39,12 +59,13 @@ export async function loadRegionReliabilityMultipliers(
     for (const region of regions) {
       const raw = hash?.[region]
       const parsed = raw !== undefined ? Number(raw) : NaN
-      map[region] = Number.isFinite(parsed) && parsed > 0 ? parsed : 1
+      const learnedMultiplier = Number.isFinite(parsed) && parsed > 0 ? parsed : 1
+      map[region] = applyClimatePhaseMultiplier(region, learnedMultiplier)
     }
     return map
   } catch {
     return regions.reduce<Record<string, number>>((acc, region) => {
-      acc[region] = 1
+      acc[region] = applyClimatePhaseMultiplier(region, 1)
       return acc
     }, {})
   }

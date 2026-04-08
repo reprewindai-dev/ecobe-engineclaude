@@ -59,6 +59,18 @@ jest.mock('../lib/finland-carbon', () => ({
   finlandCarbon: { getCarbonIntensity: jest.fn().mockResolvedValue(null) }
 }))
 
+jest.mock('../lib/ontario-carbon', () => ({
+  ontarioCarbon: { getCurrentIntensity: jest.fn().mockResolvedValue(null) }
+}))
+
+jest.mock('../lib/quebec-carbon', () => ({
+  quebecCarbon: { getCurrentIntensity: jest.fn().mockResolvedValue(null) }
+}))
+
+jest.mock('../lib/british-columbia-carbon', () => ({
+  britishColumbiaCarbon: { getCurrentIntensity: jest.fn().mockResolvedValue(null) }
+}))
+
 jest.mock('../lib/ember/structural-profile', () => ({
   EmberStructuralProfile: jest.fn().mockImplementation(() => ({
     getStructuralProfile: jest.fn().mockResolvedValue(null),
@@ -156,6 +168,91 @@ describe('ProviderRouter', () => {
       const signal = await router.getRoutingSignal('us-east-1', new Date())
 
       expect(signal.source).toBe('fallback')
+    })
+
+    it('should use Ontario IESO as the primary signal for Ontario-backed regions', async () => {
+      const { ontarioCarbon } = require('../lib/ontario-carbon')
+
+      ontarioCarbon.getCurrentIntensity.mockResolvedValue({
+        zone: 'ON',
+        carbonIntensity: 58.4,
+        timestamp: '2026-04-06T23:00:00-04:00',
+        isForecast: false,
+        generationByFuel: {
+          NUCLEAR: 9100,
+          GAS: 1300,
+          HYDRO: 4200,
+          WIND: 2500,
+        },
+        qualityFlagCount: 0,
+        estimatedFlag: false,
+        totalOutputMwh: 17100,
+        sourceUrl: 'https://reports-public.ieso.ca/public/GenOutputbyFuelHourly/PUB_GenOutputbyFuelHourly.xml',
+      })
+
+      const signal = await router.getRoutingSignal('canadacentral', new Date())
+
+      expect(signal.source).toBe('ontario_ieso')
+      expect(signal.carbonIntensity).toBe(58.4)
+      expect(signal.provenance.sourceUsed).toBe('ONTARIO_IESO_FUEL_MIX')
+      expect(signal.provenance.fallbackUsed).toBe(false)
+      expect(signal.confidence).toBeGreaterThan(0.7)
+    })
+
+    it('should use Hydro-Quebec as the primary signal for Quebec-backed regions', async () => {
+      const { quebecCarbon } = require('../lib/quebec-carbon')
+
+      quebecCarbon.getCurrentIntensity.mockResolvedValue({
+        zone: 'QC',
+        carbonIntensity: 35.144,
+        timestamp: '2026-04-07T23:30:00+00:00',
+        isForecast: false,
+        generationByFuel: {
+          HYDRO: 24419,
+          WIND: 895,
+          OTHER: 812,
+          SOLAR: 2,
+          THERMAL: 0,
+        },
+        estimatedFlag: false,
+        totalOutputMwh: 26128,
+        renewableFraction: 0.931721,
+        skippedTrailingEmptyRows: 4,
+        sourceUrl: 'https://donnees.hydroquebec.com/api/explore/v2.1/catalog/datasets/production-electricite-quebec/records?limit=12&order_by=date%20desc',
+      })
+
+      const signal = await router.getRoutingSignal('canadaeast', new Date())
+
+      expect(signal.source).toBe('quebec_hydro')
+      expect(signal.carbonIntensity).toBe(35.144)
+      expect(signal.provenance.sourceUsed).toBe('QUEBEC_HYDRO_GENERATION_MIX')
+      expect(signal.provenance.fallbackUsed).toBe(false)
+      expect(signal.confidence).toBeGreaterThan(0.7)
+    })
+
+    it('should use the BC government factor as the primary signal for BC-backed aliases', async () => {
+      const { britishColumbiaCarbon } = require('../lib/british-columbia-carbon')
+
+      britishColumbiaCarbon.getCurrentIntensity.mockResolvedValue({
+        zone: 'BC',
+        carbonIntensity: 9.9,
+        timestamp: '2024-12-31T00:00:00-08:00',
+        isForecast: false,
+        generationByFuel: { HYDRO: 1 },
+        estimatedFlag: false,
+        totalOutputMwh: null,
+        integratedGridFactorTco2ePerGwh: 9.9,
+        sourceUrl: 'https://www2.gov.bc.ca/gov/content/environment/climate-change/data/electricity',
+        sourceYear: 2024,
+      })
+
+      const signal = await router.getRoutingSignal('bc', new Date())
+
+      expect(signal.source).toBe('bc_gov')
+      expect(signal.carbonIntensity).toBe(9.9)
+      expect(signal.provenance.sourceUsed).toBe('BC_GOV_EEIF')
+      expect(signal.provenance.fallbackUsed).toBe(false)
+      expect(signal.confidence).toBeGreaterThan(0.7)
     })
   })
 

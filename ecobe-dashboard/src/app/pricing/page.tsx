@@ -3,20 +3,20 @@ import Link from 'next/link'
 const tiers = [
   {
     name: 'Operator',
-    price: 'From $2,500/mo',
+    price: 'From $7,500/mo',
     entry: 'One live control point for a single team.',
-    description: 'For buyers who need one production decision loop with canonical decision storage, proof visibility, and a real enforcement wedge.',
+    description: 'For teams that need a real enforcement wedge in front of compute, with canonical decision storage, replay visibility, and operator-grade proof.',
     scale: 'Best for teams running up to 250k decisions per month.',
     highlights: [
       'Decision API v1 and control-surface access',
-      'CI/CD or HTTP control-point rollout',
+      'One production enforcement path',
       'Canonical decision storage and replay references',
-      'Pilot onboarding with one production runtime path',
+      'Operator visibility into live decision posture',
     ],
   },
   {
     name: 'Governance',
-    price: 'From $8,000/mo',
+    price: 'From $18,000/mo',
     entry: 'Multi-team governance with production enforcement depth.',
     description: 'For organizations standardizing policy, proof, and runtime control across multiple workloads, regions, and entry points.',
     scale: 'Built for high-volume decisioning, additional adapters, and regulated operating environments.',
@@ -83,12 +83,12 @@ export default function PricingPage() {
         <div className="grid gap-5 lg:grid-cols-[0.95fr_1.05fr] lg:items-center">
           <div>
             <div className="eyebrow">Commercial model</div>
-            <h2 className="mt-3 text-3xl font-semibold text-white">Package the control plane around decisions and governance depth.</h2>
+            <h2 className="mt-3 text-3xl font-semibold text-white">Package the control plane around decisions, enforcement scope, and governance depth.</h2>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="rounded-3xl border border-white/10 bg-black/20 p-5 text-sm leading-7 text-slate-300">
               <div className="text-base font-semibold text-white">Entry path</div>
-              Start with one live decision loop, one control point, and one proof trail that your team can inspect under real conditions.
+              Start with one live decision loop, one control point, and one proof trail that your team can inspect under real production conditions.
             </div>
             <div className="rounded-3xl border border-white/10 bg-black/20 p-5 text-sm leading-7 text-slate-300">
               <div className="text-base font-semibold text-white">Scaling logic</div>

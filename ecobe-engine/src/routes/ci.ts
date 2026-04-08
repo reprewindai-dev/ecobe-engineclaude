@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto'
+import { randomUUID, timingSafeEqual } from 'crypto'
 import type { Request, Response } from 'express'
 import { Router } from 'express'
 import { z } from 'zod'
@@ -52,7 +52,10 @@ import {
   type TraceEnvelopeSeed,
   type TraceStageTimings,
 } from '../lib/ci/trace'
+import { computeSaiqPerUnit } from '../lib/ci/saiq'
+import { buildSolarSignal, resolveSolarIncentive } from '../lib/ci/solar'
 import { pinReplayProofHash } from '../lib/ci/replay'
+import { toDecisionRoutingCacheBucket } from '../lib/ci/hot-path-cache'
 import { prisma } from '../lib/db'
 import { buildGithubActionsEnforcementBundle } from '../lib/enforcement/github-actions-policy'
 import { buildKubernetesEnforcementPlan } from '../lib/enforcement/k8s-policy'
@@ -64,7 +67,7 @@ import { evaluateSekedPolicyAdapter } from '../lib/policy/seked-policy-adapter'
 import { persistExportBatch } from '../lib/proof/export-chain'
 import { env } from '../config/env'
 import { trackRecentRoutingRegions } from '../lib/cache-warmer'
-import { toRoutingCacheBucket } from '../lib/grid-signals/grid-signal-cache'
+import { recordCiDecisionEvents } from '../lib/ds/spine'
 import {
   buildWaterAuthority,
   getWaterArtifactMetadata,
@@ -119,6 +122,41 @@ export const requestSchema = z.object({
       runtime: z.string().min(1).optional(),
     })
     .optional(),
+  recommendation: z
+    .object({
+      source: z.enum(['internal_router', 'scheduler', 'external_optimizer', 'doctrine']),
+      recommendedRegion: z.string().min(1).optional(),
+      recommendedDelayMinutes: z.number().int().positive().max(1440).optional(),
+      recommendedStartWindow: z
+        .object({
+          notBefore: z.string().datetime().optional(),
+          expiresAt: z.string().datetime().optional(),
+        })
+        .optional(),
+      confidence: z.number().min(0).max(1).optional(),
+      blastRadius: z.enum(['low', 'medium', 'high']).optional(),
+      reason: z.string().optional(),
+    })
+    .optional(),
+  workloadClass: z
+    .enum([
+      'llm_inference',
+      'llm_training',
+      'api_request',
+      'batch_job',
+      'ci_build',
+      'queue_task',
+      'generic_compute',
+    ])
+    .optional(),
+  slaClass: z.enum(['latency_sensitive', 'deadline_bound', 'throughput', 'best_effort']).optional(),
+  movabilityClass: z.enum(['fixed', 'region_bound', 'partially_movable', 'movable']).optional(),
+  dependencyRisk: z.number().min(0).max(1).optional(),
+  shiftSafety: z.number().min(0).max(1).optional(),
+  workloadUnitType: z
+    .enum(['token', 'request', 'job', 'build', 'task', 'pod_minute', 'compute_unit'])
+    .optional(),
+  workloadUnitCount: z.number().positive().optional(),
   preferredRegions: z.array(z.string()).min(1),
   carbonWeight: z.number().min(0).max(1).default(0.7),
   waterWeight: z.number().min(0).max(1).default(0.3),
@@ -149,6 +187,16 @@ export const requestSchema = z.object({
       bottleneckScore: z.number().min(0).max(1).optional(),
       dependencyDepth: z.number().int().min(0).optional(),
       queueDepth: z.number().int().min(0).optional(),
+    })
+    .optional(),
+  solarProvenance: z
+    .object({
+      siteId: z.string().optional(),
+      onsitePercent: z.number().min(0).max(1).optional(),
+      surplusKw: z.number().optional(),
+      batterySoc: z.number().min(0).max(1).optional(),
+      verifiedAt: z.string().datetime().optional(),
+      source: z.enum(['meter', 'ems', 'vendor']).optional(),
     })
     .optional(),
   timestamp: z.string().optional(),
@@ -274,12 +322,21 @@ function extractInternalToken(req: Request) {
   return req.header('x-ecobe-internal-key')?.trim() ?? null
 }
 
+function safeEquals(left: string, right: string) {
+  const leftBuffer = Buffer.from(left)
+  const rightBuffer = Buffer.from(right)
+  if (leftBuffer.length !== rightBuffer.length) return false
+  return timingSafeEqual(leftBuffer, rightBuffer)
+}
+
 function isInternalFastSimulationRequest(req: Request, data: RoutingRequest) {
   if (data.decisionMode !== 'scenario_planning') return false
   if (req.header('x-co2router-response-tier') !== 'fast') return false
   if (!env.ECOBE_INTERNAL_API_KEY) return false
 
-  return extractInternalToken(req) === env.ECOBE_INTERNAL_API_KEY
+  const token = extractInternalToken(req)
+  if (!token) return false
+  return safeEquals(token, env.ECOBE_INTERNAL_API_KEY)
 }
 
 function assuranceToProofPosture(status: 'operational' | 'assurance_ready' | 'degraded') {
@@ -327,6 +384,15 @@ function percentile(values: number[], p: number): number {
   const sorted = [...values].sort((a, b) => a - b)
   const idx = Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)
   return sorted[Math.max(0, idx)]
+}
+
+function maxIsoDate(values: Array<string | null | undefined>) {
+  const parsed = values
+    .filter((value): value is string => Boolean(value))
+    .map((value) => new Date(value).getTime())
+    .filter((value) => Number.isFinite(value))
+  if (parsed.length === 0) return null
+  return new Date(Math.max(...parsed)).toISOString()
 }
 
 function isFiniteLatency(value: unknown): value is number {
@@ -438,6 +504,11 @@ function computeScore(input: {
   )
 }
 
+function computeCostIndex(region: string) {
+  const pseudoCostPenalty = region.startsWith('ap-') ? 0.2 : region.startsWith('eu-') ? 0.16 : 0.12
+  return pseudoCostPenalty * 100
+}
+
 function getFallbackRegion(preferredRegions: string[]): string {
   for (const region of preferredRegions) {
     if (RUNNER_REGIONS[region]) return region
@@ -456,7 +527,7 @@ async function evaluateCandidates(
   }
 
   const reliabilityByRegion = await loadRegionReliabilityMultipliers(data.preferredRegions)
-  const cacheBucket = toRoutingCacheBucket(at)
+  const cacheBucket = toDecisionRoutingCacheBucket(at)
   trackRecentRoutingRegions(data.preferredRegions)
   const candidates = await Promise.all(
     data.preferredRegions.map(async (region) => {
@@ -624,6 +695,45 @@ function buildCiResponse(input: {
   providerSnapshotRefs: string[]
   waterAuthority: WaterAuthority
   precedenceOverrideApplied: boolean
+  notBeforeOverride: string | null
+  delayMinutesOverride: number | null
+  recommendationContext?: {
+    source: string | null
+    recommendedRegion?: string | null
+    recommendedDelayMinutes?: number | null
+    recommendedStartWindow?: { notBefore?: string | null; expiresAt?: string | null } | null
+    confidence?: number | null
+    blastRadius?: 'low' | 'medium' | 'high' | null
+    reason?: string | null
+    accepted?: boolean | null
+    reasonCodes?: string[]
+  } | null
+  routerOverrideReason?: string | null
+  saiq?: {
+    score: number | null
+    unitType: string | null
+    unitCount: number | null
+    source?: 'engine' | 'seked' | 'external' | 'none'
+    components: {
+      carbonPerUnit: number | null
+      energyPerUnit: number | null
+      waterPerUnit: number | null
+      costIndexPerUnit: number | null
+    }
+  } | null
+  solarSignal?: {
+    onsitePercent?: number | null
+    surplusKw?: number | null
+    batterySoc?: number | null
+    verifiedAt?: string | null
+    confidence?: number | null
+    source?: string | null
+  } | null
+  incentives?: {
+    tier: 'standard' | 'green' | 'solar_peak'
+    priceMultiplier: number
+    reason: string
+  } | null
   assurance: ReturnType<typeof buildAssuranceStatus>
   mss: ReturnType<typeof buildMssState>
   decisionExplanation: ReturnType<typeof buildDecisionExplanation>
@@ -652,17 +762,8 @@ function buildCiResponse(input: {
     waterAuthorityMode: input.waterAuthority.authorityMode,
     waterScenario: input.waterAuthority.scenario,
     proofHash: input.proofHash,
-    notBefore: input.data.allowDelay && input.decision === 'delay'
-      ? resolveDelayWindow({
-          generatedAt: new Date(input.data.timestamp ?? new Date().toISOString()),
-          criticality: input.data.criticality,
-          allowDelay: input.data.allowDelay,
-          criticalPath: input.data.criticalPath,
-          deadlineAt: input.data.deadlineAt,
-          maxDelayMinutes: input.data.maxDelayMinutes,
-        }).notBefore
-      : null,
-    delayMinutes: input.data.maxDelayMinutes,
+    notBefore: input.notBeforeOverride,
+    delayMinutes: input.delayMinutesOverride ?? undefined,
   })
   const githubActionsEnforcement = buildGithubActionsEnforcementBundle({
     decisionFrameId: input.decisionFrameId,
@@ -939,18 +1040,38 @@ export async function createDecision(
     executionContext.resolvedCandidateOverrides
   )
   const candidateEvaluationMs = Date.now() - candidateEvaluationStarted
-  const precedenceProtected = isPrecedenceProtected(normalizedRequest)
+  const slaClass = normalizedRequest.slaClass ?? 'best_effort'
+  const dependencyRisk = normalizedRequest.dependencyRisk ?? 0
+  const shiftSafety = normalizedRequest.shiftSafety ?? 1
+  const workloadPrecedenceProtected =
+    slaClass === 'latency_sensitive' || dependencyRisk >= 0.7 || shiftSafety < 0.4
+  const precedenceProtected = isPrecedenceProtected(normalizedRequest) || workloadPrecedenceProtected
+  const recommendationInput = normalizedRequest.recommendation ?? null
+  const effectiveAllowDelay =
+    normalizedRequest.allowDelay && !(slaClass === 'latency_sensitive' || dependencyRisk >= 0.7)
+  const effectiveMaxDelayMinutes =
+    recommendationInput?.recommendedDelayMinutes ?? normalizedRequest.maxDelayMinutes
   const delayWindow = resolveDelayWindow({
     generatedAt: now,
     criticality: normalizedRequest.criticality,
-    allowDelay: normalizedRequest.allowDelay,
+    allowDelay: effectiveAllowDelay,
     criticalPath: normalizedRequest.criticalPath,
     deadlineAt: normalizedRequest.deadlineAt,
-    maxDelayMinutes: normalizedRequest.maxDelayMinutes,
+    maxDelayMinutes: effectiveMaxDelayMinutes,
   })
 
   const baseline = resolveBaselineCandidate(normalizedRequest.preferredRegions, candidateEvaluations, candidateEvaluations[0])
   const best = candidateEvaluations[0]
+  const baselineGuardrail = evaluateWaterGuardrail({
+    profile: normalizedRequest.waterPolicyProfile as WaterPolicyProfile,
+    selectedWater: baseline.waterSignal,
+    baselineWater: baseline.waterSignal,
+    selectedWaterImpactLiters: baseline.waterImpactLiters,
+    selectedScarcityImpact: baseline.scarcityImpact,
+    fallbackUsed: baseline.waterSignal.fallbackUsed || baseline.carbonConfidence < 0.25,
+    criticality: normalizedRequest.criticality,
+    allowDelay: effectiveAllowDelay,
+  })
   const bestGuardrail = evaluateWaterGuardrail({
     profile: normalizedRequest.waterPolicyProfile as WaterPolicyProfile,
     selectedWater: best.waterSignal,
@@ -959,7 +1080,7 @@ export async function createDecision(
     selectedScarcityImpact: best.scarcityImpact,
     fallbackUsed: best.waterSignal.fallbackUsed || best.carbonConfidence < 0.25,
     criticality: normalizedRequest.criticality,
-    allowDelay: normalizedRequest.allowDelay,
+    allowDelay: effectiveAllowDelay,
   })
 
   let selected = best
@@ -967,6 +1088,11 @@ export async function createDecision(
   let reasonCode = bestGuardrail.reasonCode
   let rerouteFrom: CandidateEvaluation | null = null
   let precedenceOverrideApplied = false
+  let routerOverrideReason: string | null = null
+  const recommendationDecision = {
+    accepted: false,
+    reasonCodes: [] as string[],
+  }
 
   const firstNonBlocked = candidateEvaluations.find((candidate) => !candidate.guardrailCandidateBlocked)
   if (bestGuardrail.hardBlock && firstNonBlocked && firstNonBlocked.region !== best.region) {
@@ -990,6 +1116,30 @@ export async function createDecision(
             : 'DENY_NO_SAFE_REGION'
     }
     selected = best
+  }
+
+  const movabilityClass = normalizedRequest.movabilityClass ?? 'movable'
+  const movabilityRestricted = movabilityClass === 'fixed' || movabilityClass === 'region_bound'
+  if (movabilityRestricted) {
+    if (selected.region !== baseline.region) {
+      rerouteFrom = selected
+      selected = baseline
+      decision = baselineGuardrail.action
+      reasonCode = 'MOVABILITY_BASELINE_ONLY'
+      routerOverrideReason = 'MOVABILITY_RESTRICTION'
+    }
+    if (baselineGuardrail.hardBlock && decision !== 'delay') {
+      if (delayWindow.allowed) {
+        decision = 'delay'
+        reasonCode = 'DELAY_MOVABILITY_BASELINE_BLOCKED'
+      } else {
+        decision = chooseNonDelayFallbackAction(normalizedRequest.criticality)
+        reasonCode =
+          normalizedRequest.criticality === 'critical'
+            ? 'THROTTLE_MOVABILITY_BASELINE_BLOCKED'
+            : 'DENY_MOVABILITY_BASELINE_BLOCKED'
+      }
+    }
   }
 
   if (
@@ -1033,10 +1183,17 @@ export async function createDecision(
     policyVersion: normalizedRequest.policyVersion,
     decisionMode: normalizedRequest.decisionMode as WaterDecisionMode,
     criticality: normalizedRequest.criticality,
-    allowDelay: normalizedRequest.allowDelay,
+    allowDelay: effectiveAllowDelay,
     facilityId: normalizedRequest.facilityId ?? null,
     scenario: (normalizedRequest.waterContext?.scenario ?? 'current') as WaterScenario,
     bottleneckScore: normalizedRequest.schedulerHints?.bottleneckScore ?? null,
+    workloadClass: normalizedRequest.workloadClass ?? null,
+    slaClass: normalizedRequest.slaClass ?? null,
+    movabilityClass: normalizedRequest.movabilityClass ?? null,
+    dependencyRisk: normalizedRequest.dependencyRisk ?? null,
+    shiftSafety: normalizedRequest.shiftSafety ?? null,
+    workloadUnitType: normalizedRequest.workloadUnitType ?? null,
+    workloadUnitCount: normalizedRequest.workloadUnitCount ?? null,
     weights: {
       carbon: normalizedRequest.carbonWeight ?? null,
       water: normalizedRequest.waterWeight ?? null,
@@ -1050,6 +1207,8 @@ export async function createDecision(
       supplierSet: selected.waterAuthority.supplierSet,
       evidenceRefs: selected.waterAuthority.evidenceRefs,
     },
+    recommendation: recommendationInput ?? null,
+    solarProvenance: normalizedRequest.solarProvenance ?? null,
     candidateSupplierProvenance: candidateEvaluations.map((candidate) => ({
       region: candidate.region,
       supplierSet: candidate.waterAuthority.supplierSet,
@@ -1170,6 +1329,61 @@ export async function createDecision(
   const sekedApplied = applyPolicyDirectives(sekedPolicy, 'SEKED_POLICY')
   const externalApplied = applyPolicyDirectives(externalPolicy, 'EXTERNAL_POLICY')
 
+  let delayNotBeforeOverride = delayWindow.notBefore
+  let delayMinutesOverride = effectiveMaxDelayMinutes ?? null
+
+  if (recommendationInput) {
+    if (recommendationInput.recommendedDelayMinutes && effectiveAllowDelay) {
+      const recNotBefore = new Date(
+        now.getTime() + recommendationInput.recommendedDelayMinutes * 60 * 1000
+      ).toISOString()
+      delayNotBeforeOverride = maxIsoDate([delayNotBeforeOverride, recNotBefore])
+      delayMinutesOverride = recommendationInput.recommendedDelayMinutes
+      if (decision !== 'deny' && decision !== 'throttle') {
+        decision = 'delay'
+        reasonCode = 'DELAY_RECOMMENDATION_ACCEPTED'
+        recommendationDecision.accepted = true
+        recommendationDecision.reasonCodes.push('RECOMMENDATION_DELAY_ACCEPTED')
+      }
+    } else if (recommendationInput.recommendedDelayMinutes && !effectiveAllowDelay) {
+      recommendationDecision.reasonCodes.push('RECOMMENDATION_DELAY_FORBIDDEN')
+      routerOverrideReason = routerOverrideReason ?? 'RECOMMENDATION_DELAY_FORBIDDEN'
+    }
+
+    if (recommendationInput.recommendedStartWindow?.notBefore) {
+      delayNotBeforeOverride = maxIsoDate([
+        delayNotBeforeOverride,
+        recommendationInput.recommendedStartWindow.notBefore,
+      ])
+    }
+
+    if (recommendationInput.recommendedRegion) {
+      const recommendedCandidate = candidateEvaluations.find(
+        (candidate) => candidate.region === recommendationInput.recommendedRegion
+      )
+      if (!recommendedCandidate) {
+        recommendationDecision.reasonCodes.push('RECOMMENDATION_REGION_UNKNOWN')
+        routerOverrideReason = routerOverrideReason ?? 'RECOMMENDATION_REGION_UNKNOWN'
+      } else if (recommendedCandidate.guardrailCandidateBlocked) {
+        recommendationDecision.reasonCodes.push('RECOMMENDATION_GUARDRAIL_BLOCKED')
+        routerOverrideReason = routerOverrideReason ?? 'RECOMMENDATION_GUARDRAIL_BLOCKED'
+      } else if (movabilityRestricted && recommendedCandidate.region !== baseline.region) {
+        recommendationDecision.reasonCodes.push('RECOMMENDATION_MOVABILITY_BLOCKED')
+        routerOverrideReason = routerOverrideReason ?? 'RECOMMENDATION_MOVABILITY_BLOCKED'
+      } else if (decision === 'deny' || decision === 'throttle') {
+        recommendationDecision.reasonCodes.push('RECOMMENDATION_POLICY_BLOCKED')
+        routerOverrideReason = routerOverrideReason ?? 'RECOMMENDATION_POLICY_BLOCKED'
+      } else if (recommendedCandidate.region !== selected.region) {
+        rerouteFrom = selected
+        selected = recommendedCandidate
+        decision = selected.region === baseline.region ? 'run_now' : 'reroute'
+        reasonCode = 'REROUTE_RECOMMENDATION_ACCEPTED'
+        recommendationDecision.accepted = true
+        recommendationDecision.reasonCodes.push('RECOMMENDATION_REGION_ACCEPTED')
+      }
+    }
+  }
+
   if (decision === 'delay' && !delayWindow.allowed) {
     decision = chooseNonDelayFallbackAction(normalizedRequest.criticality)
     reasonCode =
@@ -1226,6 +1440,17 @@ export async function createDecision(
   })
   decision = operatingModeDecision.adjustedAction
   reasonCode = operatingModeDecision.adjustedReasonCode
+
+  if (decision !== 'delay') {
+    delayNotBeforeOverride = null
+    delayMinutesOverride = null
+  }
+
+  const effectiveDelayWindow = {
+    ...delayWindow,
+    delayMinutes: delayMinutesOverride ?? delayWindow.delayMinutes ?? null,
+    notBefore: delayNotBeforeOverride,
+  }
   const mss = buildMssState({
     candidate: selected,
     assurance,
@@ -1235,7 +1460,7 @@ export async function createDecision(
   })
   const policyTrace = {
     ...bestGuardrail.trace,
-    delayWindow,
+    delayWindow: effectiveDelayWindow,
     reasonCodes: Array.from(
       new Set([
         ...bestGuardrail.trace.reasonCodes,
@@ -1331,6 +1556,85 @@ export async function createDecision(
       runtime: transport.runtime,
     })
   }
+  const sekedDirective = sekedPolicy.response as PolicyDirectiveResponse | null
+  const externalDirective = externalPolicy.response as PolicyDirectiveResponse | null
+  const governanceSource = deriveGovernanceSource({
+    sekedApplied: Boolean(sekedPolicy.enabled && sekedPolicy.evaluated),
+    externalApplied: Boolean(externalPolicy.enabled && externalPolicy.evaluated),
+    sekedSource: sekedDirective?.governance?.source ?? null,
+    externalSource: externalDirective?.governance?.source ?? null,
+  })
+  const governanceMetadata =
+    sekedDirective?.governance ?? externalDirective?.governance ?? null
+  const governanceThresholds: Record<string, number | null> | null = governanceMetadata?.thresholds
+    ? Object.fromEntries(
+        Object.entries(governanceMetadata.thresholds)
+          .filter(([, value]) => typeof value === 'number' || value == null)
+          .map(([key, value]) => [key, value ?? null] as const)
+      )
+    : null
+
+  const solarSignal = buildSolarSignal(normalizedRequest.solarProvenance ?? null)
+  const solarSignalEnvelope = solarSignal
+    ? {
+        onsitePercent: solarSignal.onsitePercent,
+        surplusKw: solarSignal.surplusKw,
+        batterySoc: solarSignal.batterySoc,
+        verifiedAt: solarSignal.verifiedAt,
+        confidence: solarSignal.confidence,
+        source: solarSignal.source,
+      }
+    : null
+  const incentives = resolveSolarIncentive(solarSignal)
+  const recommendationContext = recommendationInput
+    ? {
+        source: recommendationInput.source,
+        recommendedRegion: recommendationInput.recommendedRegion ?? null,
+        recommendedDelayMinutes: recommendationInput.recommendedDelayMinutes ?? null,
+        recommendedStartWindow: recommendationInput.recommendedStartWindow
+          ? {
+              notBefore: recommendationInput.recommendedStartWindow.notBefore ?? null,
+              expiresAt: recommendationInput.recommendedStartWindow.expiresAt ?? null,
+            }
+          : null,
+        confidence: recommendationInput.confidence ?? null,
+        blastRadius: recommendationInput.blastRadius ?? null,
+        reason: recommendationInput.reason ?? null,
+        accepted: recommendationDecision.accepted,
+        reasonCodes: recommendationDecision.reasonCodes,
+      }
+    : null
+
+  const saiqBase = computeSaiqPerUnit({
+    energyKwh,
+    unitType: normalizedRequest.workloadUnitType ?? null,
+    unitCount: normalizedRequest.workloadUnitCount ?? null,
+    selected: {
+      carbonIntensity: selected.carbonIntensity,
+      waterImpactLiters: selected.waterImpactLiters,
+    },
+    baseline: {
+      carbonIntensity: baseline.carbonIntensity,
+      waterImpactLiters: baseline.waterImpactLiters,
+    },
+    costIndexSelected: computeCostIndex(selected.region),
+    costIndexBaseline: computeCostIndex(baseline.region),
+  })
+  let saiqSource: 'engine' | 'seked' | 'external' | 'none' = 'none'
+  let saiqScore: number | null = saiqBase.score
+  if (typeof governanceMetadata?.score === 'number') {
+    saiqScore = governanceMetadata.score
+    saiqSource = sekedPolicy.evaluated ? 'seked' : externalPolicy.evaluated ? 'external' : 'engine'
+  } else if (saiqBase.score != null) {
+    saiqSource = 'engine'
+  }
+  const saiq = {
+    score: saiqScore,
+    source: saiqSource,
+    unitType: saiqBase.unitType,
+    unitCount: saiqBase.unitCount,
+    components: saiqBase.components,
+  }
   const proofHash = buildDecisionProofHash({
     request: normalizedRequest as unknown as Record<string, unknown>,
     selected: {
@@ -1354,8 +1658,8 @@ export async function createDecision(
       policyProfile: normalizedRequest.waterPolicyProfile,
       criticality: normalizedRequest.criticality,
       generatedAt: now,
-      notBefore: delayWindow.notBefore,
-      delayMinutes: delayWindow.delayMinutes ?? undefined,
+      notBefore: delayNotBeforeOverride,
+      delayMinutes: delayMinutesOverride ?? undefined,
     }) as unknown as Record<string, unknown>,
     providerSnapshotRefs,
     signalMode: selected.signalMode,
@@ -1384,29 +1688,19 @@ export async function createDecision(
     providerSnapshotRefs,
     waterAuthority,
     precedenceOverrideApplied,
+    notBeforeOverride: delayNotBeforeOverride,
+    delayMinutesOverride,
+    recommendationContext,
+    routerOverrideReason,
+    saiq,
+    solarSignal: solarSignalEnvelope ?? undefined,
+    incentives: incentives ?? undefined,
     assurance,
     mss,
     decisionExplanation,
   })
   const doctrineAssemblyMs = Date.now() - doctrineAssemblyStarted
   const traceAssemblyStarted = Date.now()
-  const sekedDirective = sekedPolicy.response as PolicyDirectiveResponse | null
-  const externalDirective = externalPolicy.response as PolicyDirectiveResponse | null
-  const governanceSource = deriveGovernanceSource({
-    sekedApplied: Boolean(sekedPolicy.enabled && sekedPolicy.evaluated),
-    externalApplied: Boolean(externalPolicy.enabled && externalPolicy.evaluated),
-    sekedSource: sekedDirective?.governance?.source ?? null,
-    externalSource: externalDirective?.governance?.source ?? null,
-  })
-  const governanceMetadata =
-    sekedDirective?.governance ?? externalDirective?.governance ?? null
-  const governanceThresholds: Record<string, number | null> | null = governanceMetadata?.thresholds
-    ? Object.fromEntries(
-        Object.entries(governanceMetadata.thresholds)
-          .filter(([, value]) => typeof value === 'number' || value == null)
-          .map(([key, value]) => [key, value ?? null] as const)
-      )
-    : null
   const traceSeed: TraceEnvelopeSeed = {
     identity: {
       traceId: `trace:${decisionFrameId}`,
@@ -1416,6 +1710,8 @@ export async function createDecision(
     },
     inputSignals: {
       request: normalizedRequest as unknown as Record<string, unknown>,
+      recommendation: recommendationInput ?? null,
+      solarProvenance: normalizedRequest.solarProvenance ?? null,
       resolvedCandidates: candidateEvaluations,
     },
     normalizedSignals: {
@@ -1463,11 +1759,13 @@ export async function createDecision(
       operatingMode,
       rerouteFrom: rerouteFrom?.region ?? null,
       precedenceOverrideApplied,
+      recommendationDecision,
+      routerOverrideReason,
       delayWindow: {
-        allowed: delayWindow.allowed,
-        delayMinutes: delayWindow.delayMinutes,
-        notBefore: delayWindow.notBefore,
-        reason: delayWindow.reason,
+        allowed: effectiveDelayWindow.allowed,
+        delayMinutes: effectiveDelayWindow.delayMinutes,
+        notBefore: effectiveDelayWindow.notBefore,
+        reason: effectiveDelayWindow.reason,
       },
     },
     governance: {
@@ -1494,6 +1792,9 @@ export async function createDecision(
       policyReferences: [sekedPolicy.policyReference, externalPolicy.policyReference].filter(
         (reference): reference is string => Boolean(reference)
       ),
+      saiq,
+      solarSignal: solarSignalEnvelope ?? undefined,
+      incentives: incentives ?? undefined,
       seked: {
         enabled: sekedPolicy.enabled,
         strict: sekedPolicy.strict,
@@ -1773,6 +2074,45 @@ export async function persistCiDecisionResult(
         waterEvidenceRefs: validatedResponse.waterAuthority.evidenceRefs,
         policyTrace: validatedResponse.policyTrace,
         datasetVersions: validatedResponse.water.datasetVersion,
+        recommendationSource: validatedResponse.recommendationContext?.source ?? null,
+        recommendedRegion: validatedResponse.recommendationContext?.recommendedRegion ?? null,
+        recommendedDelayMinutes:
+          validatedResponse.recommendationContext?.recommendedDelayMinutes ?? null,
+        recommendedStartWindowNotBefore:
+          validatedResponse.recommendationContext?.recommendedStartWindow?.notBefore ?? null,
+        recommendedStartWindowExpiresAt:
+          validatedResponse.recommendationContext?.recommendedStartWindow?.expiresAt ?? null,
+        recommendationConfidence: validatedResponse.recommendationContext?.confidence ?? null,
+        recommendationBlastRadius: validatedResponse.recommendationContext?.blastRadius ?? null,
+        recommendationReason: validatedResponse.recommendationContext?.reason ?? null,
+        recommendationAccepted: validatedResponse.recommendationContext?.accepted ?? null,
+        recommendationReasonCodes: validatedResponse.recommendationContext?.reasonCodes ?? [],
+        routerOverrideReason: validatedResponse.routerOverrideReason ?? null,
+        workloadClass: result.persistable.request.workloadClass ?? null,
+        slaClass: result.persistable.request.slaClass ?? null,
+        movabilityClass: result.persistable.request.movabilityClass ?? null,
+        dependencyRisk: result.persistable.request.dependencyRisk ?? null,
+        shiftSafety: result.persistable.request.shiftSafety ?? null,
+        workloadUnitType: result.persistable.request.workloadUnitType ?? null,
+        workloadUnitCount: result.persistable.request.workloadUnitCount ?? null,
+        saiqScore: validatedResponse.saiq?.score ?? null,
+        saiqSource: validatedResponse.saiq?.source ?? null,
+        saiqUnitType: validatedResponse.saiq?.unitType ?? null,
+        saiqUnitCount: validatedResponse.saiq?.unitCount ?? null,
+        saiqCarbonPerUnit: validatedResponse.saiq?.components.carbonPerUnit ?? null,
+        saiqEnergyPerUnit: validatedResponse.saiq?.components.energyPerUnit ?? null,
+        saiqWaterPerUnit: validatedResponse.saiq?.components.waterPerUnit ?? null,
+        saiqCostIndexPerUnit: validatedResponse.saiq?.components.costIndexPerUnit ?? null,
+        solarSiteId: result.persistable.request.solarProvenance?.siteId ?? null,
+        solarOnsitePercent: validatedResponse.solarSignal?.onsitePercent ?? null,
+        solarSurplusKw: validatedResponse.solarSignal?.surplusKw ?? null,
+        solarBatterySoc: validatedResponse.solarSignal?.batterySoc ?? null,
+        solarVerifiedAt: validatedResponse.solarSignal?.verifiedAt ?? null,
+        solarSource: validatedResponse.solarSignal?.source ?? null,
+        solarSignalConfidence: validatedResponse.solarSignal?.confidence ?? null,
+        solarIncentiveTier: validatedResponse.incentives?.tier ?? null,
+        solarIncentiveMultiplier: validatedResponse.incentives?.priceMultiplier ?? null,
+        solarIncentiveReason: validatedResponse.incentives?.reason ?? null,
         metadata: {
           request: result.persistable.request,
           response: validatedResponse,
@@ -1816,6 +2156,11 @@ export async function persistCiDecisionResult(
       baseline: validatedResponse.baseline,
       selected: validatedResponse.selected,
       policyTrace: validatedResponse.policyTrace,
+      recommendationContext: validatedResponse.recommendationContext ?? undefined,
+      routerOverrideReason: validatedResponse.routerOverrideReason ?? null,
+      saiq: validatedResponse.saiq ?? undefined,
+      solarSignal: validatedResponse.solarSignal ?? undefined,
+      incentives: validatedResponse.incentives ?? undefined,
       confidence: validatedResponse.signalConfidence,
       signalsUsed: validatedResponse.proofRecord.signals_used,
       datasetVersions: validatedResponse.proofRecord.dataset_versions,
@@ -1827,6 +2172,26 @@ export async function persistCiDecisionResult(
     })
 
     await enqueueDecisionEvaluatedEvents(tx, eventPayload)
+
+    await recordCiDecisionEvents(tx, {
+      persistedDecisionId: persisted.id,
+      decisionFrameId: validatedResponse.decisionFrameId,
+      occurredAt: persisted.createdAt,
+      selectedRegion: validatedResponse.selectedRegion,
+      selectedRunner: validatedResponse.selectedRunner,
+      workloadClass: result.persistable.request.workloadClass ?? null,
+      recommendationAccepted: validatedResponse.recommendationContext?.accepted ?? null,
+      routerOverrideReason: validatedResponse.routerOverrideReason ?? null,
+      policyTrace: validatedResponse.policyTrace,
+      metadata: result.persistable.request.metadata as Record<string, unknown> | undefined,
+      mss: validatedResponse.mss,
+      waterAuthority: validatedResponse.waterAuthority,
+      decision: validatedResponse.decision,
+      reasonCode: validatedResponse.reasonCode,
+      signalConfidence: result.persistable.signalConfidence,
+      fallbackUsed: validatedResponse.fallbackUsed,
+      savingsPct: validatedResponse.savings.carbonReductionPct,
+    })
 
     await tx.waterPolicyEvidence.create({
       data: {
@@ -2695,19 +3060,23 @@ router.get('/telemetry', (_req, res) => {
 })
 
 router.get('/regions', async (_req, res) => {
+  const regions = Object.keys(RUNNER_REGIONS)
+  const reliabilityByRegion = await loadRegionReliabilityMultipliers(regions)
   res.json({
+    climatePhase: env.CLIMATE_PHASE,
     regions: Object.entries(RUNNER_REGIONS).map(([region, runners]) => {
       const water = resolveWaterSignal(region)
       return {
         region,
         runners,
         defaultRunner: runners[0],
+        reliabilityMultiplier: reliabilityByRegion[region] ?? 1,
         waterStressIndex: water.waterStressIndex,
         waterIntensityLPerKwh: water.waterIntensityLPerKwh,
         waterConfidence: water.confidence,
       }
     }),
-    totalRegions: Object.keys(RUNNER_REGIONS).length,
+    totalRegions: regions.length,
   })
 })
 

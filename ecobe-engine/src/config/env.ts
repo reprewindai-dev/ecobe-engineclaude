@@ -6,6 +6,7 @@ dotenv.config()
 const envSchema = z.object({
   PORT: z.string().default('3000'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  CORS_ALLOWED_ORIGINS: z.string().optional(),
 
   // Required
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
@@ -33,9 +34,13 @@ const envSchema = z.object({
 
   // GridStatus.io (curated EIA-930 data with real fuel mix)
   GRIDSTATUS_API_KEY: z.string().optional(),
+  CLIMATE_PHASE: z.enum(['neutral', 'el_nino', 'super_el_nino', 'la_nina']).optional(),
   
   // Finland Fingrid (optional regional provider)
   FINGRID_API_KEY: z.string().optional(),
+  ONTARIO_IESO_REPORT_URL: z.string().default('https://reports-public.ieso.ca/public/GenOutputbyFuelHourly/PUB_GenOutputbyFuelHourly.xml'),
+  QUEBEC_HYDRO_API_URL: z.string().default('https://donnees.hydroquebec.com/api/explore/v2.1/catalog/datasets/production-electricite-quebec/records?limit=12&order_by=date%20desc'),
+  BC_GOV_EEIF_URL: z.string().default('https://www2.gov.bc.ca/gov/content/environment/climate-change/data/electricity'),
 
   // Grid Signal Cache
   GRID_SIGNAL_CACHE_TTL: z.string().default('900'),
@@ -73,6 +78,13 @@ const envSchema = z.object({
   LEARNING_LOOP_ENABLED: z.string().optional(),
   LEARNING_LOOP_CRON: z.string().default('*/15 * * * *'),
   LEARNING_LOOKBACK_HOURS: z.string().default('168'),
+  DS_LEARNING_LOOP_ENABLED: z.string().optional(),
+  DS_LEARNING_LOOP_CRON: z.string().default('*/10 * * * *'),
+  DS_EVENT_LOOKBACK_HOURS: z.string().default('168'),
+  TRENDY_SHADOW_ENABLED: z.string().optional(),
+  TRENDY_SHADOW_CRON: z.string().default('0 */6 * * *'),
+  TRENDY_SHADOW_DATASET_PATH: z.string().optional(),
+  TRENDY_SHADOW_REVIEW_DAYS: z.string().default('7'),
   RUNTIME_SUPERVISOR_ENABLED: z.string().optional(),
   RUNTIME_SUPERVISOR_INTERVAL_SEC: z.string().default('60'),
   SUPERVISOR_FORECAST_STALE_MIN: z.string().default('90'),
@@ -154,6 +166,11 @@ export const env = {
   ...parsed.data,
   DEFAULT_MAX_CARBON_G_PER_KWH: parseInt(parsed.data.DEFAULT_MAX_CARBON_G_PER_KWH),
   PORT: parseInt(parsed.data.PORT),
+  CORS_ALLOWED_ORIGINS: parsed.data.CORS_ALLOWED_ORIGINS
+    ? parsed.data.CORS_ALLOWED_ORIGINS.split(',')
+        .map((origin) => origin.trim())
+        .filter(Boolean)
+    : [],
   GRID_SIGNAL_CACHE_TTL: parseInt(parsed.data.GRID_SIGNAL_CACHE_TTL),
   GRID_FEATURE_CACHE_TTL: parseInt(parsed.data.GRID_FEATURE_CACHE_TTL),
   GRID_SIGNAL_L1_CACHE_TTL_MS: parseInt(parsed.data.GRID_SIGNAL_L1_CACHE_TTL_MS),
@@ -171,6 +188,7 @@ export const env = {
     parsed.data.ENGINE_BACKGROUND_WORKERS_ENABLED !== undefined
       ? parsed.data.ENGINE_BACKGROUND_WORKERS_ENABLED === 'true'
       : false,
+  CLIMATE_PHASE: parsed.data.CLIMATE_PHASE ?? 'neutral',
   FORECAST_REFRESH_ENABLED:
     parsed.data.FORECAST_REFRESH_ENABLED !== undefined
       ? parsed.data.FORECAST_REFRESH_ENABLED === 'true'
@@ -182,6 +200,19 @@ export const env = {
       : parsed.data.NODE_ENV !== 'test',
   LEARNING_LOOP_CRON: parsed.data.LEARNING_LOOP_CRON,
   LEARNING_LOOKBACK_HOURS: parseInt(parsed.data.LEARNING_LOOKBACK_HOURS),
+  DS_LEARNING_LOOP_ENABLED:
+    parsed.data.DS_LEARNING_LOOP_ENABLED !== undefined
+      ? parsed.data.DS_LEARNING_LOOP_ENABLED === 'true'
+      : parsed.data.NODE_ENV !== 'test',
+  DS_LEARNING_LOOP_CRON: parsed.data.DS_LEARNING_LOOP_CRON,
+  DS_EVENT_LOOKBACK_HOURS: parseInt(parsed.data.DS_EVENT_LOOKBACK_HOURS),
+  TRENDY_SHADOW_ENABLED:
+    parsed.data.TRENDY_SHADOW_ENABLED !== undefined
+      ? parsed.data.TRENDY_SHADOW_ENABLED === 'true'
+      : false,
+  TRENDY_SHADOW_CRON: parsed.data.TRENDY_SHADOW_CRON,
+  TRENDY_SHADOW_DATASET_PATH: parsed.data.TRENDY_SHADOW_DATASET_PATH,
+  TRENDY_SHADOW_REVIEW_DAYS: parseInt(parsed.data.TRENDY_SHADOW_REVIEW_DAYS),
   RUNTIME_SUPERVISOR_ENABLED:
     parsed.data.RUNTIME_SUPERVISOR_ENABLED !== undefined
       ? parsed.data.RUNTIME_SUPERVISOR_ENABLED === 'true'

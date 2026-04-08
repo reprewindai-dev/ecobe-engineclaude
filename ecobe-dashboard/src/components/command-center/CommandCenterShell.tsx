@@ -14,6 +14,7 @@ import {
   useHallOGridProWorkspace,
   useHallOGridSnapshot,
 } from '@/lib/hooks/control-surface'
+import { FALLBACK_HALLOGRID_SNAPSHOT } from '@/lib/control-surface/fallbacks'
 import type {
   ControlSurfaceProviderNode,
   HallOGridBusinessImpact,
@@ -202,6 +203,22 @@ function confidenceColor(value: number | null | undefined) {
   if (value >= 85) return A.run_now
   if (value >= 68) return A.reroute
   return A.deny
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max)
+}
+
+function signalQualityLabel(frame: HallOGridFrame) {
+  if (frame.syntheticFlag) return 'SYNTHETIC'
+  if (frame.estimatedFlag) return 'ESTIMATED'
+  return 'DIRECT'
+}
+
+function signalQualityColor(frame: HallOGridFrame) {
+  if (frame.syntheticFlag) return A.reroute
+  if (frame.estimatedFlag) return P.t2
+  return A.run_now
 }
 
 function providerStatusColor(status: ControlSurfaceProviderNode['status']) {
@@ -890,6 +907,11 @@ function HallOGridTheater({
   const [showDesktopGuide, setShowDesktopGuide] = useState(false)
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 })
   const [focusPulse, setFocusPulse] = useState(0)
+  const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [dragging, setDragging] = useState(false)
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
+  const [hoveredRegion, setHoveredRegion] = useState<string | null>(null)
   const focusActive = selectedRegion != null
 
   useEffect(() => {
@@ -934,6 +956,31 @@ function HallOGridTheater({
   }
 
   const handleMouseLeave = () => setMousePos({ x: 0, y: 0 })
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement
+    if (target.closest('button, [data-hallogrid-control="true"]')) return
+    setDragging(true)
+    setDragStart({ x: event.clientX - pan.x, y: event.clientY - pan.y })
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging) return
+    setPan({ x: event.clientX - dragStart.x, y: event.clientY - dragStart.y })
+  }
+
+  const handlePointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging) return
+    setDragging(false)
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
+
+  const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    setZoom((current) => clamp(current - event.deltaY * 0.001, 0.72, 2.4))
+  }
 
   const globeSize = mobile ? 510 : 720
   const radiusBoost = Math.round(focusPulse * (mobile ? 16 : 30))
@@ -997,7 +1044,8 @@ function HallOGridTheater({
 
   const flowPaths = useMemo(() => {
     return flows
-      .map((flow) => {
+      .slice(0, 50)
+      .map((flow, index) => {
         const from = visibleByRegion.get(flow.fromRegion)
         const to = visibleByRegion.get(flow.toRegion)
         if (!from || !to) return null
@@ -1023,6 +1071,7 @@ function HallOGridTheater({
           width: connectedToSelection ? 2.35 : 1.1,
           mode: flow.mode,
           dashSpeed: flow.mode === 'blocked' ? 0 : connectedToSelection ? 1.6 : 3.8,
+          comet: index < 15,
         }
       })
       .filter((item): item is NonNullable<typeof item> => item != null)
@@ -1032,7 +1081,10 @@ function HallOGridTheater({
   const guardedCount = nodes.filter((node) => node.state === 'marginal').length
   const blockedCount = nodes.filter((node) => node.state === 'blocked').length
   const selectedNode = selectedRegion ? nodes.find((node) => node.region === selectedRegion) ?? null : null
+  const focusedRegion = hoveredRegion ?? selectedRegion
   const selectedState = selectedNode ? WORLD_STATE_META[selectedNode.state] : null
+  const focusedNode = focusedRegion ? nodes.find((node) => node.region === focusedRegion) ?? null : null
+  const focusedState = focusedNode ? WORLD_STATE_META[focusedNode.state] : null
   const connectedFlows = selectedRegion
     ? flows.filter((flow) => flow.fromRegion === selectedRegion || flow.toRegion === selectedRegion)
     : []
@@ -1069,6 +1121,9 @@ function HallOGridTheater({
   const selectedStatusRead = selectedNode
     ? `${selectedNode.label} ${selectedState?.label.toLowerCase() ?? 'live'} | ${selectedConfidenceLabel.toLowerCase()} confidence | ${selectedFreshness.toLowerCase()}`
     : 'Select a region to inspect execution posture.'
+  const hoverStatusRead = focusedNode
+    ? `${focusedNode.label} ${focusedState?.label.toLowerCase() ?? 'live'} | ${(focusedNode.confidenceTier ?? 'unknown').toUpperCase()} confidence`
+    : selectedStatusRead
   const supportTelemetry = [
     { label: 'Routes', value: String(flowPaths.length), color: '#dbeafe' },
     { label: 'Blocked', value: String(blockedFocusFlowCount), color: blockedFocusFlowCount > 0 ? A.deny : P.t2 },
@@ -1166,8 +1221,8 @@ function HallOGridTheater({
             ) : null}
           </div>
         ) : null}
-        <div onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave} style={{ position: 'relative', minHeight: mobile ? 468 + Math.round(focusPulse * 18) : (expanded ? 580 : 462) + Math.round(focusPulse * 44), borderRadius: 22, overflow: 'hidden', border: `1px solid ${P.borderLit}`, background: `radial-gradient(circle at 50% 22%, ${hex(P.accent, 0.04)} 0%, ${hex('#04060b', 0.1)} 28%, ${hex('#020309', 0.88)} 54%, ${hex('#000000', 0.98)} 100%)`, perspective: '1200px', transition: 'min-height 0.9s cubic-bezier(0.16,1,0.3,1)' }}>
-          <div style={{ position: 'absolute', inset: 0, transformStyle: 'preserve-3d', transform: `rotateX(${-mousePos.y * 12}deg) rotateY(${mousePos.x * 12}deg) scale(${(1 + focusPulse * 0.12).toFixed(3)})`, transition: 'transform 0.9s cubic-bezier(0.16,1,0.3,1)' }}>
+        <div onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onWheel={handleWheel} style={{ position: 'relative', minHeight: mobile ? 468 + Math.round(focusPulse * 18) : (expanded ? 580 : 462) + Math.round(focusPulse * 44), borderRadius: 22, overflow: 'hidden', border: `1px solid ${P.borderLit}`, background: `radial-gradient(circle at 50% 22%, ${hex(P.accent, 0.04)} 0%, ${hex('#04060b', 0.1)} 28%, ${hex('#020309', 0.88)} 54%, ${hex('#000000', 0.98)} 100%)`, perspective: '1200px', transition: 'min-height 0.9s cubic-bezier(0.16,1,0.3,1)', cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none' }}>
+          <div style={{ position: 'absolute', inset: 0, transformStyle: 'preserve-3d', transform: `translate(${pan.x}px, ${pan.y}px) scale(${(zoom * (1 + focusPulse * 0.12)).toFixed(3)}) rotateX(${-mousePos.y * 12}deg) rotateY(${mousePos.x * 12}deg)`, transition: dragging ? 'none' : 'transform 0.9s cubic-bezier(0.16,1,0.3,1)' }}>
           <div style={{ position: 'absolute', inset: mobile ? 4 : expanded ? 12 : 10, borderRadius: '50%', background: `radial-gradient(circle at 50% 48%, ${hex('#ffffff', 0.02)} 0%, ${hex('#7db7ff', 0.02)} 16%, ${hex('#0c1624', 0.08)} 38%, ${hex('#030507', 0.82)} 68%, ${hex('#000000', 0.98)} 100%)`, boxShadow: `inset 0 0 44px ${hex('#61a3ff', 0.05)}, 0 0 18px ${hex('#8ec5ff', 0.06)}` }} />
           {selectedNode ? (
             <div style={{ position: 'absolute', inset: 0, borderRadius: 22, background: `radial-gradient(ellipse 52% 52% at 50% 50%, ${hex(worldStateColor(selectedNode), 0.08)} 0%, transparent 68%)`, pointerEvents: 'none', zIndex: 1, transition: 'background 0.5s ease' }} />
@@ -1211,7 +1266,7 @@ function HallOGridTheater({
             {flowPaths.map((flow) => (
               <g key={flow.id}>
                 <path d={flow.d} fill="none" stroke={flow.color} strokeOpacity={flow.opacity} strokeWidth={flow.width} filter="url(#hallogrid-flow-glow-next)" strokeDasharray={flow.dashSpeed > 0 ? '10 6' : undefined} style={flow.dashSpeed > 0 ? { animation: `hallogrid-flow-travel ${flow.dashSpeed}s linear infinite` } : undefined} />
-                {!reducedMotion ? (
+                {!reducedMotion && flow.comet ? (
                   <path
                     d={flow.d}
                     fill="none"
@@ -1243,26 +1298,46 @@ function HallOGridTheater({
                 </g>
               )
             })}
-          {!mobile && actionableNodes.filter((item) => item.depth > 0.15).map((item) => (
-            <text
-              key={`lbl-${item.node.region}`}
-              x={item.screenX}
-              y={item.screenY - Math.max(13, 15 * item.scale) - 2}
-              textAnchor="middle"
-              fill={item.color}
-              fillOpacity={Math.min(0.82, item.opacity * 0.9)}
-              fontSize={Math.max(7.5, 8.5 * item.scale)}
-              fontFamily="'JetBrains Mono', monospace"
-              letterSpacing="0.06em"
-              style={{ pointerEvents: 'none', userSelect: 'none' }}
-            >
-              {item.node.label}
-            </text>
-          ))}
+          {!mobile && actionableNodes.filter((item) => item.depth > 0.15).map((item) => {
+            const isHovered = item.node.region === hoveredRegion
+            const isSelected = item.node.region === selectedRegion
+            const showDetail = isHovered || isSelected || item.depth > 0.42
+            return (
+              <g key={`lbl-${item.node.region}`} style={{ pointerEvents: 'none', userSelect: 'none' }}>
+                <text
+                  x={item.screenX}
+                  y={item.screenY - Math.max(13, 15 * item.scale) - 2}
+                  textAnchor="middle"
+                  fill={item.color}
+                  fillOpacity={Math.min(0.94, item.opacity * (showDetail ? 1 : 0.9))}
+                  fontSize={Math.max(7.5, 8.5 * item.scale)}
+                  fontFamily="'JetBrains Mono', monospace"
+                  letterSpacing="0.06em"
+                >
+                  {item.node.label}
+                </text>
+                {showDetail ? (
+                  <text
+                    x={item.screenX}
+                    y={item.screenY - Math.max(13, 15 * item.scale) + 10}
+                    textAnchor="middle"
+                    fill={WORLD_STATE_META[item.node.state].color}
+                    fillOpacity={Math.min(0.9, item.opacity * 0.95)}
+                    fontSize={Math.max(6.5, 7.2 * item.scale)}
+                    fontFamily="'JetBrains Mono', monospace"
+                    letterSpacing="0.08em"
+                  >
+                    {WORLD_STATE_META[item.node.state].label.toUpperCase()}
+                  </text>
+                ) : null}
+              </g>
+            )
+          })}
           </svg>
           {actionableNodes.map((item) => {
             const stateMeta = WORLD_STATE_META[item.node.state]
             const isSelected = item.node.region === selectedRegion
+            const isHovered = item.node.region === hoveredRegion
             return mobile ? (
               <div
                 key={item.node.region}
@@ -1302,6 +1377,8 @@ function HallOGridTheater({
                 key={item.node.region}
                 type="button"
                 onClick={() => onSelectRegion(item.node)}
+                onMouseEnter={() => setHoveredRegion(item.node.region)}
+                onMouseLeave={() => setHoveredRegion((current) => (current === item.node.region ? null : current))}
                 style={{
                   position: 'absolute',
                   left: item.screenX,
@@ -1310,13 +1387,14 @@ function HallOGridTheater({
                   width: 34,
                   height: 34,
                   borderRadius: '999px',
-                  border: isSelected ? `1px solid ${hex('#dbeafe', 0.62)}` : `1px solid ${hex(stateMeta.color, 0.24)}`,
-                  background: isSelected ? hex('#dbeafe', 0.08) : 'transparent',
-                  boxShadow: isSelected ? `0 0 18px ${hex('#dbeafe', 0.16)}` : 'none',
+                  border: isSelected || isHovered ? `1px solid ${hex('#dbeafe', isSelected ? 0.62 : 0.4)}` : `1px solid ${hex(stateMeta.color, 0.24)}`,
+                  background: isSelected ? hex('#dbeafe', 0.08) : isHovered ? hex(stateMeta.color, 0.08) : 'transparent',
+                  boxShadow: isSelected ? `0 0 18px ${hex('#dbeafe', 0.16)}` : isHovered ? `0 0 20px ${hex(stateMeta.color, 0.16)}` : 'none',
                   cursor: 'pointer',
                   zIndex: Math.round((item.depth + 1) * 100),
-                  opacity: selectedRegion && !isSelected ? 0.55 : 1,
+                  opacity: selectedRegion && !isSelected && !isHovered ? 0.55 : 1,
                   pointerEvents: 'auto',
+                  transition: 'opacity 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease',
                 }}
                 aria-label={`Focus ${item.node.label}`}
                 title={`${item.node.label}: ${stateMeta.label}`}
@@ -1334,6 +1412,24 @@ function HallOGridTheater({
           </div>
 
           <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', transform: mobile ? 'none' : 'translateZ(40px)' }}>
+          <div data-hallogrid-control="true" style={{ pointerEvents: 'auto', position: 'absolute', right: 16, top: mobile ? 16 : selectedNode ? 144 : 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => setZoom((current) => clamp(current + 0.2, 0.72, 2.4))}
+              style={{ width: 36, height: 36, borderRadius: '999px', border: `1px solid ${P.borderLit}`, background: hex('#000000', 0.5), color: P.t0, cursor: 'pointer', fontFamily: 'var(--m)', fontSize: 18 }}
+              aria-label="Zoom in"
+            >
+              +
+            </button>
+            <button
+              type="button"
+              onClick={() => setZoom((current) => clamp(current - 0.2, 0.72, 2.4))}
+              style={{ width: 36, height: 36, borderRadius: '999px', border: `1px solid ${P.borderLit}`, background: hex('#000000', 0.5), color: P.t0, cursor: 'pointer', fontFamily: 'var(--m)', fontSize: 18 }}
+              aria-label="Zoom out"
+            >
+              -
+            </button>
+          </div>
           <div style={{ pointerEvents: 'auto', position: 'absolute', left: 16, top: 16, display: 'flex', flexWrap: 'wrap', gap: 6, maxWidth: mobile ? '68%' : '40%' }}>
             {([
               ['RUN', activeCount, A.run_now],
@@ -1377,6 +1473,16 @@ function HallOGridTheater({
             </div>
             </div>
           ) : null}
+          {!mobile && hoveredRegion && focusedNode && !selectedNode ? (
+            <div data-hallogrid-control="true" style={{ pointerEvents: 'auto', position: 'absolute', top: 16, right: 60, width: expanded ? 196 : 176, maxWidth: '30%', padding: '10px 11px', borderRadius: 16, background: hex('#010308', 0.72), border: `1px solid ${hex(worldStateColor(focusedNode), 0.22)}`, boxShadow: `0 0 20px ${hex(worldStateColor(focusedNode), 0.08)}`, backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' }}>
+              <div style={{ fontFamily: 'var(--m)', fontSize: 9, letterSpacing: '0.12em', color: P.t3 }}>HOVER LOCK</div>
+              <div style={{ marginTop: 5, display: 'flex', alignItems: 'baseline', gap: 7, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 15, fontWeight: 700, color: P.t0 }}>{focusedNode.label}</span>
+                {focusedState ? <span style={{ fontFamily: 'var(--m)', fontSize: 10, letterSpacing: '0.08em', color: focusedState.color }}>{focusedState.label.toUpperCase()}</span> : null}
+              </div>
+              <div style={{ marginTop: 6, fontSize: 10, color: P.t1, lineHeight: 1.5 }}>{hoverStatusRead}</div>
+            </div>
+          ) : null}
           <div style={{ position: 'absolute', left: 16, right: 16, bottom: 46, height: 3, borderRadius: 2, display: 'flex', overflow: 'hidden', background: hex('#ffffff', 0.05), pointerEvents: 'none' }}>
             <div style={{ flex: activeCount || 0, background: A.run_now, opacity: 0.78 }} />
             <div style={{ flex: guardedCount || 0, background: A.reroute, opacity: 0.78 }} />
@@ -1389,6 +1495,8 @@ function HallOGridTheater({
           <div style={{ pointerEvents: 'auto', position: 'absolute', right: 16, bottom: 14, display: mobile ? 'none' : 'inline-flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderRadius: 999, background: hex('#000000', 0.42), border: `1px solid ${P.borderLit}`, fontFamily: 'var(--m)', fontSize: 10, letterSpacing: '0.08em', color: '#dbeafe' }}>
             <span>{reducedMotion ? 'LOW MOTION' : 'LIVE ROTATION'}</span>
             <span style={{ color: P.t2 }}>{Math.round(rotation)}deg</span>
+            <span style={{ color: P.t2 }}>|</span>
+            <span>{zoom.toFixed(2)}x</span>
           </div>
           </div>
         </div>
@@ -1462,6 +1570,7 @@ function Inspector({
   drillLoading: boolean
 }) {
   const color = A[f.action]
+  const inspectedFrame = detail?.frame ?? f
   const conf = f.metrics.signalConfidence
   const confColor = confidenceColor(conf)
   const trace = detail?.evidence.trace
@@ -1573,6 +1682,14 @@ function Inspector({
               <Row label="Signal mode" value={f.runtime.signalMode ?? 'Unavailable'} />
               <Row label="Accounting" value={f.runtime.accountingMethod ?? 'Unavailable'} />
               <Row label="Water delta" value={liters(f.metrics.waterImpactDeltaLiters)} />
+            </Block>
+            <Block title="GRID INTELLIGENCE">
+              <Row label="Balancing authority" value={inspectedFrame.balancingAuthority ?? 'Unavailable'} />
+              <Row label="Demand ramp" value={inspectedFrame.demandRampPct == null ? 'Unavailable' : `${inspectedFrame.demandRampPct.toFixed(1)}%`} />
+              <Row label="Carbon spike" value={inspectedFrame.carbonSpikeProbability == null ? 'Unavailable' : `${inspectedFrame.carbonSpikeProbability.toFixed(1)}%`} color={inspectedFrame.carbonSpikeProbability != null && inspectedFrame.carbonSpikeProbability >= 60 ? A.deny : P.t1} />
+              <Row label="Curtailment" value={inspectedFrame.curtailmentProbability == null ? 'Unavailable' : `${inspectedFrame.curtailmentProbability.toFixed(1)}%`} color={inspectedFrame.curtailmentProbability != null && inspectedFrame.curtailmentProbability >= 40 ? A.run_now : P.t1} />
+              <Row label="Import leakage" value={inspectedFrame.importCarbonLeakageScore == null ? 'Unavailable' : inspectedFrame.importCarbonLeakageScore.toFixed(2)} />
+              <Row label="Signal quality" value={signalQualityLabel(inspectedFrame)} color={signalQualityColor(inspectedFrame)} />
             </Block>
             <Block title="CONFIDENCE BREAKDOWN">
               <Bar label="signal confidence" value={f.metrics.signalConfidence} />
@@ -1947,11 +2064,12 @@ function Inspector({
 
 export function CommandCenterShell() {
   const snapshotQuery = useHallOGridSnapshot()
-  const snapshot = snapshotQuery.data
+  const snapshot = snapshotQuery.data ?? FALLBACK_HALLOGRID_SNAPSHOT
 
   const [sel, setSel] = useState<string | null>(null)
-  const [seededSelection, setSeededSelection] = useState(false)
   const [mobile, setMobile] = useState(false)
+  const [viewportReady, setViewportReady] = useState(false)
+  const [selectionOrigin, setSelectionOrigin] = useState<'seeded' | 'user' | null>(null)
   const [panel, setPanel] = useState<Panel>('trace')
   const [focusedRegion, setFocusedRegion] = useState<string | null>(null)
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 })
@@ -1960,20 +2078,47 @@ export function CommandCenterShell() {
   useEffect(() => {
     const onResize = () => setMobile(window.innerWidth < 960)
     onResize()
+    setViewportReady(true)
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
   useEffect(() => {
-    if (!snapshot || seededSelection) return
-    const initial = snapshot.selectedFrameId ?? snapshot.frames[0]?.id ?? null
-    if (initial) setSel(initial)
-    setSeededSelection(true)
-  }, [seededSelection, snapshot])
+    if (!viewportReady) return
+
+    const preferredRegion =
+      snapshot.selectedFrame?.frame.region ??
+      snapshot.frames[0]?.region ??
+      snapshot.world.nodes[0]?.region ??
+      null
+
+    if (!focusedRegion && preferredRegion) {
+      setFocusedRegion(preferredRegion)
+    }
+
+    if (mobile) {
+      if (selectionOrigin === 'seeded' && sel) {
+        setSel(null)
+        setSelectionOrigin(null)
+      }
+      return
+    }
+
+    if (!sel && selectionOrigin !== 'user') {
+      const initial = snapshot.selectedFrameId ?? snapshot.frames[0]?.id ?? null
+      if (initial) {
+        setSel(initial)
+        setSelectionOrigin('seeded')
+      }
+    }
+  }, [focusedRegion, mobile, sel, selectionOrigin, snapshot, viewportReady])
 
   useEffect(() => {
     if (!snapshot || !sel) return
-    if (!snapshot.frames.some((frame) => frame.id === sel)) setSel(null)
+    if (!snapshot.frames.some((frame) => frame.id === sel)) {
+      setSel(null)
+      setSelectionOrigin(null)
+    }
   }, [sel, snapshot])
 
   const frame = useMemo(() => {
@@ -2028,8 +2173,12 @@ export function CommandCenterShell() {
       if (next) {
         setPanel('trace')
         setFocusedRegion(snapshot?.frames.find((item) => item.id === next)?.region ?? null)
+        setSelectionOrigin('user')
       }
-      if (!next) setFocusedRegion(null)
+      if (!next) {
+        setFocusedRegion(null)
+        setSelectionOrigin(null)
+      }
       return next
     })
   }
@@ -2051,27 +2200,35 @@ export function CommandCenterShell() {
     if (targetFrameId) {
       setPanel('trace')
       setSel(targetFrameId)
+      setSelectionOrigin('user')
     }
   }
 
   const clearSelection = () => {
     setSel(null)
     setFocusedRegion(null)
+    setSelectionOrigin(null)
   }
 
-  if (snapshotQuery.isLoading) {
+  if (snapshotQuery.isLoading && !snapshotQuery.data) {
     return <div className="rounded-[28px] border border-white/10 bg-white/[0.04] px-6 py-8 text-sm text-slate-300">Loading HallOGrid...</div>
   }
 
-  if (snapshotQuery.error || !snapshot) {
+  if (!snapshot) {
     return <div className="rounded-[28px] border border-rose-400/20 bg-rose-400/10 px-6 py-8 text-sm text-rose-100">{snapshotQuery.error instanceof Error ? snapshotQuery.error.message : 'Failed to load HallOGrid.'}</div>
   }
 
+  const snapshotWarning =
+    snapshotQuery.error instanceof Error
+      ? snapshotQuery.error.message
+      : snapshotQuery.error
+        ? 'HallOGrid is reconnecting. The mirror shell stays visible while live data reattaches.'
+        : null
   const activeColor = frame ? A[frame.action] : P.accent
   const sceneTop = shellSceneTop(mobile)
 
   return (
-    <div onMouseMove={handleGlobalMouseMove} style={{ background: P.bg0, color: P.t1, minHeight: '100vh', fontFamily: "'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif", position: 'relative', overflow: 'hidden' }}>
+    <div onMouseMove={handleGlobalMouseMove} style={{ background: P.bg0, color: P.t1, minHeight: '100vh', fontFamily: "'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif", position: 'relative', overflowX: 'clip', overflowY: 'visible', isolation: 'isolate' }}>
       <style jsx global>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');:root{--m:'JetBrains Mono',monospace;}@keyframes hallogrid-breathe{0%,100%{transform:translate(0,0) scale(1);opacity:.5;}50%{transform:translate(-2%,1.5%) scale(1.04);opacity:.75;}}@keyframes hallogrid-pulse{0%,100%{opacity:.35;transform:scale(1);}50%{opacity:0;transform:scale(2.5);}}@keyframes hallogrid-pulse-soft{0%,100%{opacity:1;}50%{opacity:.65;}}@keyframes hallogrid-beacon-fast{0%,100%{opacity:.15;transform:scale(.85);}50%{opacity:1;transform:scale(1.2);}}@keyframes hallogrid-beacon-slow{0%,100%{opacity:.2;transform:scale(.9);}50%{opacity:.75;transform:scale(1.08);}}@keyframes hallogrid-beacon-irregular{0%,20%,60%,100%{opacity:.18;transform:scale(.88);}10%,32%,74%{opacity:.95;transform:scale(1.12);}45%{opacity:.38;transform:scale(.96);}}@keyframes hallogrid-inspector-in{from{opacity:0;transform:translateX(28px);}to{opacity:1;transform:translateX(0);}}@keyframes hallogrid-sheet-up{from{transform:translateY(100%);}to{transform:translateY(0);}}@keyframes hallogrid-flow-travel{to{stroke-dashoffset:-80;}}@keyframes hallogrid-flow-comet{0%{stroke-dashoffset:100;opacity:0;}15%{opacity:1;}85%{opacity:1;}100%{stroke-dashoffset:0;opacity:0;}}@keyframes hallogrid-shockwave{0%{r:0;opacity:1;stroke-width:3;}100%{r:50px;opacity:0;stroke-width:0;}}::-webkit-scrollbar{width:3px;height:3px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:${P.borderLit};border-radius:2px;}button{font-family:inherit;}button:focus-visible{outline:2px solid ${P.accent};outline-offset:2px;}`}</style>
       <BackgroundGrid active={Boolean(sel)} color={activeColor} mousePos={mousePos} />
       <HeaderBar title={snapshot.title} subtitle={snapshot.subtitle} streamHealthy={snapshot.transport.streamHealthy} generatedAt={snapshot.generatedAt} mobile={mobile} access={snapshot.access} mirror={snapshot.mirror} />
@@ -2079,6 +2236,11 @@ export function CommandCenterShell() {
 
       <div style={{ position: 'relative', zIndex: 1, minHeight: '100vh', paddingTop: 12, paddingBottom: 18, paddingLeft: mobile ? 12 : 18, paddingRight: mobile ? 12 : 18 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'stretch', width: '100%', maxWidth: mobile ? '100%' : 1180, margin: '0 auto' }}>
+          {snapshotWarning ? (
+            <div style={{ padding: '12px 14px', borderRadius: 16, border: `1px solid ${hex(A.reroute, 0.28)}`, background: hex(A.reroute, 0.1), color: '#fde68a', fontSize: 12, lineHeight: 1.6 }}>
+              {snapshotWarning}
+            </div>
+          ) : null}
           <UpgradeStrip access={snapshot.access} />
 
           <HallOGridTheater
@@ -2128,7 +2290,7 @@ export function CommandCenterShell() {
             </div>
 
             {!mobile && frame && snapshot.access.canViewOperatorConsole ? (
-              <div style={{ minHeight: `calc(100vh - ${sceneTop + 18}px)`, position: 'sticky', top: sceneTop, borderLeft: `1px solid ${P.border}`, boxShadow: `-6px 0 22px ${hex('#000000', 0.18)}`, animation: 'hallogrid-inspector-in 0.35s cubic-bezier(0.16,1,0.3,1)', overflow: 'hidden', borderRadius: 24, minWidth: 0 }}>
+              <div style={{ minHeight: `calc(100vh - ${sceneTop + 18}px)`, position: 'sticky', top: sceneTop, alignSelf: 'start', borderLeft: `1px solid ${P.border}`, boxShadow: `-6px 0 22px ${hex('#000000', 0.18)}`, animation: 'hallogrid-inspector-in 0.35s cubic-bezier(0.16,1,0.3,1)', overflow: 'hidden', borderRadius: 24, minWidth: 0 }}>
                 <Inspector
                   f={frame}
                   detail={detail}
@@ -2147,9 +2309,11 @@ export function CommandCenterShell() {
                 />
               </div>
             ) : !mobile && snapshot.access.isReadOnlyPreview ? (
-              <LockedSurfacePanel access={snapshot.access} selectedFrame={frame} />
+              <div style={{ minHeight: `calc(100vh - ${sceneTop + 18}px)`, position: 'sticky', top: sceneTop, alignSelf: 'start', overflow: 'hidden', borderRadius: 24, minWidth: 0 }}>
+                <LockedSurfacePanel access={snapshot.access} selectedFrame={frame} />
+              </div>
             ) : !mobile ? (
-              <div style={{ minHeight: `calc(100vh - ${sceneTop + 18}px)`, position: 'sticky', top: sceneTop, padding: '24px', borderRadius: 24, border: `1px solid ${P.border}`, background: `linear-gradient(180deg, ${P.glass2} 0%, ${P.glass} 100%)`, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: P.t2, minWidth: 0 }}>
+              <div style={{ minHeight: `calc(100vh - ${sceneTop + 18}px)`, position: 'sticky', top: sceneTop, alignSelf: 'start', padding: '24px', borderRadius: 24, border: `1px solid ${P.border}`, background: `linear-gradient(180deg, ${P.glass2} 0%, ${P.glass} 100%)`, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: P.t2, minWidth: 0 }}>
                 <div>
                   <div style={{ fontFamily: 'var(--m)', fontSize: 11, letterSpacing: '0.12em', color: '#dbeafe' }}>SELECT A FRAME</div>
                   <div style={{ marginTop: 10, fontSize: 14, lineHeight: 1.7 }}>

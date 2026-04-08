@@ -712,6 +712,13 @@ export interface HallOGridFrame {
     fallbackUsed: boolean
     systemState: WorldExecutionState
   }
+  balancingAuthority?: string | null
+  demandRampPct?: number | null
+  carbonSpikeProbability?: number | null
+  curtailmentProbability?: number | null
+  importCarbonLeakageScore?: number | null
+  estimatedFlag?: boolean | null
+  syntheticFlag?: boolean | null
 }
 
 export interface HallOGridFrameDetail {

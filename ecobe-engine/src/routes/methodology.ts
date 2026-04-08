@@ -30,7 +30,7 @@ const PROVIDERS: ProviderConfig[] = [
   {
     name: 'GridStatus EIA-930',
     source: 'GRIDSTATUS',
-    enabled: Boolean(env.GRIDSTATUS_API_KEY || env.EIA_API_KEY),
+    enabled: true,
   },
   {
     name: 'Ember',
@@ -40,6 +40,21 @@ const PROVIDERS: ProviderConfig[] = [
   {
     name: 'GB Carbon Intensity',
     source: 'GB_CARBON',
+    enabled: true,
+  },
+  {
+    name: 'Ontario IESO',
+    source: 'ONTARIO_IESO',
+    enabled: true,
+  },
+  {
+    name: 'Hydro-Quebec',
+    source: 'QUEBEC_HYDRO',
+    enabled: true,
+  },
+  {
+    name: 'BC Government Integrated Grid',
+    source: 'BC_GOV',
     enabled: true,
   },
 ]
