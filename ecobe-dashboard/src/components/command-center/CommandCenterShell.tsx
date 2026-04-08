@@ -1092,7 +1092,7 @@ function HallOGridTheater({
   const actionableNodes = projected.filter((item) => item.depth >= 0.02).sort((a, b) => b.depth - a.depth)
   const frontLineNodes = actionableNodes.slice(0, 5)
   const regionRailNodes = mobile ? nodes : frontLineNodes.map((item) => item.node)
-  const providerMesh = providers.slice(0, 6).map((provider, index, list) => {
+  const providerMesh = providers.slice(0, 8).map((provider, index, list) => {
     const angle = (-110 + (220 / Math.max(list.length - 1, 1)) * index) * (Math.PI / 180)
     const orbitX = center + Math.cos(angle) * (radius + 54)
     const orbitY = center + Math.sin(angle) * (radius * 0.76 + 44)
@@ -1101,7 +1101,7 @@ function HallOGridTheater({
   const healthyProviders = providers.filter((provider) => provider.status === 'healthy').length
   const degradedProviders = providers.filter((provider) => provider.status === 'degraded').length
   const offlineProviders = Math.max(0, providers.length - healthyProviders - degradedProviders)
-  const providerNodes = mobile ? [] : selectedNode ? providerMesh.slice(0, Math.min(providerMesh.length, 4)) : []
+  const providerNodes = mobile ? [] : selectedNode ? providerMesh.slice(0, Math.min(providerMesh.length, 6)) : []
   const selectedDecisionRead = compactDecisionRead(selectedFrame)
   const selectedFreshness = selectedFrame ? shortFreshness(selectedFrame.trust.freshnessLabel) : 'Awaiting focus'
   const selectedConfidence = selectedFrame?.metrics.signalConfidence ?? selectedNode?.signalConfidence ?? null

@@ -171,6 +171,9 @@ function isCanonicalCarbonProvider(provider: string) {
     provider === 'WATTTIME_MOER' ||
     provider === 'GRIDSTATUS' ||
     provider === 'EIA_930' ||
+    provider === 'ONTARIO_IESO' ||
+    provider === 'QUEBEC_HYDRO' ||
+    provider === 'BC_GOV' ||
     provider === 'GB_CARBON' ||
     provider === 'DK_CARBON' ||
     provider === 'FI_CARBON' ||
@@ -513,7 +516,18 @@ function buildProviders(
     } satisfies ControlSurfaceProviderNode
   })
 
-  const carbonOrder = ['WATTTIME_MOER', 'GRIDSTATUS', 'EIA_930', 'EMBER_STRUCTURAL_BASELINE']
+  const carbonOrder = [
+    'WATTTIME_MOER',
+    'GRIDSTATUS',
+    'EIA_930',
+    'ONTARIO_IESO',
+    'QUEBEC_HYDRO',
+    'BC_GOV',
+    'EMBER_STRUCTURAL_BASELINE',
+    'GB_CARBON',
+    'DK_CARBON',
+    'FI_CARBON',
+  ]
   carbonProviders.sort((a, b) => {
     const aIndex = carbonOrder.indexOf(a.id)
     const bIndex = carbonOrder.indexOf(b.id)
