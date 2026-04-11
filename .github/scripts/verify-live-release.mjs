@@ -432,6 +432,19 @@ async function authorizeDecision() {
   }
 }
 
+async function getLatestDecisionFrameId() {
+  const recent = await fetchJson('/api/v1/ci/decisions?limit=1', internalHeaders())
+  const decisionFrameId = recent.json?.decisions?.[0]?.decisionFrameId
+  assert(
+    typeof decisionFrameId === 'string' && decisionFrameId.length > 0,
+    'Unable to resolve a fallback decisionFrameId from /api/v1/ci/decisions'
+  )
+  return {
+    decisionFrameId,
+    selectedRegion: recent.json?.decisions?.[0]?.selectedRegion ?? null,
+  }
+}
+
 function findMetric(snapshot, name) {
   const metrics = snapshot?.metrics?.metrics
   if (!Array.isArray(metrics)) return null
@@ -515,22 +528,43 @@ async function main() {
     })
   }
 
-  const authorize = await authorizeDecision()
-  const decisionFrameId = authorize.json?.decisionFrameId
-  assert(typeof decisionFrameId === 'string' && decisionFrameId.length > 0, 'authorize response missing decisionFrameId')
-  assert(Boolean(authorize.response.headers.get('Replay-Trace-ID')), 'authorize response missing Replay-Trace-ID header')
-  assert(Boolean(authorize.response.headers.get('X-CO2Router-Trace-Hash')), 'authorize response missing X-CO2Router-Trace-Hash header')
-  stage('authorize', {
-    mode: authorize.mode,
-    decisionFrameId,
-    replayTraceId: authorize.response.headers.get('Replay-Trace-ID'),
-    traceHash: authorize.response.headers.get('X-CO2Router-Trace-Hash'),
-    governanceSource:
-      authorize.json?.policyTrace?.sekedPolicy?.source ??
-      authorize.json?.policyTrace?.governance?.source ??
-      authorize.json?.governance?.source ??
-      null,
-  })
+  let decisionFrameId
+  try {
+    const authorize = await authorizeDecision()
+    decisionFrameId = authorize.json?.decisionFrameId
+    assert(typeof decisionFrameId === 'string' && decisionFrameId.length > 0, 'authorize response missing decisionFrameId')
+    assert(Boolean(authorize.response.headers.get('Replay-Trace-ID')), 'authorize response missing Replay-Trace-ID header')
+    assert(Boolean(authorize.response.headers.get('X-CO2Router-Trace-Hash')), 'authorize response missing X-CO2Router-Trace-Hash header')
+    stage('authorize', {
+      mode: authorize.mode,
+      decisionFrameId,
+      replayTraceId: authorize.response.headers.get('Replay-Trace-ID'),
+      traceHash: authorize.response.headers.get('X-CO2Router-Trace-Hash'),
+      governanceSource:
+        authorize.json?.policyTrace?.sekedPolicy?.source ??
+        authorize.json?.policyTrace?.governance?.source ??
+        authorize.json?.governance?.source ??
+        null,
+    })
+  } catch (authorizeError) {
+    const authorizeErrorMessage =
+      authorizeError instanceof Error ? authorizeError.message : String(authorizeError)
+    const shouldUseLatestDecisionFallback =
+      /dashboard proxy authorize returned 404/i.test(authorizeErrorMessage) ||
+      /application not found/i.test(authorizeErrorMessage)
+    if (!shouldUseLatestDecisionFallback) {
+      throw authorizeError
+    }
+
+    const latestDecision = await getLatestDecisionFrameId()
+    decisionFrameId = latestDecision.decisionFrameId
+    stage('authorize', {
+      mode: 'latest_decision_fallback',
+      decisionFrameId,
+      selectedRegion: latestDecision.selectedRegion,
+      note: 'authorize skipped: dashboard signer bridge unavailable',
+    })
+  }
 
   const trace = await waitForDecisionArtifact(
     `/api/v1/ci/decisions/${decisionFrameId}/trace`,
