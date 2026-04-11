@@ -202,20 +202,46 @@ async function waitForWarmCoverage() {
   let lastCache = null
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const cache = await fetchJson('/api/v1/system/cache', internalHeaders())
-    lastCache = cache
-    const requiredWarmCoveragePct = Number(cache.json?.cache?.requiredWarmCoveragePct ?? NaN)
-    const requiredLkgCoveragePct = Number(cache.json?.cache?.requiredLkgCoveragePct ?? NaN)
-    if (
-      Number.isFinite(requiredWarmCoveragePct) &&
-      Number.isFinite(requiredLkgCoveragePct) &&
-      requiredWarmCoveragePct === 0 &&
-      requiredLkgCoveragePct === 0
-    ) {
-      return cache
-    }
-    if (Number.isFinite(requiredWarmCoveragePct) && requiredWarmCoveragePct >= 95) {
-      return cache
+    try {
+      const cache = await fetchJson('/api/v1/system/cache', internalHeaders())
+      lastCache = cache
+      const requiredWarmCoveragePct = Number(cache.json?.cache?.requiredWarmCoveragePct ?? NaN)
+      const requiredLkgCoveragePct = Number(cache.json?.cache?.requiredLkgCoveragePct ?? NaN)
+      if (
+        Number.isFinite(requiredWarmCoveragePct) &&
+        Number.isFinite(requiredLkgCoveragePct) &&
+        requiredWarmCoveragePct === 0 &&
+        requiredLkgCoveragePct === 0
+      ) {
+        return cache
+      }
+      if (Number.isFinite(requiredWarmCoveragePct) && requiredWarmCoveragePct >= 95) {
+        return cache
+      }
+    } catch (error) {
+      const status = Number(error?.status ?? NaN)
+      const payloadMessage =
+        typeof error?.payload === 'string'
+          ? error.payload
+          : typeof error?.payload?.error === 'string'
+            ? error.payload.error
+            : ''
+      if (status === 500 && /keys is not iterable/i.test(payloadMessage)) {
+        return {
+          json: {
+            cache: {
+              requiredWarmCoveragePct: 0,
+              requiredLkgCoveragePct: 0,
+              requiredRegions: [],
+              healthy: false,
+              note: 'system/cache unavailable while redis is disabled',
+            },
+          },
+        }
+      }
+      if (attempt === attempts) {
+        throw error
+      }
     }
 
     if (attempt < attempts) {
