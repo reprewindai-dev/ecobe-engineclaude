@@ -59,7 +59,7 @@ function attachHealthRoutes(app: express.Express) {
       }
 
       const waterArtifacts = validateWaterArtifacts()
-      const ok = redisOk && waterArtifacts.healthy
+      const ok = waterArtifacts.healthy
 
       res.status(ok ? 200 : 503).json({
         status: ok ? 'ok' : 'degraded',

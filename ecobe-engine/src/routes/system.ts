@@ -184,21 +184,25 @@ router.get('/workers', (req: Request, res: Response) => {
  */
 router.get('/cache', async (req: Request, res: Response) => {
   try {
-    const cacheStats = await GridSignalCache.getCacheStats()
     const cacheHealth = await getCacheHealthStatus()
+    const cacheStats = cacheHealth.cacheStats ?? (await GridSignalCache.getCacheStats().catch(() => null))
 
     res.json({
       timestamp: new Date().toISOString(),
       cache: {
-        totalKeys: cacheStats.totalKeys,
-        keyTypes: cacheStats.keyTypes,
-        regions: cacheStats.regions,
-        l1: cacheStats.l1,
-        regionCount: Object.keys(cacheStats.regions).length,
+        totalKeys: cacheStats?.totalKeys ?? 0,
+        keyTypes: cacheStats?.keyTypes ?? {},
+        regions: cacheStats?.regions ?? {},
+        l1: cacheStats?.l1 ?? {
+          routingSignalEntries: 0,
+          routingLkgEntries: 0,
+        },
+        regionCount: Object.keys(cacheStats?.regions ?? {}).length,
         requiredWarmCoveragePct: cacheHealth.requiredWarmCoveragePct,
         requiredLkgCoveragePct: cacheHealth.requiredLkgCoveragePct,
         requiredRegions: cacheHealth.requiredRegions,
         healthy: cacheHealth.isHealthy,
+        redisConnected: cacheHealth.redisConnected,
       }
     })
   } catch (error) {
