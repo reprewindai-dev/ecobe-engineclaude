@@ -110,6 +110,18 @@ Production-grade deterministic decisioning and proof, with operational water aut
 - `GET /api/v1/water/provenance`
 - `POST /api/v1/water/provenance/verify`
 
+## Deployment (Render)
+
+When deploying the engine as a Docker web service, Prisma migrations must run successfully before the server starts.
+
+Required environment variables:
+
+- `DATABASE_URL` (runtime connection; may be Prisma Accelerate `prisma+postgres://...`)
+- `DIRECT_DATABASE_URL` (direct Postgres connection for migrations; e.g. Neon/Supabase/Render Postgres)
+
+If migrations are skipped or `DIRECT_DATABASE_URL` is missing, Postgres tables (including `Region`) will not exist and
+ingestion/metrics endpoints will fail or time out.
+
 ## Canonical response shape
 
 The decision response includes both the historical CI response and the canonical envelopes:
