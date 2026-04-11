@@ -51,6 +51,11 @@ export function toRoutingCacheKey(timestamp: Date | string) {
   return toRoutingCacheBucket(timestamp).toISOString()
 }
 
+function toRedisKeyList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is string => typeof item === 'string' && item.length > 0)
+}
+
 type L1CacheEntry<T> = {
   value: T
   expiresAt: number
@@ -403,7 +408,7 @@ export class GridSignalCache {
    */
   static async invalidateRegion(region: string, keyPrefix: string = this.KEY_PREFIX): Promise<void> {
     const pattern = `${keyPrefix}:*:${region}:*`
-    const keys = await redis.keys(pattern)
+    const keys = toRedisKeyList(await redis.keys(pattern))
 
     if (keys.length > 0) {
       await redis.del(...keys)
@@ -418,7 +423,7 @@ export class GridSignalCache {
     keyPrefix: string = this.KEY_PREFIX
   ): Promise<void> {
     const pattern = `${keyPrefix}:*:*`
-    const keys = await redis.keys(pattern)
+    const keys = toRedisKeyList(await redis.keys(pattern))
 
     const keysToDelete: string[] = []
 
@@ -452,7 +457,7 @@ export class GridSignalCache {
     this.pruneL1(this.routingSignalL1 as unknown as Map<string, L1CacheEntry<unknown>>)
     this.pruneL1(this.routingLkgL1 as unknown as Map<string, L1CacheEntry<unknown>>)
     const pattern = `${keyPrefix}:*`
-    const keys = await redis.keys(pattern)
+    const keys = toRedisKeyList(await redis.keys(pattern))
 
     const keyTypes: Record<string, number> = {}
     const regions: Record<string, number> = {}
