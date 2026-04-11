@@ -322,6 +322,38 @@ async function tryDirectAuthorize(body) {
   }
 }
 
+async function tryDirectAuthorizeWithInternalKey(body) {
+  if (!internalKey) {
+    throw new Error('Internal API key is not configured.')
+  }
+
+  const response = await fetch(`${baseUrl}/api/v1/ci/authorize`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...internalHeaders(),
+    },
+    body,
+  })
+
+  const parsed = await parseJsonResponse(response)
+  if (!parsed.response.ok) {
+    const error = new Error(
+      `authorize (internal key) returned ${parsed.response.status}: ${
+        typeof parsed.json === 'string' ? parsed.json : JSON.stringify(parsed.json)
+      }`
+    )
+    error.status = parsed.response.status
+    error.payload = parsed.json
+    throw error
+  }
+
+  return {
+    ...parsed,
+    mode: 'direct_internal_key',
+  }
+}
+
 async function tryDashboardProxyAuthorize(body) {
   if (!dashboardUrl) {
     throw new Error('Dashboard signer bridge is not configured.')
@@ -384,6 +416,16 @@ async function authorizeDecision() {
 
     if (!shouldFallbackToDashboardProxy) {
       throw error
+    }
+
+    if (internalKey) {
+      try {
+        return await tryDirectAuthorizeWithInternalKey(body)
+      } catch (internalKeyError) {
+        if (!dashboardUrl) {
+          throw internalKeyError
+        }
+      }
     }
 
     return tryDashboardProxyAuthorize(body)
