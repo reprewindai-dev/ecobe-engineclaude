@@ -39,13 +39,10 @@ function attachHealthRoutes(app: express.Express) {
         redisOk = false
       }
 
-      // Redis is an optional performance dependency (cache). The engine can still serve
-      // correct responses without it, so we treat Redis failures as "degraded" (200),
-      // not "unhealthy" (503). The database is required and will still fail the check.
-      const ok = true
+      const ok = redisOk
 
       res.status(ok ? 200 : 503).json({
-        status: redisOk ? 'healthy' : 'degraded',
+        status: ok ? 'healthy' : 'unhealthy',
         service: 'ECOBE Engine',
         version: '1.0.0',
         timestamp: new Date().toISOString(),

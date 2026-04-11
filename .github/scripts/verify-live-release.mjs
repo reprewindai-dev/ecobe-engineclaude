@@ -96,6 +96,30 @@ async function fetchJson(pathname, headers = {}) {
   }
 }
 
+async function fetchJsonAllowDegraded(pathname, headers = {}) {
+  const response = await fetch(`${baseUrl}${pathname}`, {
+    headers,
+  })
+  const parsed = await parseJsonResponse(response)
+
+  if (!parsed.response.ok) {
+    const statusText = String(parsed.json?.status ?? '').toLowerCase()
+    const isDegradedHealth = pathname === '/health' && parsed.response.status === 503 && statusText === 'degraded'
+    if (!isDegradedHealth) {
+      const error = new Error(
+        `${pathname} returned ${parsed.response.status}: ${
+          typeof parsed.json === 'string' ? parsed.json : JSON.stringify(parsed.json)
+        }`
+      )
+      error.status = parsed.response.status
+      error.payload = parsed.json
+      throw error
+    }
+  }
+
+  return parsed
+}
+
 async function resolveBaseUrl() {
   const candidates = Array.from(
     new Set(
@@ -355,7 +379,7 @@ function writeResult(result) {
 
 async function main() {
   await resolveBaseUrl()
-  const health = await fetchJson('/health')
+  const health = await fetchJsonAllowDegraded('/health')
   assert(['healthy', 'ok', 'degraded'].includes(String(health.json?.status)), '/health missing valid status')
   stage('health', { status: health.json?.status ?? null })
 
