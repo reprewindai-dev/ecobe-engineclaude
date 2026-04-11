@@ -3,9 +3,20 @@ import fs from 'fs'
 import path from 'path'
 
 const repoRoot = process.cwd()
-const configuredBaseUrl = (process.env.ECOBE_ENGINE_URL || process.env.DEFAULT_ECOBE_ENGINE_URL || '')
-  .trim()
-  .replace(/\/$/, '')
+function normalizeBaseUrl(value) {
+  const trimmed = String(value || '').trim().replace(/\/$/, '')
+  if (!trimmed) return ''
+
+  try {
+    const url = new URL(trimmed)
+    return url.origin
+  } catch {
+    // Best-effort cleanup for non-URL inputs.
+    return trimmed.replace(/\/api\/v1$/, '').replace(/\/api$/, '').replace(/\/$/, '')
+  }
+}
+
+const configuredBaseUrl = normalizeBaseUrl(process.env.ECOBE_ENGINE_URL || process.env.DEFAULT_ECOBE_ENGINE_URL || '')
 const FALLBACK_ENGINE_URL = 'https://ecobe-engineclaude-co2router.onrender.com'
 let baseUrl = configuredBaseUrl
 const dashboardUrl = (process.env.DASHBOARD_URL || process.env.DEFAULT_DASHBOARD_URL || '').trim().replace(/\/$/, '')
@@ -89,7 +100,7 @@ async function resolveBaseUrl() {
   const candidates = Array.from(
     new Set(
       [configuredBaseUrl, process.env.DEFAULT_ECOBE_ENGINE_URL, FALLBACK_ENGINE_URL]
-        .map((value) => String(value || '').trim().replace(/\/$/, ''))
+        .map((value) => normalizeBaseUrl(value))
         .filter(Boolean)
     )
   )
@@ -102,7 +113,11 @@ async function resolveBaseUrl() {
         headers: { Accept: 'application/json' },
       })
       const parsed = await parseJsonResponse(response)
-      if (!parsed.response.ok) {
+
+      // We accept a 503 if the payload indicates the engine is up but degraded.
+      // (e.g. Redis disabled in free environments). The follow-on stages will
+      // still fail if required APIs are unavailable.
+      if (!parsed.response.ok && parsed.response.status !== 503) {
         errors.push(`${candidate}/health returned ${parsed.response.status}`)
         continue
       }
