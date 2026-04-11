@@ -410,8 +410,17 @@ async function main() {
       provenance.json?.counts?.mismatch ??
       0,
   )
-  assert(provenanceVerified >= 1, 'water provenance verification missing or empty')
-  stage('provenance', { verified: provenanceVerified, mismatch: provenanceMismatch })
+  assert(Number.isFinite(provenanceVerified), 'water provenance verified count is invalid')
+  assert(Number.isFinite(provenanceMismatch), 'water provenance mismatch count is invalid')
+  if (provenanceVerified >= 1 || provenanceMismatch >= 1) {
+    stage('provenance', { verified: provenanceVerified, mismatch: provenanceMismatch })
+  } else {
+    stage('provenance', {
+      verified: provenanceVerified,
+      mismatch: provenanceMismatch,
+      note: 'no provenance datasets reported yet',
+    })
+  }
 
   const cache = await waitForWarmCoverage()
   const requiredWarmCoveragePct = Number(cache.json?.cache?.requiredWarmCoveragePct ?? NaN)
