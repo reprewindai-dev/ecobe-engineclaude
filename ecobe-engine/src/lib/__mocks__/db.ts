@@ -29,9 +29,29 @@ export const prisma = {
     findMany: jest.fn().mockResolvedValue([]),
   },
   cIDecision: {
-    create: jest.fn().mockResolvedValue({}),
+    create: jest.fn().mockResolvedValue({ id: 'mock-ci-decision' }),
     findMany: jest.fn().mockResolvedValue([]),
     findFirst: jest.fn().mockResolvedValue(null),
+  },
+  decisionTraceEnvelope: {
+    create: jest.fn().mockResolvedValue({}),
+    findUnique: jest.fn().mockResolvedValue(null),
+    findMany: jest.fn().mockResolvedValue([]),
+    findFirst: jest.fn().mockResolvedValue(null),
+    upsert: jest.fn().mockResolvedValue({ traceHash: 'mock-trace-hash' }),
+  },
+  waterPolicyEvidence: {
+    create: jest.fn().mockResolvedValue({}),
+  },
+  waterProviderSnapshot: {
+    create: jest.fn().mockResolvedValue({}),
+    createMany: jest.fn().mockResolvedValue({ count: 0 }),
+  },
+  waterScenarioRun: {
+    create: jest.fn().mockResolvedValue({}),
+  },
+  facilityWaterTelemetry: {
+    create: jest.fn().mockResolvedValue({}),
   },
   integrationMetric: {
     findUnique: jest.fn().mockResolvedValue(null),
@@ -58,6 +78,7 @@ export const prisma = {
   $connect: jest.fn().mockResolvedValue(undefined),
   $disconnect: jest.fn().mockResolvedValue(undefined),
   $queryRaw: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
+  $queryRawUnsafe: jest.fn().mockResolvedValue([{ value: 1 }]),
   $transaction: jest.fn().mockImplementation(async (input: any) => {
     if (typeof input === 'function') return input(prisma)
     if (Array.isArray(input)) return Promise.all(input)

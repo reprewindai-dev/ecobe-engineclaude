@@ -92,6 +92,114 @@ import { internalServiceGuard } from '../middleware/internal-auth'
 
 const router = Router()
 
+const CI_ANCILLARY_PERSISTENCE_CONCURRENCY = 4
+const CI_PERSISTENCE_RETRY_ATTEMPTS = 3
+const CI_PERSISTENCE_RETRY_BASE_MS = 25
+
+const ciAncillaryPersistenceQueue: Array<{
+  label: string
+  run: () => Promise<void>
+}> = []
+const ciAncillaryDrainWaiters: Array<() => void> = []
+let ciAncillaryPersistenceActiveCount = 0
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+export function isTransientDecisionPersistenceError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  return [
+    'Unable to start a transaction in the given time',
+    'Timed out fetching a new connection from the connection pool',
+    'Transaction API error',
+    'P2024',
+    'Connection closed',
+  ].some((fragment) => message.includes(fragment))
+}
+
+async function withDecisionPersistenceRetry<T>(
+  label: string,
+  task: () => Promise<T>,
+  options?: {
+    attempts?: number
+    baseDelayMs?: number
+  }
+) {
+  const attempts = Math.max(1, options?.attempts ?? CI_PERSISTENCE_RETRY_ATTEMPTS)
+  const baseDelayMs = Math.max(1, options?.baseDelayMs ?? CI_PERSISTENCE_RETRY_BASE_MS)
+
+  let attempt = 0
+  while (attempt < attempts) {
+    attempt += 1
+    try {
+      return await task()
+    } catch (error) {
+      if (attempt >= attempts || !isTransientDecisionPersistenceError(error)) {
+        throw error
+      }
+      console.warn(`Retrying ${label} after transient persistence error (attempt ${attempt}/${attempts})`, error)
+      await wait(baseDelayMs * Math.pow(2, attempt - 1))
+    }
+  }
+
+  throw new Error(`Persistence retry loop exhausted for ${label}`)
+}
+
+function maybeResolveCiAncillaryDrainWaiters() {
+  if (ciAncillaryPersistenceActiveCount !== 0 || ciAncillaryPersistenceQueue.length !== 0) {
+    return
+  }
+
+  while (ciAncillaryDrainWaiters.length > 0) {
+    ciAncillaryDrainWaiters.shift()?.()
+  }
+}
+
+function pumpCiAncillaryPersistenceQueue() {
+  while (
+    ciAncillaryPersistenceActiveCount < CI_ANCILLARY_PERSISTENCE_CONCURRENCY &&
+    ciAncillaryPersistenceQueue.length > 0
+  ) {
+    const task = ciAncillaryPersistenceQueue.shift()
+    if (!task) break
+
+    ciAncillaryPersistenceActiveCount += 1
+    void (async () => {
+      try {
+        await task.run()
+      } catch (error) {
+        console.warn(`Failed CI ancillary persistence task (${task.label}):`, error)
+      } finally {
+        ciAncillaryPersistenceActiveCount = Math.max(0, ciAncillaryPersistenceActiveCount - 1)
+        if (ciAncillaryPersistenceQueue.length > 0) {
+          setImmediate(pumpCiAncillaryPersistenceQueue)
+        } else {
+          maybeResolveCiAncillaryDrainWaiters()
+        }
+      }
+    })()
+  }
+
+  maybeResolveCiAncillaryDrainWaiters()
+}
+
+function scheduleCiAncillaryPersistence(label: string, run: () => Promise<void>) {
+  ciAncillaryPersistenceQueue.push({ label, run })
+  setImmediate(pumpCiAncillaryPersistenceQueue)
+}
+
+export async function flushCiAncillaryPersistenceForTests() {
+  if (ciAncillaryPersistenceActiveCount === 0 && ciAncillaryPersistenceQueue.length === 0) {
+    return
+  }
+
+  await new Promise<void>((resolve) => {
+    ciAncillaryDrainWaiters.push(resolve)
+    setImmediate(pumpCiAncillaryPersistenceQueue)
+  })
+}
+
 const RUNNER_REGIONS: Record<string, string[]> = {
   'us-east-1': ['ubuntu-latest', 'windows-latest', 'macos-latest'],
   'us-west-2': ['ubuntu-latest', 'windows-latest'],
@@ -1821,121 +1929,117 @@ export async function finalizeCiDecisionResponse(
   return CiResponseV2Schema.parse(responsePayload)
 }
 
-export async function persistCiDecisionResult(
-  result: Awaited<ReturnType<typeof createDecision>>,
-  latencyMs?: { total: number; compute: number },
-  options?: {
-    idempotencyReplayed?: boolean
+async function persistCIDecisionRow(
+  decisionFrameId: string,
+  data: any
+): Promise<{ id: string }> {
+  return withDecisionPersistenceRetry(`persist core CI decision ${decisionFrameId}`, async () => {
+    const existing = await prisma.cIDecision.findFirst({
+      where: { decisionFrameId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    })
+
+    if (existing) {
+      return existing
+    }
+
+    return prisma.cIDecision.create({
+      data,
+      select: { id: true },
+    })
+  })
+}
+
+async function persistDecisionTraceEnvelope(
+  decisionFrameId: string,
+  data: {
+    sequenceNumber: number
+    traceHash: string
+    previousTraceHash: string | null
+    inputSignalHash: string
+    payload: TraceEnvelope
   }
-): Promise<{ response: CiResponseV2; traceHash: string }> {
-  const validatedResponse = await finalizeCiDecisionResponse(result, latencyMs, options)
-  const manifestDatasets = result.persistable.manifestDatasets
-  const waterArtifacts = result.persistable.waterArtifactMetadata
-  let persistedTraceHash = ''
-  await prisma.$transaction(async (tx: any) => {
-    const previousTrace = await tx.decisionTraceEnvelope.findFirst({
-      orderBy: { sequenceNumber: 'desc' },
+) {
+  return withDecisionPersistenceRetry(`persist decision trace ${decisionFrameId}`, async () =>
+    prisma.decisionTraceEnvelope.upsert({
+      where: { decisionFrameId },
+      update: {},
+      create: {
+        sequenceNumber: data.sequenceNumber,
+        decisionFrameId,
+        traceHash: data.traceHash,
+        previousTraceHash: data.previousTraceHash,
+        inputSignalHash: data.inputSignalHash,
+        payload: data.payload,
+      },
       select: { traceHash: true },
     })
-    const traceSequenceNumber = await reserveNextTraceSequence(tx)
-    const traceEnvelope = finalizeTraceEnvelope(result.persistable.traceSeed, {
-      sequenceNumber: traceSequenceNumber,
-      totalMs: latencyMs?.total ?? null,
-      computeMs: latencyMs?.compute ?? null,
-      stageTimings: result.persistable.stageTimings,
-      providerTimings: buildTraceProviderTimings(result.persistable.candidateEvaluations),
-      cacheHit: result.persistable.candidateEvaluations.some((candidate) =>
-        ['warm', 'redis', 'lkg', 'degraded-safe'].includes(candidate.cacheStatus)
-      ),
-    })
-    const traceHashes = buildTraceHashes(traceEnvelope, previousTrace?.traceHash ?? null)
+  )
+}
 
-    const persisted = await tx.cIDecision.create({
-      data: {
-        decisionFrameId: result.persistable.decisionFrameId,
-        selectedRunner: result.persistable.selected.runner,
-        selectedRegion: result.persistable.selected.region,
-        carbonIntensity: result.persistable.selected.carbonIntensity,
-        baseline: result.persistable.baseline.carbonIntensity,
-        savings: validatedResponse.savings.carbonReductionPct,
-        jobType: result.persistable.request.jobType,
-        preferredRegions: result.persistable.request.preferredRegions,
-        carbonWeight: result.persistable.request.carbonWeight,
-        recommendation: validatedResponse.recommendation,
-        decisionAction: validatedResponse.decision,
-        decisionMode: validatedResponse.decisionMode,
-        reasonCode: validatedResponse.reasonCode,
-        signalConfidence: result.persistable.signalConfidence,
-        fallbackUsed: validatedResponse.fallbackUsed,
-        waterImpactLiters: validatedResponse.water.selectedLiters,
-        waterBaselineLiters: validatedResponse.water.baselineLiters,
-        waterScarcityImpact: validatedResponse.water.selectedScarcityImpact,
-        waterStressIndex: validatedResponse.water.stressIndex,
-        waterConfidence: validatedResponse.water.confidence,
-        waterAuthorityMode: validatedResponse.waterAuthority.authorityMode,
-        waterScenario: validatedResponse.waterAuthority.scenario,
-        facilityId: validatedResponse.waterAuthority.facilityId,
-        proofHash: validatedResponse.proofHash,
-        waterEvidenceRefs: validatedResponse.waterAuthority.evidenceRefs,
-        policyTrace: validatedResponse.policyTrace,
-        datasetVersions: validatedResponse.water.datasetVersion,
-        metadata: {
-          request: result.persistable.request,
-          response: validatedResponse,
-          policyTrace: validatedResponse.policyTrace,
-          signalConfidence: result.persistable.signalConfidence,
-          datasetProvenance: manifestDatasets,
-          waterArtifacts,
-          decisionAction: validatedResponse.decision,
-          selectedReliabilityMultiplier: result.persistable.selected.reliabilityMultiplier,
-          decisionEnvelope: validatedResponse.decisionEnvelope,
-          proofEnvelope: validatedResponse.proofEnvelope,
-          telemetryBridge: validatedResponse.telemetryBridge,
-          adapterContext: validatedResponse.adapterContext,
-          trace: {
-            available: true,
-            sequenceNumber: traceSequenceNumber,
-            traceHash: traceHashes.traceHash,
-            governanceSource: traceEnvelope.governance.source,
-          },
-        },
-        createdAt: new Date(),
-      },
-    })
+async function persistCiAncillaryDecisionArtifacts(input: {
+  persistedDecisionId: string
+  validatedResponse: CiResponseV2
+  result: Awaited<ReturnType<typeof createDecision>>
+  manifestDatasets: WaterManifestDataset[]
+  waterArtifacts: WaterArtifactMetadata
+}) {
+  const { persistedDecisionId, validatedResponse, result, manifestDatasets, waterArtifacts } = input
 
-    await tx.decisionTraceEnvelope.create({
-      data: {
-        sequenceNumber: traceSequenceNumber,
-        decisionFrameId: validatedResponse.decisionFrameId,
-        traceHash: traceHashes.traceHash,
-        previousTraceHash: previousTrace?.traceHash ?? null,
-        inputSignalHash: traceHashes.inputSignalHash,
-        payload: traceEnvelope,
-      },
-    })
-    persistedTraceHash = traceHashes.traceHash
+  const eventPayload = buildDecisionEvaluatedEvent({
+    decisionId: persistedDecisionId,
+    decisionFrameId: validatedResponse.decisionFrameId,
+    action: validatedResponse.decision,
+    reasonCode: validatedResponse.reasonCode,
+    baseline: validatedResponse.baseline,
+    selected: validatedResponse.selected,
+    policyTrace: validatedResponse.policyTrace,
+    confidence: validatedResponse.signalConfidence,
+    signalsUsed: validatedResponse.proofRecord.signals_used,
+    datasetVersions: validatedResponse.proofRecord.dataset_versions,
+    sourceProvenance: manifestDatasets as unknown as Record<string, unknown>[],
+    canonicalDecision: validatedResponse.decisionEnvelope,
+    proof: validatedResponse.proofEnvelope,
+    adapter: validatedResponse.adapterContext ?? validatedResponse.decisionEnvelope.transport,
+    timestamp: validatedResponse.proofRecord.timestamp,
+  })
 
-    const eventPayload = buildDecisionEvaluatedEvent({
-      decisionId: persisted.id,
-      decisionFrameId: validatedResponse.decisionFrameId,
-      action: validatedResponse.decision,
-      reasonCode: validatedResponse.reasonCode,
-      baseline: validatedResponse.baseline,
-      selected: validatedResponse.selected,
-      policyTrace: validatedResponse.policyTrace,
-      confidence: validatedResponse.signalConfidence,
-      signalsUsed: validatedResponse.proofRecord.signals_used,
-      datasetVersions: validatedResponse.proofRecord.dataset_versions,
-      sourceProvenance: manifestDatasets as unknown as Record<string, unknown>[],
-      canonicalDecision: validatedResponse.decisionEnvelope,
-      proof: validatedResponse.proofEnvelope,
-      adapter: validatedResponse.adapterContext ?? validatedResponse.decisionEnvelope.transport,
-      timestamp: validatedResponse.proofRecord.timestamp,
-    })
+  const providerSnapshots = validatedResponse.waterAuthority.supplierSet.map((supplier) => ({
+    provider: supplier,
+    authorityRole:
+      supplier === 'aqueduct'
+        ? 'baseline'
+        : supplier.startsWith('facility:')
+          ? 'facility'
+          : 'overlay',
+    region: validatedResponse.selectedRegion,
+    scenario: validatedResponse.waterAuthority.scenario,
+    authorityMode: validatedResponse.waterAuthority.authorityMode,
+    confidence: validatedResponse.waterAuthority.confidence,
+    evidenceRefs: validatedResponse.waterAuthority.evidenceRefs,
+    observedAt: new Date(
+      validatedResponse.waterAuthority.telemetryRef
+        ? new Date().toISOString()
+        : waterArtifacts.bundleGeneratedAt ?? new Date().toISOString()
+    ),
+    metadata: {
+      facilityId: validatedResponse.waterAuthority.facilityId,
+      bundleHash: waterArtifacts.bundleHash,
+      manifestHash: waterArtifacts.manifestHash,
+    },
+  }))
 
-    await enqueueDecisionEvaluatedEvents(tx, eventPayload)
-
-    await tx.waterPolicyEvidence.create({
+  const ancillaryWrites = await Promise.allSettled([
+    withDecisionPersistenceRetry(
+      `enqueue decision evaluated event ${validatedResponse.decisionFrameId}`,
+      () => enqueueDecisionEvaluatedEvents(prisma, eventPayload),
+      {
+        attempts: 4,
+        baseDelayMs: 50,
+      }
+    ),
+    prisma.waterPolicyEvidence.create({
       data: {
         decisionFrameId: validatedResponse.decisionFrameId,
         proofHash: validatedResponse.proofHash,
@@ -1955,75 +2059,173 @@ export async function persistCiDecisionResult(
           adapterContext: validatedResponse.adapterContext,
         },
       },
-    })
-
-    await Promise.all(
-      validatedResponse.waterAuthority.supplierSet.map((supplier) =>
-        tx.waterProviderSnapshot.create({
+    }),
+    providerSnapshots.length > 0
+      ? prisma.waterProviderSnapshot.createMany({
+          data: providerSnapshots,
+        })
+      : Promise.resolve({ count: 0 }),
+    validatedResponse.decisionMode === 'scenario_planning'
+      ? prisma.waterScenarioRun.create({
           data: {
-            provider: supplier,
-            authorityRole:
-              supplier === 'aqueduct'
-                ? 'baseline'
-                : supplier.startsWith('facility:')
-                  ? 'facility'
-                  : 'overlay',
-            region: validatedResponse.selectedRegion,
+            decisionFrameId: validatedResponse.decisionFrameId,
             scenario: validatedResponse.waterAuthority.scenario,
-            authorityMode: validatedResponse.waterAuthority.authorityMode,
-            confidence: validatedResponse.waterAuthority.confidence,
-            evidenceRefs: validatedResponse.waterAuthority.evidenceRefs,
-            observedAt: new Date(
-              validatedResponse.waterAuthority.telemetryRef
-                ? new Date().toISOString()
-                : waterArtifacts.bundleGeneratedAt ?? new Date().toISOString()
-            ),
-            metadata: {
-              facilityId: validatedResponse.waterAuthority.facilityId,
-              bundleHash: waterArtifacts.bundleHash,
-              manifestHash: waterArtifacts.manifestHash,
-            },
+            requestPayload: result.persistable.request,
+            resultPayload: validatedResponse,
           },
         })
-      )
+      : Promise.resolve(null),
+    validatedResponse.waterAuthority.authorityMode === 'facility_overlay' &&
+    validatedResponse.waterAuthority.facilityId
+      ? prisma.facilityWaterTelemetry.create({
+          data: {
+            facilityId: validatedResponse.waterAuthority.facilityId,
+            region: validatedResponse.selectedRegion,
+            scenario: validatedResponse.waterAuthority.scenario,
+            waterIntensityLPerKwh: validatedResponse.water.intensityLPerKwh,
+            waterStressIndex: validatedResponse.water.stressIndex,
+            scarcityImpact: validatedResponse.water.selectedScarcityImpact,
+            confidence: validatedResponse.water.confidence,
+            telemetryRef:
+              validatedResponse.waterAuthority.telemetryRef ??
+              `water-bundle:${validatedResponse.selectedRegion}:${validatedResponse.decisionFrameId}`,
+            evidenceRefs: validatedResponse.waterAuthority.evidenceRefs,
+          },
+        })
+      : Promise.resolve(null),
+  ])
+
+  ancillaryWrites.forEach((result, index) => {
+    if (result.status !== 'rejected') {
+      return
+    }
+
+    const labels = [
+      'decision event outbox',
+      'water policy evidence',
+      'water provider snapshots',
+      'water scenario run',
+      'facility telemetry',
+    ] as const
+    console.warn(
+      `Failed ancillary CI persistence (${labels[index] ?? 'unknown'}) for ${validatedResponse.decisionFrameId}:`,
+      result.reason
     )
-
-    if (validatedResponse.decisionMode === 'scenario_planning') {
-      await tx.waterScenarioRun.create({
-        data: {
-          decisionFrameId: validatedResponse.decisionFrameId,
-          scenario: validatedResponse.waterAuthority.scenario,
-          requestPayload: result.persistable.request,
-          resultPayload: validatedResponse,
-        },
-      })
-    }
-
-    if (
-      validatedResponse.waterAuthority.authorityMode === 'facility_overlay' &&
-      validatedResponse.waterAuthority.facilityId
-    ) {
-      await tx.facilityWaterTelemetry.create({
-        data: {
-          facilityId: validatedResponse.waterAuthority.facilityId,
-          region: validatedResponse.selectedRegion,
-          scenario: validatedResponse.waterAuthority.scenario,
-          waterIntensityLPerKwh: validatedResponse.water.intensityLPerKwh,
-          waterStressIndex: validatedResponse.water.stressIndex,
-          scarcityImpact: validatedResponse.water.selectedScarcityImpact,
-          confidence: validatedResponse.water.confidence,
-          telemetryRef:
-            validatedResponse.waterAuthority.telemetryRef ??
-            `water-bundle:${validatedResponse.selectedRegion}:${validatedResponse.decisionFrameId}`,
-          evidenceRefs: validatedResponse.waterAuthority.evidenceRefs,
-        },
-      })
-    }
   })
+}
+
+export async function persistCiDecisionResult(
+  result: Awaited<ReturnType<typeof createDecision>>,
+  latencyMs?: { total: number; compute: number },
+  options?: {
+    idempotencyReplayed?: boolean
+  }
+): Promise<{ response: CiResponseV2; traceHash: string }> {
+  const validatedResponse = await finalizeCiDecisionResponse(result, latencyMs, options)
+  const manifestDatasets = result.persistable.manifestDatasets
+  const waterArtifacts = result.persistable.waterArtifactMetadata
+  const traceSequenceNumber = await withDecisionPersistenceRetry(
+    `reserve trace sequence ${validatedResponse.decisionFrameId}`,
+    () => reserveNextTraceSequence(prisma)
+  )
+  const previousTrace = await withDecisionPersistenceRetry<{ traceHash: string } | null>(
+    `read previous trace ${validatedResponse.decisionFrameId}`,
+    () =>
+      prisma.decisionTraceEnvelope.findFirst({
+        where: {
+          sequenceNumber: {
+            lt: traceSequenceNumber,
+          },
+        },
+        orderBy: { sequenceNumber: 'desc' },
+        select: { traceHash: true },
+      })
+  )
+  const traceEnvelope = finalizeTraceEnvelope(result.persistable.traceSeed, {
+    sequenceNumber: traceSequenceNumber,
+    totalMs: latencyMs?.total ?? null,
+    computeMs: latencyMs?.compute ?? null,
+    stageTimings: result.persistable.stageTimings,
+    providerTimings: buildTraceProviderTimings(result.persistable.candidateEvaluations),
+    cacheHit: result.persistable.candidateEvaluations.some((candidate) =>
+      ['warm', 'redis', 'lkg', 'degraded-safe'].includes(candidate.cacheStatus)
+    ),
+  })
+  const traceHashes = buildTraceHashes(traceEnvelope, previousTrace?.traceHash ?? null)
+
+  const [persistedDecision, persistedTrace] = await Promise.all([
+    persistCIDecisionRow(validatedResponse.decisionFrameId, {
+      decisionFrameId: result.persistable.decisionFrameId,
+      selectedRunner: result.persistable.selected.runner,
+      selectedRegion: result.persistable.selected.region,
+      carbonIntensity: result.persistable.selected.carbonIntensity,
+      baseline: result.persistable.baseline.carbonIntensity,
+      savings: validatedResponse.savings.carbonReductionPct,
+      jobType: result.persistable.request.jobType,
+      preferredRegions: result.persistable.request.preferredRegions,
+      carbonWeight: result.persistable.request.carbonWeight,
+      recommendation: validatedResponse.recommendation,
+      decisionAction: validatedResponse.decision,
+      decisionMode: validatedResponse.decisionMode,
+      reasonCode: validatedResponse.reasonCode,
+      signalConfidence: result.persistable.signalConfidence,
+      fallbackUsed: validatedResponse.fallbackUsed,
+      waterImpactLiters: validatedResponse.water.selectedLiters,
+      waterBaselineLiters: validatedResponse.water.baselineLiters,
+      waterScarcityImpact: validatedResponse.water.selectedScarcityImpact,
+      waterStressIndex: validatedResponse.water.stressIndex,
+      waterConfidence: validatedResponse.water.confidence,
+      waterAuthorityMode: validatedResponse.waterAuthority.authorityMode,
+      waterScenario: validatedResponse.waterAuthority.scenario,
+      facilityId: validatedResponse.waterAuthority.facilityId,
+      proofHash: validatedResponse.proofHash,
+      waterEvidenceRefs: validatedResponse.waterAuthority.evidenceRefs,
+      policyTrace: validatedResponse.policyTrace,
+      datasetVersions: validatedResponse.water.datasetVersion,
+      metadata: {
+        request: result.persistable.request,
+        response: validatedResponse,
+        policyTrace: validatedResponse.policyTrace,
+        signalConfidence: result.persistable.signalConfidence,
+        datasetProvenance: manifestDatasets,
+        waterArtifacts,
+        decisionAction: validatedResponse.decision,
+        selectedReliabilityMultiplier: result.persistable.selected.reliabilityMultiplier,
+        decisionEnvelope: validatedResponse.decisionEnvelope,
+        proofEnvelope: validatedResponse.proofEnvelope,
+        telemetryBridge: validatedResponse.telemetryBridge,
+        adapterContext: validatedResponse.adapterContext,
+        trace: {
+          available: true,
+          sequenceNumber: traceSequenceNumber,
+          traceHash: traceHashes.traceHash,
+          governanceSource: traceEnvelope.governance.source,
+        },
+      },
+      createdAt: new Date(),
+    }),
+    persistDecisionTraceEnvelope(validatedResponse.decisionFrameId, {
+      sequenceNumber: traceSequenceNumber,
+      traceHash: traceHashes.traceHash,
+      previousTraceHash: previousTrace?.traceHash ?? null,
+      inputSignalHash: traceHashes.inputSignalHash,
+      payload: traceEnvelope,
+    }),
+  ])
+
+  scheduleCiAncillaryPersistence(`decision ${validatedResponse.decisionFrameId}`, async () =>
+    persistCiAncillaryDecisionArtifacts({
+      persistedDecisionId: persistedDecision.id,
+      validatedResponse,
+      result,
+      manifestDatasets,
+      waterArtifacts,
+    })
+  )
 
   return {
     response: validatedResponse,
-    traceHash: persistedTraceHash,
+    traceHash: persistedTrace.traceHash ?? traceHashes.traceHash,
   }
 }
 

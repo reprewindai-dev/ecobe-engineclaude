@@ -47,6 +47,16 @@ export const DecisionEvaluatedV1Schema = z.object({
 
 export type DecisionEvaluatedV1 = z.infer<typeof DecisionEvaluatedV1Schema>
 
+const ACTIVE_SINK_CACHE_TTL_MS = 30_000
+
+let activeSinkIdsCache:
+  | {
+      expiresAt: number
+      sinkIds: string[]
+    }
+  | null = null
+let activeSinkIdsPromise: Promise<string[]> | null = null
+
 function signingKey() {
   return resolveDecisionEventSigningSecret() || 'ecobe-dev-signing-key'
 }
@@ -67,6 +77,39 @@ function computeNextAttempt(attemptCount: number) {
   const base = Math.max(250, env.DECISION_EVENT_RETRY_BASE_MS)
   const delayMs = Math.min(15 * 60 * 1000, base * Math.pow(2, Math.max(0, attemptCount)))
   return new Date(Date.now() + delayMs)
+}
+
+async function getActiveDecisionEventSinkIds(db: any) {
+  const now = Date.now()
+  if (activeSinkIdsCache && activeSinkIdsCache.expiresAt > now) {
+    return activeSinkIdsCache.sinkIds
+  }
+
+  if (!activeSinkIdsPromise) {
+    activeSinkIdsPromise = db.integrationWebhookSink
+      .findMany({
+        where: { status: 'ACTIVE' },
+        select: { id: true },
+      })
+      .then((rows: Array<{ id: string }>) => {
+        const sinkIds = rows.map((row) => row.id)
+        activeSinkIdsCache = {
+          expiresAt: Date.now() + ACTIVE_SINK_CACHE_TTL_MS,
+          sinkIds,
+        }
+        return sinkIds
+      })
+      .finally(() => {
+        activeSinkIdsPromise = null
+      })
+  }
+
+  return activeSinkIdsPromise ?? Promise.resolve(activeSinkIdsCache?.sinkIds ?? [])
+}
+
+export function resetDecisionEventSinkCache() {
+  activeSinkIdsCache = null
+  activeSinkIdsPromise = null
 }
 
 export function buildDecisionEvaluatedEvent(input: {
@@ -124,29 +167,25 @@ export function buildDecisionEvaluatedEvent(input: {
 }
 
 export async function enqueueDecisionEvaluatedEvents(
-  tx: any,
+  db: any,
   eventPayload: DecisionEvaluatedV1
 ) {
-  const sinks = await tx.integrationWebhookSink.findMany({
-    where: { status: 'ACTIVE' },
-    select: { id: true },
-  })
-
-  if (sinks.length === 0) {
+  const sinkIds = await getActiveDecisionEventSinkIds(db)
+  if (sinkIds.length === 0) {
     return { enqueued: 0 }
   }
 
-  const records = sinks.map((sink: { id: string }) => ({
+  const records = sinkIds.map((sinkId: string) => ({
     eventType: 'DecisionEvaluatedV1',
-    eventKey: `decision-evaluated:${eventPayload.decisionFrameId}:${sink.id}`,
-    sinkId: sink.id,
+    eventKey: `decision-evaluated:${eventPayload.decisionFrameId}:${sinkId}`,
+    sinkId,
     payload: eventPayload as unknown as Prisma.InputJsonValue,
     status: 'PENDING' as const,
     attemptCount: 0,
     nextAttemptAt: new Date(),
   }))
 
-  const result = await tx.decisionEventOutbox.createMany({
+  const result = await db.decisionEventOutbox.createMany({
     data: records,
     skipDuplicates: true,
   })
