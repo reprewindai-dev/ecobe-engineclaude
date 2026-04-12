@@ -1253,6 +1253,9 @@ export async function createDecision(
     waterFreshnessSec: selected.waterFreshnessSec,
     cacheStatus: selected.cacheStatus,
   })
+  const sekedGovernance = (sekedPolicy.response as PolicyDirectiveResponse | null)?.governance ?? null
+  const externalGovernance = (externalPolicy.response as PolicyDirectiveResponse | null)?.governance ?? null
+  const policyGovernance = sekedGovernance ?? externalGovernance
   const policyTrace = {
     ...bestGuardrail.trace,
     delayWindow,
@@ -1271,6 +1274,22 @@ export async function createDecision(
       applied: sekedPolicy.applied,
       hookStatus: sekedPolicy.hookStatus,
       reasonCodes: sekedApplied.reasonCodes,
+      source: sekedGovernance?.source ?? null,
+      score: sekedGovernance?.score ?? null,
+      zone: sekedGovernance?.zone ?? null,
+      weights: sekedGovernance?.weights
+        ? {
+            carbon: sekedGovernance.weights.carbon ?? null,
+            water: sekedGovernance.weights.water ?? null,
+            latency: sekedGovernance.weights.latency ?? null,
+            cost: sekedGovernance.weights.cost ?? null,
+          }
+        : null,
+      thresholds: sekedGovernance?.thresholds
+        ? Object.fromEntries(
+            Object.entries(sekedGovernance.thresholds).map(([key, value]) => [key, value ?? null])
+          )
+        : null,
       policyReference: sekedPolicy.policyReference,
     },
     externalPolicy: {
@@ -1280,8 +1299,45 @@ export async function createDecision(
       applied: externalPolicy.applied,
       hookStatus: externalPolicy.hookStatus,
       reasonCodes: externalApplied.reasonCodes,
+      source: externalGovernance?.source ?? null,
+      score: externalGovernance?.score ?? null,
+      zone: externalGovernance?.zone ?? null,
+      weights: externalGovernance?.weights
+        ? {
+            carbon: externalGovernance.weights.carbon ?? null,
+            water: externalGovernance.weights.water ?? null,
+            latency: externalGovernance.weights.latency ?? null,
+            cost: externalGovernance.weights.cost ?? null,
+          }
+        : null,
+      thresholds: externalGovernance?.thresholds
+        ? Object.fromEntries(
+            Object.entries(externalGovernance.thresholds).map(([key, value]) => [key, value ?? null])
+          )
+        : null,
       policyReference: externalPolicy.policyReference,
     },
+    governance: policyGovernance
+      ? {
+          source: policyGovernance.source ?? null,
+          score: policyGovernance.score ?? null,
+          zone: policyGovernance.zone ?? null,
+          weights: policyGovernance.weights
+            ? {
+                carbon: policyGovernance.weights.carbon ?? null,
+                water: policyGovernance.weights.water ?? null,
+                latency: policyGovernance.weights.latency ?? null,
+                cost: policyGovernance.weights.cost ?? null,
+              }
+            : null,
+          thresholds: policyGovernance.thresholds
+            ? Object.fromEntries(
+                Object.entries(policyGovernance.thresholds).map(([key, value]) => [key, value ?? null])
+              )
+            : null,
+          policyReference: sekedPolicy.policyReference ?? externalPolicy.policyReference ?? null,
+        }
+      : null,
   }
   const decisionExplanation = buildDecisionExplanation({
     decision,

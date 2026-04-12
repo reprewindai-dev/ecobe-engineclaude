@@ -7,6 +7,27 @@ import {
 } from './canonical'
 
 const DecisionAction = z.enum(['run_now', 'reroute', 'delay', 'throttle', 'deny'])
+const PolicyGovernanceWeightsSchema = z
+  .object({
+    carbon: z.number().nullable().optional(),
+    water: z.number().nullable().optional(),
+    latency: z.number().nullable().optional(),
+    cost: z.number().nullable().optional(),
+  })
+  .nullable()
+  .optional()
+const PolicyGovernanceThresholdsSchema = z.record(z.number().nullable()).nullable().optional()
+const PolicyGovernanceSummarySchema = z
+  .object({
+    source: z.string().nullable().optional(),
+    score: z.number().nullable().optional(),
+    zone: z.enum(['green', 'amber', 'red']).nullable().optional(),
+    weights: PolicyGovernanceWeightsSchema,
+    thresholds: PolicyGovernanceThresholdsSchema,
+    policyReference: z.string().nullable().optional(),
+  })
+  .nullable()
+  .optional()
 
 export const CiResponseV2Schema = z.object({
   decision: DecisionAction,
@@ -96,6 +117,7 @@ export const CiResponseV2Schema = z.object({
     facilityId: z.string().nullable().optional(),
     conflictHierarchy: z.array(z.string()).optional(),
     operatingMode: z.enum(['NORMAL', 'STRESS', 'CRISIS']).optional(),
+    governance: PolicyGovernanceSummarySchema,
     externalPolicy: z
       .object({
         enabled: z.boolean(),
@@ -104,6 +126,11 @@ export const CiResponseV2Schema = z.object({
         applied: z.boolean(),
         hookStatus: z.enum(['not_configured', 'skipped', 'success', 'error']),
         reasonCodes: z.array(z.string()),
+        source: z.string().nullable().optional(),
+        score: z.number().nullable().optional(),
+        zone: z.enum(['green', 'amber', 'red']).nullable().optional(),
+        weights: PolicyGovernanceWeightsSchema,
+        thresholds: PolicyGovernanceThresholdsSchema,
         policyReference: z.string().nullable().optional(),
       })
       .optional(),
@@ -115,6 +142,11 @@ export const CiResponseV2Schema = z.object({
         applied: z.boolean(),
         hookStatus: z.enum(['not_configured', 'skipped', 'success', 'error']),
         reasonCodes: z.array(z.string()),
+        source: z.string().nullable().optional(),
+        score: z.number().nullable().optional(),
+        zone: z.enum(['green', 'amber', 'red']).nullable().optional(),
+        weights: PolicyGovernanceWeightsSchema,
+        thresholds: PolicyGovernanceThresholdsSchema,
         policyReference: z.string().nullable().optional(),
       })
       .optional(),

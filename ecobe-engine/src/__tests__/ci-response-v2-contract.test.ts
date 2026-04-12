@@ -46,9 +46,13 @@ describe('CiResponseV2 contract freeze', () => {
   it('keeps policy trace sub-contracts for external and SEKED adapters', () => {
     const policyTraceShape = CiResponseV2Schema.shape.policyTrace.shape
     expect(policyTraceShape).toHaveProperty('externalPolicy')
+    expect(policyTraceShape).toHaveProperty('governance')
     expect(policyTraceShape).toHaveProperty('sekedPolicy')
     expect(policyTraceShape).toHaveProperty('conflictHierarchy')
     expect(policyTraceShape).toHaveProperty('operatingMode')
+    expect(policyTraceShape.sekedPolicy.unwrap().shape).toHaveProperty('source')
+    expect(policyTraceShape.sekedPolicy.unwrap().shape).toHaveProperty('weights')
+    expect(policyTraceShape.sekedPolicy.unwrap().shape).toHaveProperty('thresholds')
   })
 
   it('keeps water proof fields required for assurance exports', () => {
