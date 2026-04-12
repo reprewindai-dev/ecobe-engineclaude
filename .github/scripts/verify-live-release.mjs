@@ -26,14 +26,9 @@ const outputPath = process.env.RELEASE_PROOF_OUTPUT_PATH?.trim()
 const checkpoint = {
   ok: false,
   checkedAt: new Date().toISOString(),
-  baseUrl,
+  baseUrl: baseUrl || null,
   dashboardUrl: dashboardUrl || null,
   stages: {},
-}
-
-if (!baseUrl) {
-  console.error('Missing ECOBE_ENGINE_URL or DEFAULT_ECOBE_ENGINE_URL.')
-  process.exit(1)
 }
 
 function assert(condition, message) {
