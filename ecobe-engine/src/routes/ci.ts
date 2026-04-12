@@ -1,11 +1,11 @@
-import { randomUUID } from 'crypto'
-import type { Request, Response } from 'express'
-import { Router } from 'express'
-import { z } from 'zod'
-import { providerRouter } from '../lib/carbon/provider-router'
-import { toRoutingCacheBucket } from '../lib/cache/routing-cache-bucket'
-import { applyLowestDefensibleSignalPenalty } from '../lib/ci/conflict-resolver'
-import { CiResponseV2Schema, type CiResponseV2 } from '../lib/ci/contracts'
+import { randomUUID } from "crypto";
+import type { Request, Response } from "express";
+import { Router } from "express";
+import { z } from "zod";
+import { providerRouter } from "../lib/carbon/provider-router";
+import { toRoutingCacheBucket } from "../lib/cache/routing-cache-bucket";
+import { applyLowestDefensibleSignalPenalty } from "../lib/ci/conflict-resolver";
+import { CiResponseV2Schema, type CiResponseV2 } from "../lib/ci/contracts";
 import {
   buildCanonicalDecisionEnvelope,
   buildCanonicalProofEnvelope,
@@ -17,19 +17,19 @@ import {
   verifySignatureHeader,
   type CanonicalTelemetryContext,
   type CanonicalTransportMetadata,
-} from '../lib/ci/canonical'
+} from "../lib/ci/canonical";
 import {
   buildIdempotencyCacheKey,
   readIdempotentResponse,
   writeIdempotentResponse,
-} from '../lib/ci/idempotency'
+} from "../lib/ci/idempotency";
 import {
   buildDecisionProofHash,
   chooseNonDelayFallbackAction,
   determineSignalSemantics,
   resolveDelayWindow,
   type AuthorizationSignalPolicy,
-} from '../lib/ci/authorization'
+} from "../lib/ci/authorization";
 import {
   buildAssuranceStatus,
   buildDecisionExplanation,
@@ -37,12 +37,16 @@ import {
   DECISION_DOCTRINE_VERSION,
   DETERMINISTIC_CONFLICT_HIERARCHY,
   resolveBaselineCandidate,
-} from '../lib/ci/doctrine'
+} from "../lib/ci/doctrine";
 import {
   buildDecisionEvaluatedEvent,
   enqueueDecisionEvaluatedEvents,
-} from '../lib/ci/decision-events'
-import { applyOperatingModePolicy, resolveOperatingMode, type OperatingMode } from '../lib/ci/operating-mode'
+} from "../lib/ci/decision-events";
+import {
+  applyOperatingModePolicy,
+  resolveOperatingMode,
+  type OperatingMode,
+} from "../lib/ci/operating-mode";
 import {
   buildCuratedTraceEnvelopeView,
   buildTraceHashes,
@@ -52,19 +56,26 @@ import {
   type TraceEnvelope,
   type TraceEnvelopeSeed,
   type TraceStageTimings,
-} from '../lib/ci/trace'
-import { pinReplayProofHash } from '../lib/ci/replay'
-import { prisma } from '../lib/db'
-import { buildGithubActionsEnforcementBundle } from '../lib/enforcement/github-actions-policy'
-import { buildKubernetesEnforcementPlan } from '../lib/enforcement/k8s-policy'
-import { buildDecisionSpanRecord, exportDecisionSpanRecord } from '../lib/observability/otel'
-import { getTelemetrySnapshot, recordTelemetryMetric, telemetryMetricNames } from '../lib/observability/telemetry'
-import { loadRegionReliabilityMultipliers } from '../lib/learning/region-reliability'
-import { evaluateExternalPolicyHook } from '../lib/policy/external-hook'
-import { evaluateSekedPolicyAdapter } from '../lib/policy/seked-policy-adapter'
-import { persistExportBatch } from '../lib/proof/export-chain'
-import { env } from '../config/env'
-import { trackRecentRoutingRegions } from '../lib/cache-warmer'
+} from "../lib/ci/trace";
+import { pinReplayProofHash } from "../lib/ci/replay";
+import { prisma } from "../lib/db";
+import { buildGithubActionsEnforcementBundle } from "../lib/enforcement/github-actions-policy";
+import { buildKubernetesEnforcementPlan } from "../lib/enforcement/k8s-policy";
+import {
+  buildDecisionSpanRecord,
+  exportDecisionSpanRecord,
+} from "../lib/observability/otel";
+import {
+  getTelemetrySnapshot,
+  recordTelemetryMetric,
+  telemetryMetricNames,
+} from "../lib/observability/telemetry";
+import { loadRegionReliabilityMultipliers } from "../lib/learning/region-reliability";
+import { evaluateExternalPolicyHook } from "../lib/policy/external-hook";
+import { evaluateSekedPolicyAdapter } from "../lib/policy/seked-policy-adapter";
+import { persistExportBatch } from "../lib/proof/export-chain";
+import { env } from "../config/env";
+import { trackRecentRoutingRegions } from "../lib/cache-warmer";
 import {
   buildWaterAuthority,
   getWaterArtifactMetadata,
@@ -73,9 +84,12 @@ import {
   resolveWaterSignal,
   summarizeWaterProviders,
   validateWaterArtifacts,
-} from '../lib/water/bundle'
-import { inspectWaterDatasetProvenance } from '../lib/water/provenance'
-import { evaluateWaterGuardrail, WATER_POLICY_VERSION } from '../lib/water/policy'
+} from "../lib/water/bundle";
+import { inspectWaterDatasetProvenance } from "../lib/water/provenance";
+import {
+  evaluateWaterGuardrail,
+  WATER_POLICY_VERSION,
+} from "../lib/water/policy";
 import type {
   WaterAuthority,
   WaterDecisionAction,
@@ -85,74 +99,86 @@ import type {
   WaterArtifactMetadata,
   WaterManifestDataset,
   WaterSignal,
-} from '../lib/water/types'
-import type { ExternalPolicyHookResult } from '../lib/policy/external-hook'
-import type { SekedPolicyAdapterResult } from '../lib/policy/seked-policy-adapter'
-import { internalServiceGuard } from '../middleware/internal-auth'
+} from "../lib/water/types";
+import type { ExternalPolicyHookResult } from "../lib/policy/external-hook";
+import type { SekedPolicyAdapterResult } from "../lib/policy/seked-policy-adapter";
+import { internalServiceGuard } from "../middleware/internal-auth";
 
-const router = Router()
+const router = Router();
 
-const CI_ANCILLARY_PERSISTENCE_CONCURRENCY = 4
-const CI_PERSISTENCE_RETRY_ATTEMPTS = 3
-const CI_PERSISTENCE_RETRY_BASE_MS = 25
+const CI_ANCILLARY_PERSISTENCE_CONCURRENCY = 4;
+const CI_PERSISTENCE_RETRY_ATTEMPTS = 3;
+const CI_PERSISTENCE_RETRY_BASE_MS = 25;
 
 const ciAncillaryPersistenceQueue: Array<{
-  label: string
-  run: () => Promise<void>
-}> = []
-const ciAncillaryDrainWaiters: Array<() => void> = []
-let ciAncillaryPersistenceActiveCount = 0
+  label: string;
+  run: () => Promise<void>;
+}> = [];
+const ciAncillaryDrainWaiters: Array<() => void> = [];
+let ciAncillaryPersistenceActiveCount = 0;
 
 function wait(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function isTransientDecisionPersistenceError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error ?? '')
+  const message = error instanceof Error ? error.message : String(error ?? "");
   return [
-    'Unable to start a transaction in the given time',
-    'Timed out fetching a new connection from the connection pool',
-    'Transaction API error',
-    'P2024',
-    'Connection closed',
-  ].some((fragment) => message.includes(fragment))
+    "Unable to start a transaction in the given time",
+    "Timed out fetching a new connection from the connection pool",
+    "Transaction API error",
+    "P2024",
+    "Connection closed",
+  ].some((fragment) => message.includes(fragment));
 }
 
 async function withDecisionPersistenceRetry<T>(
   label: string,
   task: () => Promise<T>,
   options?: {
-    attempts?: number
-    baseDelayMs?: number
-  }
+    attempts?: number;
+    baseDelayMs?: number;
+  },
 ) {
-  const attempts = Math.max(1, options?.attempts ?? CI_PERSISTENCE_RETRY_ATTEMPTS)
-  const baseDelayMs = Math.max(1, options?.baseDelayMs ?? CI_PERSISTENCE_RETRY_BASE_MS)
+  const attempts = Math.max(
+    1,
+    options?.attempts ?? CI_PERSISTENCE_RETRY_ATTEMPTS,
+  );
+  const baseDelayMs = Math.max(
+    1,
+    options?.baseDelayMs ?? CI_PERSISTENCE_RETRY_BASE_MS,
+  );
 
-  let attempt = 0
+  let attempt = 0;
   while (attempt < attempts) {
-    attempt += 1
+    attempt += 1;
     try {
-      return await task()
+      return await task();
     } catch (error) {
       if (attempt >= attempts || !isTransientDecisionPersistenceError(error)) {
-        throw error
+        throw error;
       }
-      console.warn(`Retrying ${label} after transient persistence error (attempt ${attempt}/${attempts})`, error)
-      await wait(baseDelayMs * Math.pow(2, attempt - 1))
+      console.warn(
+        `Retrying ${label} after transient persistence error (attempt ${attempt}/${attempts})`,
+        error,
+      );
+      await wait(baseDelayMs * Math.pow(2, attempt - 1));
     }
   }
 
-  throw new Error(`Persistence retry loop exhausted for ${label}`)
+  throw new Error(`Persistence retry loop exhausted for ${label}`);
 }
 
 function maybeResolveCiAncillaryDrainWaiters() {
-  if (ciAncillaryPersistenceActiveCount !== 0 || ciAncillaryPersistenceQueue.length !== 0) {
-    return
+  if (
+    ciAncillaryPersistenceActiveCount !== 0 ||
+    ciAncillaryPersistenceQueue.length !== 0
+  ) {
+    return;
   }
 
   while (ciAncillaryDrainWaiters.length > 0) {
-    ciAncillaryDrainWaiters.shift()?.()
+    ciAncillaryDrainWaiters.shift()?.();
   }
 }
 
@@ -161,56 +187,68 @@ function pumpCiAncillaryPersistenceQueue() {
     ciAncillaryPersistenceActiveCount < CI_ANCILLARY_PERSISTENCE_CONCURRENCY &&
     ciAncillaryPersistenceQueue.length > 0
   ) {
-    const task = ciAncillaryPersistenceQueue.shift()
-    if (!task) break
+    const task = ciAncillaryPersistenceQueue.shift();
+    if (!task) break;
 
-    ciAncillaryPersistenceActiveCount += 1
+    ciAncillaryPersistenceActiveCount += 1;
     void (async () => {
       try {
-        await task.run()
+        await task.run();
       } catch (error) {
-        console.warn(`Failed CI ancillary persistence task (${task.label}):`, error)
+        console.warn(
+          `Failed CI ancillary persistence task (${task.label}):`,
+          error,
+        );
       } finally {
-        ciAncillaryPersistenceActiveCount = Math.max(0, ciAncillaryPersistenceActiveCount - 1)
+        ciAncillaryPersistenceActiveCount = Math.max(
+          0,
+          ciAncillaryPersistenceActiveCount - 1,
+        );
         if (ciAncillaryPersistenceQueue.length > 0) {
-          setImmediate(pumpCiAncillaryPersistenceQueue)
+          setImmediate(pumpCiAncillaryPersistenceQueue);
         } else {
-          maybeResolveCiAncillaryDrainWaiters()
+          maybeResolveCiAncillaryDrainWaiters();
         }
       }
-    })()
+    })();
   }
 
-  maybeResolveCiAncillaryDrainWaiters()
+  maybeResolveCiAncillaryDrainWaiters();
 }
 
-function scheduleCiAncillaryPersistence(label: string, run: () => Promise<void>) {
-  ciAncillaryPersistenceQueue.push({ label, run })
-  setImmediate(pumpCiAncillaryPersistenceQueue)
+function scheduleCiAncillaryPersistence(
+  label: string,
+  run: () => Promise<void>,
+) {
+  ciAncillaryPersistenceQueue.push({ label, run });
+  setImmediate(pumpCiAncillaryPersistenceQueue);
 }
 
 export async function flushCiAncillaryPersistenceForTests() {
-  if (ciAncillaryPersistenceActiveCount === 0 && ciAncillaryPersistenceQueue.length === 0) {
-    return
+  if (
+    ciAncillaryPersistenceActiveCount === 0 &&
+    ciAncillaryPersistenceQueue.length === 0
+  ) {
+    return;
   }
 
   await new Promise<void>((resolve) => {
-    ciAncillaryDrainWaiters.push(resolve)
-    setImmediate(pumpCiAncillaryPersistenceQueue)
-  })
+    ciAncillaryDrainWaiters.push(resolve);
+    setImmediate(pumpCiAncillaryPersistenceQueue);
+  });
 }
 
 const RUNNER_REGIONS: Record<string, string[]> = {
-  'us-east-1': ['ubuntu-latest', 'windows-latest', 'macos-latest'],
-  'us-west-2': ['ubuntu-latest', 'windows-latest'],
-  'us-central-1': ['ubuntu-latest'],
-  'eu-west-1': ['ubuntu-latest', 'windows-latest'],
-  'eu-west-2': ['ubuntu-latest'],
-  'eu-central-1': ['ubuntu-latest'],
-  'ap-southeast-1': ['ubuntu-latest'],
-  'ap-northeast-1': ['ubuntu-latest'],
-  'ap-south-1': ['ubuntu-latest'],
-}
+  "us-east-1": ["ubuntu-latest", "windows-latest", "macos-latest"],
+  "us-west-2": ["ubuntu-latest", "windows-latest"],
+  "us-central-1": ["ubuntu-latest"],
+  "eu-west-1": ["ubuntu-latest", "windows-latest"],
+  "eu-west-2": ["ubuntu-latest"],
+  "eu-central-1": ["ubuntu-latest"],
+  "ap-southeast-1": ["ubuntu-latest"],
+  "ap-northeast-1": ["ubuntu-latest"],
+  "ap-south-1": ["ubuntu-latest"],
+};
 
 export const requestSchema = z.object({
   requestId: z.string().min(1).optional(),
@@ -232,24 +270,33 @@ export const requestSchema = z.object({
   waterWeight: z.number().min(0).max(1).default(0.3),
   latencyWeight: z.number().min(0).max(1).default(0.1),
   costWeight: z.number().min(0).max(1).default(0.1),
-  jobType: z.enum(['standard', 'heavy', 'light']).default('standard'),
-  criticality: z.enum(['critical', 'standard', 'batch']).default('standard'),
+  jobType: z.enum(["standard", "heavy", "light"]).default("standard"),
+  criticality: z.enum(["critical", "standard", "batch"]).default("standard"),
   waterPolicyProfile: z
-    .enum(['default', 'drought_sensitive', 'eu_data_center_reporting', 'high_water_sensitivity'])
-    .default('default'),
+    .enum([
+      "default",
+      "drought_sensitive",
+      "eu_data_center_reporting",
+      "high_water_sensitivity",
+    ])
+    .default("default"),
   allowDelay: z.boolean().default(true),
   deadlineAt: z.string().datetime().optional(),
   maxDelayMinutes: z.number().int().positive().max(1440).optional(),
   criticalPath: z.boolean().default(false),
-  signalPolicy: z.enum(['marginal_first', 'average_fallback']).default('marginal_first'),
+  signalPolicy: z
+    .enum(["marginal_first", "average_fallback"])
+    .default("marginal_first"),
   policyVersion: z.literal(WATER_POLICY_VERSION).default(WATER_POLICY_VERSION),
-  decisionMode: z.enum(['runtime_authorization', 'scenario_planning']).default('runtime_authorization'),
+  decisionMode: z
+    .enum(["runtime_authorization", "scenario_planning"])
+    .default("runtime_authorization"),
   facilityId: z.string().min(1).optional(),
   waterContext: z
     .object({
       basinId: z.string().min(1).optional(),
       telemetryWindowMinutes: z.number().int().positive().max(1440).optional(),
-      scenario: z.enum(['current', '2030', '2050', '2080']).default('current'),
+      scenario: z.enum(["current", "2030", "2050", "2080"]).default("current"),
     })
     .optional(),
   schedulerHints: z
@@ -262,20 +309,20 @@ export const requestSchema = z.object({
   timestamp: z.string().optional(),
   estimatedEnergyKwh: z.number().positive().optional(),
   metadata: z.record(z.any()).optional(),
-})
+});
 
-type RoutingRequestInput = z.input<typeof requestSchema>
-type RoutingRequest = z.infer<typeof requestSchema>
+type RoutingRequestInput = z.input<typeof requestSchema>;
+type RoutingRequest = z.infer<typeof requestSchema>;
 
-type CandidateEvaluation = ResolvedCandidateOverride
+type CandidateEvaluation = ResolvedCandidateOverride;
 
-type DecisionStageTimings = TraceStageTimings
+type DecisionStageTimings = TraceStageTimings;
 
 export type DecisionExecutionContext = {
-  decisionFrameId?: string
-  nowIso?: string
-  resolvedCandidateOverrides?: CandidateEvaluation[]
-}
+  decisionFrameId?: string;
+  nowIso?: string;
+  resolvedCandidateOverrides?: CandidateEvaluation[];
+};
 
 const sloState = {
   totalMs: [] as number[],
@@ -284,104 +331,108 @@ const sloState = {
     totalP95Ms: 100,
     computeP95Ms: 50,
   },
-}
+};
 
-const CI_PROCESS_BOOTED_AT = new Date()
-const SLO_PERSISTED_WINDOW_LIMIT = 250
+const CI_PROCESS_BOOTED_AT = new Date();
+const SLO_PERSISTED_WINDOW_LIMIT = 250;
 const SLO_ACTIVE_WINDOW_MINUTES = Math.max(
   5,
-  Number(process.env.CI_SLO_ACTIVE_WINDOW_MINUTES ?? 30)
-)
+  Number(process.env.CI_SLO_ACTIVE_WINDOW_MINUTES ?? 30),
+);
 
 type PersistedLatencyWindow = {
-  totalMs: number[]
-  computeMs: number[]
-  sampleCount: number
-  windowStart: string | null
-  windowEnd: string | null
-  selection: 'latest_active_window' | 'recent_history'
-}
+  totalMs: number[];
+  computeMs: number[];
+  sampleCount: number;
+  windowStart: string | null;
+  windowEnd: string | null;
+  selection: "latest_active_window" | "recent_history";
+};
 
 type PersistedLatencySample = {
-  createdAt: Date
-  totalMs: number | null
-  computeMs: number | null
-}
+  createdAt: Date;
+  totalMs: number | null;
+  computeMs: number | null;
+};
 
 function resolveRequestId(data: RoutingRequest) {
-  return data.requestId?.trim() || randomUUID()
+  return data.requestId?.trim() || randomUUID();
 }
 
 function resolveTransport(data: RoutingRequest): CanonicalTransportMetadata {
-  const runtime = data.runtimeTarget?.runtime ?? 'http'
+  const runtime = data.runtimeTarget?.runtime ?? "http";
   const controlPoint =
     data.transport?.controlPoint ??
-    (runtime === 'github_actions'
-      ? 'ci_pre_job'
-      : runtime === 'kubernetes'
-        ? 'scheduler_hint'
-        : runtime === 'lambda'
-          ? 'lambda_wrapper'
-          : runtime === 'queue'
-            ? 'dispatcher'
-            : runtime === 'event'
-              ? 'event_bus'
-              : 'gateway_preflight')
+    (runtime === "github_actions"
+      ? "ci_pre_job"
+      : runtime === "kubernetes"
+        ? "scheduler_hint"
+        : runtime === "lambda"
+          ? "lambda_wrapper"
+          : runtime === "queue"
+            ? "dispatcher"
+            : runtime === "event"
+              ? "event_bus"
+              : "gateway_preflight");
 
   const transport =
     data.transport?.transport ??
-    (runtime === 'github_actions'
-      ? 'ci_runner'
-      : runtime === 'kubernetes'
-        ? 'k8s_admission'
-        : runtime === 'lambda'
-          ? 'lambda_invoke'
-          : runtime === 'queue'
-            ? 'queue_dispatch'
-            : runtime === 'event'
-              ? 'cloudevent'
-              : 'sync_http')
+    (runtime === "github_actions"
+      ? "ci_runner"
+      : runtime === "kubernetes"
+        ? "k8s_admission"
+        : runtime === "lambda"
+          ? "lambda_invoke"
+          : runtime === "queue"
+            ? "queue_dispatch"
+            : runtime === "event"
+              ? "cloudevent"
+              : "sync_http");
 
   const adapterId =
     data.transport?.adapterId ??
-    (runtime === 'github_actions'
-      ? 'ecobe.github-actions.adapter.v1'
-      : runtime === 'kubernetes'
-        ? 'ecobe.kubernetes.adapter.v1'
-        : runtime === 'lambda'
-          ? 'ecobe.lambda.adapter.v1'
-          : runtime === 'queue'
-            ? 'ecobe.queue.adapter.v1'
-            : runtime === 'event'
-              ? 'ecobe.cloudevents.adapter.v1'
-              : 'ecobe.http.decision.v1')
+    (runtime === "github_actions"
+      ? "ecobe.github-actions.adapter.v1"
+      : runtime === "kubernetes"
+        ? "ecobe.kubernetes.adapter.v1"
+        : runtime === "lambda"
+          ? "ecobe.lambda.adapter.v1"
+          : runtime === "queue"
+            ? "ecobe.queue.adapter.v1"
+            : runtime === "event"
+              ? "ecobe.cloudevents.adapter.v1"
+              : "ecobe.http.decision.v1");
 
   return resolveCanonicalTransportMetadata({
     runtime,
     transport,
     controlPoint,
     adapterId,
-    adapterVersion: data.transport?.adapterVersion ?? '1.0.0',
+    adapterVersion: data.transport?.adapterVersion ?? "1.0.0",
     observedRuntimeTarget: data.transport?.observedRuntimeTarget,
-    enforcementResult: data.transport?.enforcementResult ?? 'applied',
-  })
+    enforcementResult: data.transport?.enforcementResult ?? "applied",
+  });
 }
 
 export function isAuthorizedDecisionRequest(input: {
-  rawBody?: string
-  signatureHeader?: string
-  internalToken?: string | null
+  rawBody?: string;
+  signatureHeader?: string;
+  internalToken?: string | null;
 }) {
-  const signatureValid = verifySignatureHeader(input.rawBody, input.signatureHeader)
+  const signatureValid = verifySignatureHeader(
+    input.rawBody,
+    input.signatureHeader,
+  );
   const internalTokenValid =
-    Boolean(env.ECOBE_INTERNAL_API_KEY) && input.internalToken === env.ECOBE_INTERNAL_API_KEY
+    Boolean(env.ECOBE_INTERNAL_API_KEY) &&
+    input.internalToken === env.ECOBE_INTERNAL_API_KEY;
 
-  return signatureValid || internalTokenValid
+  return signatureValid || internalTokenValid;
 }
 
 function verifySignedDecisionRequest(req: Request, res: Response) {
-  const signatureHeader = req.header('x-ecobe-signature')
-  const internalToken = extractInternalToken(req)
+  const signatureHeader = req.header("x-ecobe-signature");
+  const internalToken = extractInternalToken(req);
 
   if (
     !isAuthorizedDecisionRequest({
@@ -391,62 +442,64 @@ function verifySignedDecisionRequest(req: Request, res: Response) {
     })
   ) {
     res.status(401).json({
-      error: 'Invalid request signature',
-      code: 'INVALID_REQUEST_SIGNATURE',
-    })
-    return false
+      error: "Invalid request signature",
+      code: "INVALID_REQUEST_SIGNATURE",
+    });
+    return false;
   }
 
-  return true
+  return true;
 }
 
 function extractInternalToken(req: Request) {
-  const authorization = req.header('authorization')
-  if (authorization?.startsWith('Bearer ')) {
-    return authorization.slice('Bearer '.length).trim()
+  const authorization = req.header("authorization");
+  if (authorization?.startsWith("Bearer ")) {
+    return authorization.slice("Bearer ".length).trim();
   }
 
-  return req.header('x-ecobe-internal-key')?.trim() ?? null
+  return req.header("x-ecobe-internal-key")?.trim() ?? null;
 }
 
 function isInternalFastSimulationRequest(req: Request, data: RoutingRequest) {
-  if (data.decisionMode !== 'scenario_planning') return false
-  if (req.header('x-co2router-response-tier') !== 'fast') return false
-  if (!env.ECOBE_INTERNAL_API_KEY) return false
+  if (data.decisionMode !== "scenario_planning") return false;
+  if (req.header("x-co2router-response-tier") !== "fast") return false;
+  if (!env.ECOBE_INTERNAL_API_KEY) return false;
 
-  return extractInternalToken(req) === env.ECOBE_INTERNAL_API_KEY
+  return extractInternalToken(req) === env.ECOBE_INTERNAL_API_KEY;
 }
 
-function assuranceToProofPosture(status: 'operational' | 'assurance_ready' | 'degraded') {
-  if (status === 'assurance_ready') return 'assurance_ready' as const
-  if (status === 'degraded') return 'degraded' as const
-  return 'operational' as const
+function assuranceToProofPosture(
+  status: "operational" | "assurance_ready" | "degraded",
+) {
+  if (status === "assurance_ready") return "assurance_ready" as const;
+  if (status === "degraded") return "degraded" as const;
+  return "operational" as const;
 }
 
 function recordLatency(totalMs: number, computeMs: number) {
-  const windowSize = 250
-  sloState.totalMs.push(totalMs)
-  sloState.computeMs.push(computeMs)
+  const windowSize = 250;
+  sloState.totalMs.push(totalMs);
+  sloState.computeMs.push(computeMs);
   if (sloState.totalMs.length > windowSize) {
-    sloState.totalMs.splice(0, sloState.totalMs.length - windowSize)
+    sloState.totalMs.splice(0, sloState.totalMs.length - windowSize);
   }
   if (sloState.computeMs.length > windowSize) {
-    sloState.computeMs.splice(0, sloState.computeMs.length - windowSize)
+    sloState.computeMs.splice(0, sloState.computeMs.length - windowSize);
   }
 }
 
 function logSlowDecision(input: {
-  computeMs: number
-  totalMs: number
-  decisionFrameId: string
-  selectedRegion: string
-  reasonCode: string
-  stageTimings: DecisionStageTimings
-  providerResolutionMs: number
+  computeMs: number;
+  totalMs: number;
+  decisionFrameId: string;
+  selectedRegion: string;
+  reasonCode: string;
+  stageTimings: DecisionStageTimings;
+  providerResolutionMs: number;
 }) {
-  if (input.computeMs <= sloState.budget.computeP95Ms) return
+  if (input.computeMs <= sloState.budget.computeP95Ms) return;
 
-  console.warn('Slow decision path detected', {
+  console.warn("Slow decision path detected", {
     decisionFrameId: input.decisionFrameId,
     selectedRegion: input.selectedRegion,
     reasonCode: input.reasonCode,
@@ -454,55 +507,62 @@ function logSlowDecision(input: {
     totalMs: input.totalMs,
     providerResolutionMs: input.providerResolutionMs,
     stageTimings: input.stageTimings,
-  })
+  });
 }
 
 function percentile(values: number[], p: number): number {
-  if (values.length === 0) return 0
-  const sorted = [...values].sort((a, b) => a - b)
-  const idx = Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)
-  return sorted[Math.max(0, idx)]
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = Math.min(
+    sorted.length - 1,
+    Math.ceil((p / 100) * sorted.length) - 1,
+  );
+  return sorted[Math.max(0, idx)];
 }
 
 function isFiniteLatency(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
-async function getPersistedLatencyWindow(limit = SLO_PERSISTED_WINDOW_LIMIT): Promise<PersistedLatencyWindow> {
+async function getPersistedLatencyWindow(
+  limit = SLO_PERSISTED_WINDOW_LIMIT,
+): Promise<PersistedLatencyWindow> {
   const recentDecisions = await prisma.cIDecision.findMany({
-    orderBy: { createdAt: 'desc' },
+    orderBy: { createdAt: "desc" },
     take: limit,
     select: {
       createdAt: true,
       metadata: true,
     },
-  })
+  });
 
   const latencySamples: Array<{
-    createdAt: Date
-    totalMs: number | null
-    computeMs: number | null
-  }> = []
+    createdAt: Date;
+    totalMs: number | null;
+    computeMs: number | null;
+  }> = [];
 
   for (const decision of recentDecisions) {
-    const latency = (decision.metadata as any)?.response?.latencyMs
-    const totalMs = isFiniteLatency(latency?.total) ? latency.total : null
-    const computeMs = isFiniteLatency(latency?.compute) ? latency.compute : null
+    const latency = (decision.metadata as any)?.response?.latencyMs;
+    const totalMs = isFiniteLatency(latency?.total) ? latency.total : null;
+    const computeMs = isFiniteLatency(latency?.compute)
+      ? latency.compute
+      : null;
     if (totalMs !== null || computeMs !== null) {
       latencySamples.push({
         createdAt: decision.createdAt,
         totalMs,
         computeMs,
-      })
+      });
     }
   }
 
-  return selectPersistedLatencyWindow(latencySamples)
+  return selectPersistedLatencyWindow(latencySamples);
 }
 
 export function selectPersistedLatencyWindow(
   latencySamples: PersistedLatencySample[],
-  bootedAt = CI_PROCESS_BOOTED_AT
+  bootedAt = CI_PROCESS_BOOTED_AT,
 ): PersistedLatencyWindow {
   if (latencySamples.length === 0) {
     return {
@@ -511,14 +571,16 @@ export function selectPersistedLatencyWindow(
       sampleCount: 0,
       windowStart: null,
       windowEnd: null,
-      selection: 'recent_history',
-    }
+      selection: "recent_history",
+    };
   }
 
   const orderedSamples = [...latencySamples].sort(
-    (left, right) => right.createdAt.getTime() - left.createdAt.getTime()
-  )
-  const postBootSamples = orderedSamples.filter((sample) => sample.createdAt >= bootedAt)
+    (left, right) => right.createdAt.getTime() - left.createdAt.getTime(),
+  );
+  const postBootSamples = orderedSamples.filter(
+    (sample) => sample.createdAt >= bootedAt,
+  );
   if (postBootSamples.length === 0) {
     return {
       totalMs: [],
@@ -526,19 +588,19 @@ export function selectPersistedLatencyWindow(
       sampleCount: 0,
       windowStart: null,
       windowEnd: null,
-      selection: 'recent_history',
-    }
+      selection: "recent_history",
+    };
   }
 
-  const newestSampleAt = postBootSamples[0].createdAt
+  const newestSampleAt = postBootSamples[0].createdAt;
   const activeWindowStart = new Date(
-    newestSampleAt.getTime() - SLO_ACTIVE_WINDOW_MINUTES * 60 * 1000
-  )
+    newestSampleAt.getTime() - SLO_ACTIVE_WINDOW_MINUTES * 60 * 1000,
+  );
   const activeWindowSamples = postBootSamples.filter(
-    (sample) => sample.createdAt >= activeWindowStart
-  )
+    (sample) => sample.createdAt >= activeWindowStart,
+  );
   const selectedSamples =
-    activeWindowSamples.length > 0 ? activeWindowSamples : postBootSamples
+    activeWindowSamples.length > 0 ? activeWindowSamples : postBootSamples;
 
   return {
     totalMs: selectedSamples
@@ -550,146 +612,197 @@ export function selectPersistedLatencyWindow(
       .filter((value): value is number => value !== null)
       .reverse(),
     sampleCount: selectedSamples.length,
-    windowStart: selectedSamples[selectedSamples.length - 1]?.createdAt.toISOString() ?? null,
+    windowStart:
+      selectedSamples[selectedSamples.length - 1]?.createdAt.toISOString() ??
+      null,
     windowEnd: selectedSamples[0]?.createdAt.toISOString() ?? null,
     selection:
-      activeWindowSamples.length > 0 ? 'latest_active_window' : 'recent_history',
-  }
+      activeWindowSamples.length > 0
+        ? "latest_active_window"
+        : "recent_history",
+  };
 }
 
-function estimateEnergyKwh(jobType: RoutingRequest['jobType'], explicit?: number): number {
-  if (explicit && explicit > 0) return explicit
-  if (jobType === 'heavy') return 8
-  if (jobType === 'light') return 0.8
-  return 2.5
+function estimateEnergyKwh(
+  jobType: RoutingRequest["jobType"],
+  explicit?: number,
+): number {
+  if (explicit && explicit > 0) return explicit;
+  if (jobType === "heavy") return 8;
+  if (jobType === "light") return 0.8;
+  return 2.5;
 }
 
-function computeSignalConfidence(carbonConfidence: number, waterConfidence: number) {
-  return Number(Math.max(0.05, Math.min(1, (carbonConfidence + waterConfidence) / 2)).toFixed(3))
+function computeSignalConfidence(
+  carbonConfidence: number,
+  waterConfidence: number,
+) {
+  return Number(
+    Math.max(
+      0.05,
+      Math.min(1, (carbonConfidence + waterConfidence) / 2),
+    ).toFixed(3),
+  );
 }
 
 function computeScore(input: {
-  carbonIntensity: number
-  waterScarcityImpact: number
-  carbonWeight: number
-  waterWeight: number
-  latencyWeight: number
-  costWeight: number
-  region: string
+  carbonIntensity: number;
+  waterScarcityImpact: number;
+  carbonWeight: number;
+  waterWeight: number;
+  latencyWeight: number;
+  costWeight: number;
+  region: string;
 }) {
   const totalWeight =
-    input.carbonWeight + input.waterWeight + input.latencyWeight + input.costWeight
-  const carbonW = input.carbonWeight / totalWeight
-  const waterW = input.waterWeight / totalWeight
-  const latencyW = input.latencyWeight / totalWeight
-  const costW = input.costWeight / totalWeight
+    input.carbonWeight +
+    input.waterWeight +
+    input.latencyWeight +
+    input.costWeight;
+  const carbonW = input.carbonWeight / totalWeight;
+  const waterW = input.waterWeight / totalWeight;
+  const latencyW = input.latencyWeight / totalWeight;
+  const costW = input.costWeight / totalWeight;
 
-  const pseudoLatencyPenalty = input.region.startsWith('eu-') ? 0.18 : 0.1
-  const pseudoCostPenalty = input.region.startsWith('ap-') ? 0.2 : 0.12
+  const pseudoLatencyPenalty = input.region.startsWith("eu-") ? 0.18 : 0.1;
+  const pseudoCostPenalty = input.region.startsWith("ap-") ? 0.2 : 0.12;
 
   return (
     carbonW * input.carbonIntensity +
     waterW * input.waterScarcityImpact * 100 +
     latencyW * pseudoLatencyPenalty * 100 +
     costW * pseudoCostPenalty * 100
-  )
+  );
 }
 
 function getFallbackRegion(preferredRegions: string[]): string {
   for (const region of preferredRegions) {
-    if (RUNNER_REGIONS[region]) return region
+    if (RUNNER_REGIONS[region]) return region;
   }
-  return 'us-east-1'
+  return "us-east-1";
 }
 
 async function evaluateCandidates(
   data: RoutingRequest,
   energyKwh: number,
   at: Date,
-  resolvedCandidateOverrides?: CandidateEvaluation[]
+  resolvedCandidateOverrides?: CandidateEvaluation[],
 ) {
   if (resolvedCandidateOverrides?.length) {
-    return [...resolvedCandidateOverrides].sort((a, b) => a.score - b.score)
+    return [...resolvedCandidateOverrides].sort((a, b) => a.score - b.score);
   }
 
-  const reliabilityByRegion = await loadRegionReliabilityMultipliers(data.preferredRegions)
-  const cacheBucket = toRoutingCacheBucket(at)
-  trackRecentRoutingRegions(data.preferredRegions)
+  const reliabilityByRegion = await loadRegionReliabilityMultipliers(
+    data.preferredRegions,
+  );
+  const cacheBucket = toRoutingCacheBucket(at);
+  trackRecentRoutingRegions(data.preferredRegions);
   const candidates = await Promise.all(
     data.preferredRegions.map(async (region) => {
-      const providerResolutionStarted = Date.now()
-      const signalRecord = await providerRouter.getHotPathRoutingSignalRecord(region, at)
-      const signal = signalRecord.signal
-      const cacheStatus = signalRecord.cacheSource ?? 'degraded-safe'
-      const providerResolutionMs = Date.now() - providerResolutionStarted
-      recordTelemetryMetric(telemetryMetricNames.providerResolutionLatencyMs, 'histogram', providerResolutionMs, {
+      const providerResolutionStarted = Date.now();
+      const signalRecord = await providerRouter.getHotPathRoutingSignalRecord(
         region,
-        cache_status: cacheStatus,
-        source: signal.source,
-      })
+        at,
+      );
+      const signal = signalRecord.signal;
+      const cacheStatus = signalRecord.cacheSource ?? "degraded-safe";
+      const providerResolutionMs = Date.now() - providerResolutionStarted;
       recordTelemetryMetric(
-        cacheStatus === 'live'
+        telemetryMetricNames.providerResolutionLatencyMs,
+        "histogram",
+        providerResolutionMs,
+        {
+          region,
+          cache_status: cacheStatus,
+          source: signal.source,
+        },
+      );
+      recordTelemetryMetric(
+        cacheStatus === "live"
           ? telemetryMetricNames.routingCacheMissCount
           : telemetryMetricNames.routingCacheHitCount,
-        'counter',
+        "counter",
         1,
         {
           region,
           cache_status: cacheStatus,
-        }
-      )
-      if (cacheStatus === 'live') {
-        recordTelemetryMetric(telemetryMetricNames.routingHotPathProviderLeakCount, 'counter', 1, {
-          region,
-        })
+        },
+      );
+      if (cacheStatus === "live") {
+        recordTelemetryMetric(
+          telemetryMetricNames.routingHotPathProviderLeakCount,
+          "counter",
+          1,
+          {
+            region,
+          },
+        );
       }
 
-      if (cacheStatus !== 'warm' && cacheStatus !== 'redis') {
-        providerRouter.cacheRoutingSignal(region, signalRecord, cacheBucket).catch((error) => {
-          console.warn('Failed to cache routing signal', { region, error })
-        })
+      if (cacheStatus !== "warm" && cacheStatus !== "redis") {
+        providerRouter
+          .cacheRoutingSignal(region, signalRecord, cacheBucket)
+          .catch((error) => {
+            console.warn("Failed to cache routing signal", { region, error });
+          });
       }
 
       const waterSignal = resolveWaterSignal(region, at, {
         facilityId: data.facilityId,
-        scenario: (data.waterContext?.scenario ?? 'current') as WaterScenario,
-      })
-      const waterAuthority = buildWaterAuthority(waterSignal)
-      const runner = RUNNER_REGIONS[region]?.[0] ?? 'ubuntu-latest'
-      const waterImpactLiters = Number((energyKwh * waterSignal.waterIntensityLPerKwh).toFixed(6))
-      const scarcityImpact = Number((waterImpactLiters * waterSignal.scarcityFactor).toFixed(6))
+        scenario: (data.waterContext?.scenario ?? "current") as WaterScenario,
+      });
+      const waterAuthority = buildWaterAuthority(waterSignal);
+      const runner = RUNNER_REGIONS[region]?.[0] ?? "ubuntu-latest";
+      const waterImpactLiters = Number(
+        (energyKwh * waterSignal.waterIntensityLPerKwh).toFixed(6),
+      );
+      const scarcityImpact = Number(
+        (waterImpactLiters * waterSignal.scarcityFactor).toFixed(6),
+      );
       const signalSemantics = determineSignalSemantics({
         source: signal.provenance.sourceUsed,
         fallbackUsed: signal.provenance.fallbackUsed,
         signalPolicy: data.signalPolicy as AuthorizationSignalPolicy,
-      })
-      const providerSnapshotRef = `${region}:${signal.provenance.sourceUsed}:${signal.provenance.referenceTime}`
+      });
+      const providerSnapshotRef = `${region}:${signal.provenance.sourceUsed}:${signal.provenance.referenceTime}`;
       const freshnessSec = Math.max(
         0,
-        Math.round((Date.now() - new Date(signal.provenance.referenceTime).getTime()) / 1000)
-      )
-      recordTelemetryMetric(telemetryMetricNames.providerFreshnessSeconds, 'gauge', freshnessSec, {
-        region,
-        source: signal.provenance.sourceUsed,
-        signal_mode: signalSemantics.signalMode,
-      })
+        Math.round(
+          (Date.now() - new Date(signal.provenance.referenceTime).getTime()) /
+            1000,
+        ),
+      );
+      recordTelemetryMetric(
+        telemetryMetricNames.providerFreshnessSeconds,
+        "gauge",
+        freshnessSec,
+        {
+          region,
+          source: signal.provenance.sourceUsed,
+          signal_mode: signalSemantics.signalMode,
+        },
+      );
       const waterFreshnessSec = waterSignal.artifactGeneratedAt
         ? Math.max(
             0,
-            Math.round((Date.now() - new Date(waterSignal.artifactGeneratedAt).getTime()) / 1000)
+            Math.round(
+              (Date.now() -
+                new Date(waterSignal.artifactGeneratedAt).getTime()) /
+                1000,
+            ),
           )
-        : null
+        : null;
       if (waterFreshnessSec !== null) {
         recordTelemetryMetric(
           telemetryMetricNames.waterAuthorityFreshnessSeconds,
-          'gauge',
+          "gauge",
           waterFreshnessSec,
           {
             region,
             authority_mode: waterAuthority.authorityMode,
             scenario: waterAuthority.scenario,
-          }
-        )
+          },
+        );
       }
 
       const guardrailCheck = evaluateWaterGuardrail({
@@ -701,7 +814,7 @@ async function evaluateCandidates(
         fallbackUsed: waterSignal.fallbackUsed,
         criticality: data.criticality,
         allowDelay: data.allowDelay,
-      })
+      });
 
       const baseScore = computeScore({
         carbonIntensity: signal.carbonIntensity,
@@ -711,7 +824,7 @@ async function evaluateCandidates(
         latencyWeight: data.latencyWeight,
         costWeight: data.costWeight,
         region,
-      })
+      });
       const defensiblePenalty = applyLowestDefensibleSignalPenalty({
         carbonConfidence: signal.confidence,
         carbonFallbackUsed: signal.provenance.fallbackUsed,
@@ -719,9 +832,13 @@ async function evaluateCandidates(
         carbonDisagreementPct: signal.provenance.disagreementPct,
         waterConfidence: waterSignal.confidence,
         waterFallbackUsed: waterSignal.fallbackUsed,
-      })
-      const reliabilityMultiplier = reliabilityByRegion[region] ?? 1
-      const score = Number(((baseScore / reliabilityMultiplier) + defensiblePenalty.penalty).toFixed(6))
+      });
+      const reliabilityMultiplier = reliabilityByRegion[region] ?? 1;
+      const score = Number(
+        (baseScore / reliabilityMultiplier + defensiblePenalty.penalty).toFixed(
+          6,
+        ),
+      );
 
       return {
         region,
@@ -749,92 +866,67 @@ async function evaluateCandidates(
         providerResolutionMs,
         carbonFreshnessSec: freshnessSec,
         waterFreshnessSec,
-      } satisfies CandidateEvaluation
-    })
-  )
+      } satisfies CandidateEvaluation;
+    }),
+  );
 
-  candidates.sort((a, b) => a.score - b.score)
-  return candidates
+  candidates.sort((a, b) => a.score - b.score);
+  return candidates;
 }
 
 function isPrecedenceProtected(request: RoutingRequest) {
-  return Boolean(request.criticalPath) || (request.schedulerHints?.bottleneckScore ?? 0) >= 0.8
+  return (
+    Boolean(request.criticalPath) ||
+    (request.schedulerHints?.bottleneckScore ?? 0) >= 0.8
+  );
 }
 
 function buildCiResponse(input: {
-  data: RoutingRequest
-  requestId: string
-  transport: CanonicalTransportMetadata
-  doctrineVersion: string
-  operatingMode: OperatingMode
-  decisionFrameId: string
-  decision: WaterDecisionAction
-  reasonCode: string
-  selected: CandidateEvaluation
-  baseline: CandidateEvaluation
-  rerouteFrom: CandidateEvaluation | null
-  policyTrace: ReturnType<typeof evaluateWaterGuardrail>['trace']
-  signalConfidence: number
-  fallbackUsed: boolean
-  candidateEvaluations: CandidateEvaluation[]
-  proofHash: string
-  providerSnapshotRefs: string[]
-  waterAuthority: WaterAuthority
-  precedenceOverrideApplied: boolean
-  assurance: ReturnType<typeof buildAssuranceStatus>
-  mss: ReturnType<typeof buildMssState>
-  decisionExplanation: ReturnType<typeof buildDecisionExplanation>
+  data: RoutingRequest;
+  requestId: string;
+  transport: CanonicalTransportMetadata;
+  doctrineVersion: string;
+  operatingMode: OperatingMode;
+  decisionFrameId: string;
+  decision: WaterDecisionAction;
+  reasonCode: string;
+  selected: CandidateEvaluation;
+  baseline: CandidateEvaluation;
+  rerouteFrom: CandidateEvaluation | null;
+  policyTrace: ReturnType<typeof evaluateWaterGuardrail>["trace"];
+  signalConfidence: number;
+  fallbackUsed: boolean;
+  candidateEvaluations: CandidateEvaluation[];
+  proofHash: string;
+  providerSnapshotRefs: string[];
+  waterAuthority: WaterAuthority;
+  precedenceOverrideApplied: boolean;
+  assurance: ReturnType<typeof buildAssuranceStatus>;
+  mss: ReturnType<typeof buildMssState>;
+  decisionExplanation: ReturnType<typeof buildDecisionExplanation>;
+  kubernetesEnforcement: ReturnType<typeof buildKubernetesEnforcementPlan>;
+  githubActionsEnforcement: ReturnType<
+    typeof buildGithubActionsEnforcementBundle
+  >;
+  requestAt: Date;
 }) {
   const selectedReductionPct =
     input.baseline.carbonIntensity > 0
-      ? ((input.baseline.carbonIntensity - input.selected.carbonIntensity) / input.baseline.carbonIntensity) *
+      ? ((input.baseline.carbonIntensity - input.selected.carbonIntensity) /
+          input.baseline.carbonIntensity) *
         100
-      : 0
+      : 0;
 
-  const waterDeltaLiters = input.baseline.waterImpactLiters - input.selected.waterImpactLiters
+  const waterDeltaLiters =
+    input.baseline.waterImpactLiters - input.selected.waterImpactLiters;
   const signalsUsed = Array.from(
     new Set([
       input.selected.carbonSourceUsed,
       ...input.selected.waterSignal.source,
-    ])
-  )
-  const kubernetesEnforcement = buildKubernetesEnforcementPlan({
-    decisionFrameId: input.decisionFrameId,
-    decision: input.decision,
-    decisionMode: input.data.decisionMode as WaterDecisionMode,
-    reasonCode: input.reasonCode,
-    selectedRegion: input.selected.region,
-    policyProfile: input.data.waterPolicyProfile,
-    criticality: input.data.criticality,
-    waterAuthorityMode: input.waterAuthority.authorityMode,
-    waterScenario: input.waterAuthority.scenario,
-    proofHash: input.proofHash,
-    notBefore: input.data.allowDelay && input.decision === 'delay'
-      ? resolveDelayWindow({
-          generatedAt: new Date(input.data.timestamp ?? new Date().toISOString()),
-          criticality: input.data.criticality,
-          allowDelay: input.data.allowDelay,
-          criticalPath: input.data.criticalPath,
-          deadlineAt: input.data.deadlineAt,
-          maxDelayMinutes: input.data.maxDelayMinutes,
-        }).notBefore
-      : null,
-    delayMinutes: input.data.maxDelayMinutes,
-  })
-  const githubActionsEnforcement = buildGithubActionsEnforcementBundle({
-    decisionFrameId: input.decisionFrameId,
-    decision: input.decision,
-    decisionMode: input.data.decisionMode as WaterDecisionMode,
-    selectedRegion: input.selected.region,
-    preferredRegions: input.data.preferredRegions,
-    criticality: input.data.criticality,
-    notBefore: kubernetesEnforcement.execution.notBefore,
-  })
-  const signalSemantics = determineSignalSemantics({
-    source: input.selected.carbonSourceUsed,
-    fallbackUsed: input.fallbackUsed,
-    signalPolicy: input.data.signalPolicy as AuthorizationSignalPolicy,
-  })
+    ]),
+  );
+  const kubernetesEnforcement = input.kubernetesEnforcement;
+  const githubActionsEnforcement = input.githubActionsEnforcement;
   const decisionEnvelope = buildCanonicalDecisionEnvelope({
     requestId: input.requestId,
     decisionFrameId: input.decisionFrameId,
@@ -844,7 +936,7 @@ function buildCiResponse(input: {
     selectedRunner: input.selected.runner,
     baselineRegion: input.baseline.region,
     runtime: input.transport.runtime,
-    provider: input.data.runtimeTarget?.provider ?? 'generic',
+    provider: input.data.runtimeTarget?.provider ?? "generic",
     signalConfidence: input.signalConfidence,
     decisionMode: input.data.decisionMode as WaterDecisionMode,
     fallbackUsed: input.fallbackUsed,
@@ -854,9 +946,9 @@ function buildCiResponse(input: {
     transport: input.transport,
     notBefore: kubernetesEnforcement.execution.notBefore,
     timeoutMs: input.data.timeoutMs,
-    requestAt: new Date(input.data.timestamp ?? new Date().toISOString()),
+    requestAt: input.requestAt,
     idempotencyKey: input.data.idempotencyKey ?? null,
-  })
+  });
   const proofEnvelope = buildCanonicalProofEnvelope({
     posture: assuranceToProofPosture(input.assurance.status),
     proofHash: input.proofHash,
@@ -880,7 +972,7 @@ function buildCiResponse(input: {
     datasetVersions: input.selected.waterSignal.datasetVersions,
     providerSnapshotRefs: input.providerSnapshotRefs,
     transport: input.transport,
-  })
+  });
 
   return {
     decision: input.decision,
@@ -894,8 +986,8 @@ function buildCiResponse(input: {
     recommendation: `Decision ${input.decision} under ${input.data.waterPolicyProfile} profile`,
     signalConfidence: input.signalConfidence,
     fallbackUsed: input.fallbackUsed,
-    signalMode: signalSemantics.signalMode,
-    accountingMethod: signalSemantics.accountingMethod,
+    signalMode: input.selected.signalMode,
+    accountingMethod: input.selected.accountingMethod,
     decisionEnvelope,
     proofEnvelope,
     notBefore: kubernetesEnforcement.execution.notBefore,
@@ -906,14 +998,14 @@ function buildCiResponse(input: {
     decisionExplanation: input.decisionExplanation,
     policyTrace: {
       ...input.policyTrace,
-      capabilityId: 'ci.route.authorization',
-      authorizationMode: 'pre_action',
+      capabilityId: "ci.route.authorization",
+      authorizationMode: "pre_action",
       policyPacks: [
         `water.${input.data.waterPolicyProfile}.${WATER_POLICY_VERSION}`,
-        'seked.pre_action.v1',
-        'external.pre_action.v1',
+        "seked.pre_action.v1",
+        "external.pre_action.v1",
       ],
-      scenarioPlanningActive: input.data.decisionMode === 'scenario_planning',
+      scenarioPlanningActive: input.data.decisionMode === "scenario_planning",
       reroutedFromRegion: input.rerouteFrom?.region ?? null,
       selectedRegion: input.selected.region,
       baselineRegion: input.baseline.region,
@@ -971,13 +1063,15 @@ function buildCiResponse(input: {
       waterSelectedLiters: Number(input.selected.waterImpactLiters.toFixed(6)),
       waterBaselineLiters: Number(input.baseline.waterImpactLiters.toFixed(6)),
       waterImpactDeltaLiters: Number(waterDeltaLiters.toFixed(6)),
-      waterStressIndex: Number(input.selected.waterSignal.waterStressIndex.toFixed(3)),
+      waterStressIndex: Number(
+        input.selected.waterSignal.waterStressIndex.toFixed(3),
+      ),
       waterScarcityImpact: Number(input.selected.scarcityImpact.toFixed(6)),
       signalConfidence: input.signalConfidence,
       decisionFrameId: input.decisionFrameId,
       waterPolicyVersion: WATER_POLICY_VERSION,
-      signalMode: signalSemantics.signalMode,
-      accountingMethod: signalSemantics.accountingMethod,
+      signalMode: input.selected.signalMode,
+      accountingMethod: input.selected.accountingMethod,
       proofHash: input.proofHash,
       decisionMode: input.data.decisionMode,
       waterAuthorityMode: input.waterAuthority.authorityMode,
@@ -986,11 +1080,17 @@ function buildCiResponse(input: {
       githubActionsMaxParallel: githubActionsEnforcement.maxParallel,
       githubActionsEnvironment: githubActionsEnforcement.environment,
       githubActionsNotBefore: githubActionsEnforcement.notBefore,
-      kubernetesRegion: kubernetesEnforcement.nodeSelector['topology.kubernetes.io/region'],
-      kubernetesDecision: kubernetesEnforcement.admission.allow ? kubernetesEnforcement.scaling.mode : 'blocked',
+      kubernetesRegion:
+        kubernetesEnforcement.nodeSelector["topology.kubernetes.io/region"],
+      kubernetesDecision: kubernetesEnforcement.admission.allow
+        ? kubernetesEnforcement.scaling.mode
+        : "blocked",
       kubernetesNotBefore: kubernetesEnforcement.execution.notBefore,
-      kubernetesReplicaFactor: kubernetesEnforcement.scaling.targetReplicaFactor,
-      selectedRegionReliabilityMultiplier: Number(input.selected.reliabilityMultiplier.toFixed(4)),
+      kubernetesReplicaFactor:
+        kubernetesEnforcement.scaling.targetReplicaFactor,
+      selectedRegionReliabilityMultiplier: Number(
+        input.selected.reliabilityMultiplier.toFixed(4),
+      ),
     },
     candidateEvaluations: input.candidateEvaluations.map((candidate) => ({
       region: candidate.region,
@@ -1012,7 +1112,9 @@ function buildCiResponse(input: {
       baseline_region: input.baseline.region,
       selected_region: input.selected.region,
       carbon_delta: Number(
-        (input.baseline.carbonIntensity - input.selected.carbonIntensity).toFixed(6)
+        (
+          input.baseline.carbonIntensity - input.selected.carbonIntensity
+        ).toFixed(6),
       ),
       water_delta: Number(waterDeltaLiters.toFixed(6)),
       signals_used: signalsUsed,
@@ -1025,7 +1127,9 @@ function buildCiResponse(input: {
       water_bundle_hash: input.waterAuthority.bundleHash,
       water_manifest_hash: input.waterAuthority.manifestHash,
       supplier_refs: input.waterAuthority.supplierSet,
-      facility_telemetry_refs: input.waterAuthority.telemetryRef ? [input.waterAuthority.telemetryRef] : [],
+      facility_telemetry_refs: input.waterAuthority.telemetryRef
+        ? [input.waterAuthority.telemetryRef]
+        : [],
       water_scenario: input.waterAuthority.scenario,
       external_policy_refs: [
         input.policyTrace.externalPolicy?.policyReference ?? null,
@@ -1039,64 +1143,68 @@ function buildCiResponse(input: {
       observed_runtime_target: input.transport.observedRuntimeTarget ?? null,
     },
     adapterContext: input.transport,
-  }
+  };
 }
 
 type PolicyDirectiveResponse = {
-  allow?: boolean
-  action?: WaterDecisionAction
-  reasonCode?: string
-  forceRegion?: string
-  denyRegions?: string[]
-  maxWaterStress?: number
-  maxCarbonIntensity?: number
-  policyReference?: string
+  allow?: boolean;
+  action?: WaterDecisionAction;
+  reasonCode?: string;
+  forceRegion?: string;
+  denyRegions?: string[];
+  maxWaterStress?: number;
+  maxCarbonIntensity?: number;
+  policyReference?: string;
   governance?: {
-    source?: string
-    score?: number
-    zone?: 'green' | 'amber' | 'red'
+    source?: string;
+    score?: number;
+    zone?: "green" | "amber" | "red";
     weights?: {
-      carbon?: number | null
-      water?: number | null
-      latency?: number | null
-      cost?: number | null
-    }
-    thresholds?: Record<string, number | null | undefined>
-  }
-}
+      carbon?: number | null;
+      water?: number | null;
+      latency?: number | null;
+      cost?: number | null;
+    };
+    thresholds?: Record<string, number | null | undefined>;
+  };
+};
 
 type AppliedPolicyResult = {
-  reasonCodes: string[]
-}
+  reasonCodes: string[];
+};
 
 export async function createDecision(
   data: RoutingRequestInput,
-  executionContext: DecisionExecutionContext = {}
+  executionContext: DecisionExecutionContext = {},
 ) {
-  const timestampIso = data.timestamp ?? executionContext.nowIso ?? new Date().toISOString()
+  const timestampIso =
+    data.timestamp ?? executionContext.nowIso ?? new Date().toISOString();
   const normalizedRequest = requestSchema.parse({
     ...data,
     policyVersion: data.policyVersion ?? WATER_POLICY_VERSION,
-    decisionMode: data.decisionMode ?? 'runtime_authorization',
+    decisionMode: data.decisionMode ?? "runtime_authorization",
     timestamp: timestampIso,
-  })
-  const artifactSnapshotStarted = Date.now()
-  const artifactHealth = getWaterArtifactHealthSnapshot()
-  const manifestDatasets = artifactHealth.manifestDatasets
-  const artifactSnapshotMs = Date.now() - artifactSnapshotStarted
-  const now = new Date(timestampIso)
-  const requestId = resolveRequestId(normalizedRequest)
-  const transport = resolveTransport(normalizedRequest)
-  const energyKwh = estimateEnergyKwh(normalizedRequest.jobType, normalizedRequest.estimatedEnergyKwh)
-  const candidateEvaluationStarted = Date.now()
+  });
+  const artifactSnapshotStarted = Date.now();
+  const artifactHealth = getWaterArtifactHealthSnapshot();
+  const manifestDatasets = artifactHealth.manifestDatasets;
+  const artifactSnapshotMs = Date.now() - artifactSnapshotStarted;
+  const now = new Date(timestampIso);
+  const requestId = resolveRequestId(normalizedRequest);
+  const transport = resolveTransport(normalizedRequest);
+  const energyKwh = estimateEnergyKwh(
+    normalizedRequest.jobType,
+    normalizedRequest.estimatedEnergyKwh,
+  );
+  const candidateEvaluationStarted = Date.now();
   const candidateEvaluations = await evaluateCandidates(
     normalizedRequest,
     energyKwh,
     now,
-    executionContext.resolvedCandidateOverrides
-  )
-  const candidateEvaluationMs = Date.now() - candidateEvaluationStarted
-  const precedenceProtected = isPrecedenceProtected(normalizedRequest)
+    executionContext.resolvedCandidateOverrides,
+  );
+  const candidateEvaluationMs = Date.now() - candidateEvaluationStarted;
+  const precedenceProtected = isPrecedenceProtected(normalizedRequest);
   const delayWindow = resolveDelayWindow({
     generatedAt: now,
     criticality: normalizedRequest.criticality,
@@ -1104,10 +1212,14 @@ export async function createDecision(
     criticalPath: normalizedRequest.criticalPath,
     deadlineAt: normalizedRequest.deadlineAt,
     maxDelayMinutes: normalizedRequest.maxDelayMinutes,
-  })
+  });
 
-  const baseline = resolveBaselineCandidate(normalizedRequest.preferredRegions, candidateEvaluations, candidateEvaluations[0])
-  const best = candidateEvaluations[0]
+  const baseline = resolveBaselineCandidate(
+    normalizedRequest.preferredRegions,
+    candidateEvaluations,
+    candidateEvaluations[0],
+  );
+  const best = candidateEvaluations[0];
   const bestGuardrail = evaluateWaterGuardrail({
     profile: normalizedRequest.waterPolicyProfile as WaterPolicyProfile,
     selectedWater: best.waterSignal,
@@ -1117,47 +1229,53 @@ export async function createDecision(
     fallbackUsed: best.waterSignal.fallbackUsed || best.carbonConfidence < 0.25,
     criticality: normalizedRequest.criticality,
     allowDelay: normalizedRequest.allowDelay,
-  })
+  });
 
-  let selected = best
-  let decision = bestGuardrail.action
-  let reasonCode = bestGuardrail.reasonCode
-  let rerouteFrom: CandidateEvaluation | null = null
-  let precedenceOverrideApplied = false
+  let selected = best;
+  let decision = bestGuardrail.action;
+  let reasonCode = bestGuardrail.reasonCode;
+  let rerouteFrom: CandidateEvaluation | null = null;
+  let precedenceOverrideApplied = false;
 
-  const firstNonBlocked = candidateEvaluations.find((candidate) => !candidate.guardrailCandidateBlocked)
-  if (bestGuardrail.hardBlock && firstNonBlocked && firstNonBlocked.region !== best.region) {
-    rerouteFrom = best
-    selected = firstNonBlocked
-    decision = 'reroute'
-    reasonCode = 'REROUTE_WATER_GUARDRAIL'
+  const firstNonBlocked = candidateEvaluations.find(
+    (candidate) => !candidate.guardrailCandidateBlocked,
+  );
+  if (
+    bestGuardrail.hardBlock &&
+    firstNonBlocked &&
+    firstNonBlocked.region !== best.region
+  ) {
+    rerouteFrom = best;
+    selected = firstNonBlocked;
+    decision = "reroute";
+    reasonCode = "REROUTE_WATER_GUARDRAIL";
   }
 
   if (bestGuardrail.hardBlock && !firstNonBlocked) {
     if (delayWindow.allowed) {
-      decision = 'delay'
-      reasonCode = 'DELAY_NO_SAFE_REGION'
+      decision = "delay";
+      reasonCode = "DELAY_NO_SAFE_REGION";
     } else {
-      decision = chooseNonDelayFallbackAction(normalizedRequest.criticality)
+      decision = chooseNonDelayFallbackAction(normalizedRequest.criticality);
       reasonCode =
-        normalizedRequest.criticality === 'critical'
-          ? 'THROTTLE_NO_SAFE_REGION'
+        normalizedRequest.criticality === "critical"
+          ? "THROTTLE_NO_SAFE_REGION"
           : normalizedRequest.criticalPath
-            ? 'DENY_CRITICAL_PATH_NO_SAFE_REGION'
-            : 'DENY_NO_SAFE_REGION'
+            ? "DENY_CRITICAL_PATH_NO_SAFE_REGION"
+            : "DENY_NO_SAFE_REGION";
     }
-    selected = best
+    selected = best;
   }
 
   if (
     precedenceProtected &&
-    decision === 'deny' &&
-    reasonCode.startsWith('DENY_') &&
+    decision === "deny" &&
+    reasonCode.startsWith("DENY_") &&
     !bestGuardrail.hardBlock
   ) {
-    decision = 'throttle'
-    reasonCode = 'THROTTLE_PRECEDENCE_PROTECTED_WATER'
-    precedenceOverrideApplied = true
+    decision = "throttle";
+    reasonCode = "THROTTLE_PRECEDENCE_PROTECTED_WATER";
+    precedenceOverrideApplied = true;
   }
 
   if (
@@ -1165,25 +1283,25 @@ export async function createDecision(
     bestGuardrail.hardBlock &&
     firstNonBlocked &&
     selected.region === firstNonBlocked.region &&
-    decision !== 'reroute'
+    decision !== "reroute"
   ) {
-    rerouteFrom = best
-    selected = firstNonBlocked
-    decision = 'reroute'
-    reasonCode = 'REROUTE_PRECEDENCE_PROTECTED_WATER'
-    precedenceOverrideApplied = true
+    rerouteFrom = best;
+    selected = firstNonBlocked;
+    decision = "reroute";
+    reasonCode = "REROUTE_PRECEDENCE_PROTECTED_WATER";
+    precedenceOverrideApplied = true;
   }
 
   if (
-    decision === 'run_now' &&
-    normalizedRequest.criticality === 'critical' &&
+    decision === "run_now" &&
+    normalizedRequest.criticality === "critical" &&
     selected.carbonIntensity > 450
   ) {
-    decision = 'throttle'
-    reasonCode = 'THROTTLE_CARBON_AND_CRITICALITY'
+    decision = "throttle";
+    reasonCode = "THROTTLE_CARBON_AND_CRITICALITY";
   }
 
-  const decisionFrameId = executionContext.decisionFrameId ?? randomUUID()
+  const decisionFrameId = executionContext.decisionFrameId ?? randomUUID();
   const policyRequest = {
     decisionFrameId,
     policyProfile: normalizedRequest.waterPolicyProfile as WaterPolicyProfile,
@@ -1192,7 +1310,8 @@ export async function createDecision(
     criticality: normalizedRequest.criticality,
     allowDelay: normalizedRequest.allowDelay,
     facilityId: normalizedRequest.facilityId ?? null,
-    scenario: (normalizedRequest.waterContext?.scenario ?? 'current') as WaterScenario,
+    scenario: (normalizedRequest.waterContext?.scenario ??
+      "current") as WaterScenario,
     bottleneckScore: normalizedRequest.schedulerHints?.bottleneckScore ?? null,
     weights: {
       carbon: normalizedRequest.carbonWeight ?? null,
@@ -1228,143 +1347,177 @@ export async function createDecision(
       baselineRegion: baseline.region,
     },
     timestamp: timestampIso,
-  }
+  };
 
-  const policyHookStarted = Date.now()
-  const sekedPolicy = await evaluateSekedPolicyAdapter(policyRequest)
-  const externalPolicy = await evaluateExternalPolicyHook(policyRequest)
-  const policyHookMs = Date.now() - policyHookStarted
+  const policyHookStarted = Date.now();
+  const sekedPolicy = await evaluateSekedPolicyAdapter(policyRequest);
+  const externalPolicy = await evaluateExternalPolicyHook(policyRequest);
+  const policyHookMs = Date.now() - policyHookStarted;
 
   const applyPolicyDirectives = (
     policy:
       | Pick<
           ExternalPolicyHookResult,
-          'strict' | 'reasonCodes' | 'hardFailure' | 'enforcedFailureAction' | 'response'
+          | "strict"
+          | "reasonCodes"
+          | "hardFailure"
+          | "enforcedFailureAction"
+          | "response"
         >
       | Pick<
           SekedPolicyAdapterResult,
-          'strict' | 'reasonCodes' | 'hardFailure' | 'enforcedFailureAction' | 'response'
+          | "strict"
+          | "reasonCodes"
+          | "hardFailure"
+          | "enforcedFailureAction"
+          | "response"
         >,
-    prefix: 'SEKED_POLICY' | 'EXTERNAL_POLICY'
+    prefix: "SEKED_POLICY" | "EXTERNAL_POLICY",
   ): AppliedPolicyResult => {
-    const reasonCodes = [...policy.reasonCodes]
+    const reasonCodes = [...policy.reasonCodes];
 
     if (policy.hardFailure && policy.enforcedFailureAction) {
-      decision = policy.enforcedFailureAction
-      reasonCode = `${prefix}_STRICT_FAILSAFE`
-      reasonCodes.push(`${prefix}_ENFORCED_FAILSAFE_ACTION`)
-      return { reasonCodes: Array.from(new Set(reasonCodes)) }
+      decision = policy.enforcedFailureAction;
+      reasonCode = `${prefix}_STRICT_FAILSAFE`;
+      reasonCodes.push(`${prefix}_ENFORCED_FAILSAFE_ACTION`);
+      return { reasonCodes: Array.from(new Set(reasonCodes)) };
     }
 
-    const response = policy.response as PolicyDirectiveResponse | null
+    const response = policy.response as PolicyDirectiveResponse | null;
     if (!response) {
-      return { reasonCodes: Array.from(new Set(reasonCodes)) }
+      return { reasonCodes: Array.from(new Set(reasonCodes)) };
     }
 
-    let constrainedCandidates = candidateEvaluations
+    let constrainedCandidates = candidateEvaluations;
 
     if (response.denyRegions?.length) {
-      const denySet = new Set(response.denyRegions)
-      constrainedCandidates = constrainedCandidates.filter((candidate) => !denySet.has(candidate.region))
-      reasonCodes.push(`${prefix}_DENY_REGIONS_APPLIED`)
+      const denySet = new Set(response.denyRegions);
+      constrainedCandidates = constrainedCandidates.filter(
+        (candidate) => !denySet.has(candidate.region),
+      );
+      reasonCodes.push(`${prefix}_DENY_REGIONS_APPLIED`);
     }
 
     if (response.maxWaterStress !== undefined) {
       constrainedCandidates = constrainedCandidates.filter(
-        (candidate) => candidate.waterSignal.waterStressIndex <= response.maxWaterStress!
-      )
-      reasonCodes.push(`${prefix}_MAX_WATER_STRESS_APPLIED`)
+        (candidate) =>
+          candidate.waterSignal.waterStressIndex <= response.maxWaterStress!,
+      );
+      reasonCodes.push(`${prefix}_MAX_WATER_STRESS_APPLIED`);
     }
 
     if (response.maxCarbonIntensity !== undefined) {
       constrainedCandidates = constrainedCandidates.filter(
-        (candidate) => candidate.carbonIntensity <= response.maxCarbonIntensity!
-      )
-      reasonCodes.push(`${prefix}_MAX_CARBON_INTENSITY_APPLIED`)
+        (candidate) =>
+          candidate.carbonIntensity <= response.maxCarbonIntensity!,
+      );
+      reasonCodes.push(`${prefix}_MAX_CARBON_INTENSITY_APPLIED`);
     }
 
     if (response.forceRegion) {
-      const forced = constrainedCandidates.find((candidate) => candidate.region === response.forceRegion)
+      const forced = constrainedCandidates.find(
+        (candidate) => candidate.region === response.forceRegion,
+      );
       if (forced) {
-        if (forced.region !== selected.region) rerouteFrom = selected
-        selected = forced
-        decision = 'reroute'
-        reasonCode = response.reasonCode || `${prefix}_FORCE_REGION`
-        reasonCodes.push(`${prefix}_FORCE_REGION_APPLIED`)
+        if (forced.region !== selected.region) rerouteFrom = selected;
+        selected = forced;
+        decision = "reroute";
+        reasonCode = response.reasonCode || `${prefix}_FORCE_REGION`;
+        reasonCodes.push(`${prefix}_FORCE_REGION_APPLIED`);
       } else if (policy.strict) {
-        decision = delayWindow.allowed ? 'delay' : chooseNonDelayFallbackAction(normalizedRequest.criticality)
-        reasonCode = `${prefix}_FORCE_REGION_UNAVAILABLE`
-        reasonCodes.push(`${prefix}_FORCE_REGION_UNAVAILABLE`)
+        decision = delayWindow.allowed
+          ? "delay"
+          : chooseNonDelayFallbackAction(normalizedRequest.criticality);
+        reasonCode = `${prefix}_FORCE_REGION_UNAVAILABLE`;
+        reasonCodes.push(`${prefix}_FORCE_REGION_UNAVAILABLE`);
       }
     } else if (constrainedCandidates.length > 0) {
-      const bestConstrained = [...constrainedCandidates].sort((a, b) => a.score - b.score)[0]
+      const bestConstrained = [...constrainedCandidates].sort(
+        (a, b) => a.score - b.score,
+      )[0];
       if (bestConstrained.region !== selected.region) {
-        rerouteFrom = selected
-        selected = bestConstrained
-        decision = 'reroute'
-        reasonCode = response.reasonCode || `${prefix}_REROUTE`
-        reasonCodes.push(`${prefix}_REROUTE_APPLIED`)
+        rerouteFrom = selected;
+        selected = bestConstrained;
+        decision = "reroute";
+        reasonCode = response.reasonCode || `${prefix}_REROUTE`;
+        reasonCodes.push(`${prefix}_REROUTE_APPLIED`);
       }
     } else if (policy.strict) {
-      decision = delayWindow.allowed ? 'delay' : chooseNonDelayFallbackAction(normalizedRequest.criticality)
-      reasonCode = `${prefix}_CONSTRAINTS_NO_CANDIDATE`
-      reasonCodes.push(`${prefix}_NO_FEASIBLE_CANDIDATE`)
+      decision = delayWindow.allowed
+        ? "delay"
+        : chooseNonDelayFallbackAction(normalizedRequest.criticality);
+      reasonCode = `${prefix}_CONSTRAINTS_NO_CANDIDATE`;
+      reasonCodes.push(`${prefix}_NO_FEASIBLE_CANDIDATE`);
     }
 
     if (response.action) {
-      decision = response.action
-      reasonCode = response.reasonCode || `${prefix}_ACTION_OVERRIDE`
-      reasonCodes.push(`${prefix}_ACTION_OVERRIDE`)
+      decision = response.action;
+      reasonCode = response.reasonCode || `${prefix}_ACTION_OVERRIDE`;
+      reasonCodes.push(`${prefix}_ACTION_OVERRIDE`);
     } else if (response.allow === false) {
-      decision = delayWindow.allowed ? 'delay' : chooseNonDelayFallbackAction(normalizedRequest.criticality)
-      reasonCode = response.reasonCode || (decision === 'delay' ? `${prefix}_DELAY` : `${prefix}_DENY`)
-      reasonCodes.push(`${prefix}_DENY`)
+      decision = delayWindow.allowed
+        ? "delay"
+        : chooseNonDelayFallbackAction(normalizedRequest.criticality);
+      reasonCode =
+        response.reasonCode ||
+        (decision === "delay" ? `${prefix}_DELAY` : `${prefix}_DENY`);
+      reasonCodes.push(`${prefix}_DENY`);
     }
 
-    return { reasonCodes: Array.from(new Set(reasonCodes)) }
-  }
+    return { reasonCodes: Array.from(new Set(reasonCodes)) };
+  };
 
-  const sekedApplied = applyPolicyDirectives(sekedPolicy, 'SEKED_POLICY')
-  const externalApplied = applyPolicyDirectives(externalPolicy, 'EXTERNAL_POLICY')
+  const sekedApplied = applyPolicyDirectives(sekedPolicy, "SEKED_POLICY");
+  const externalApplied = applyPolicyDirectives(
+    externalPolicy,
+    "EXTERNAL_POLICY",
+  );
 
-  if (decision === 'delay' && !delayWindow.allowed) {
-    decision = chooseNonDelayFallbackAction(normalizedRequest.criticality)
+  if (decision === "delay" && !delayWindow.allowed) {
+    decision = chooseNonDelayFallbackAction(normalizedRequest.criticality);
     reasonCode =
-      delayWindow.reason === 'critical_path'
-        ? 'DENY_CRITICAL_PATH_DELAY_FORBIDDEN'
-        : delayWindow.reason === 'deadline_exceeded'
-          ? 'DENY_DELAY_WINDOW_EXHAUSTED'
-          : normalizedRequest.criticality === 'critical'
-            ? 'THROTTLE_DELAY_NOT_PERMITTED'
-            : 'DENY_DELAY_NOT_PERMITTED'
+      delayWindow.reason === "critical_path"
+        ? "DENY_CRITICAL_PATH_DELAY_FORBIDDEN"
+        : delayWindow.reason === "deadline_exceeded"
+          ? "DENY_DELAY_WINDOW_EXHAUSTED"
+          : normalizedRequest.criticality === "critical"
+            ? "THROTTLE_DELAY_NOT_PERMITTED"
+            : "DENY_DELAY_NOT_PERMITTED";
   }
 
-  const doctrineAssemblyStarted = Date.now()
+  const doctrineAssemblyStarted = Date.now();
   const signalConfidence = computeSignalConfidence(
     selected.carbonConfidence,
-    selected.waterSignal.confidence
-  )
+    selected.waterSignal.confidence,
+  );
   const assurance = buildAssuranceStatus({
     datasetHashesPresent: manifestDatasets.every(
-      (dataset) => Boolean(dataset.file_hash) && dataset.file_hash !== 'unverified'
+      (dataset) =>
+        Boolean(dataset.file_hash) && dataset.file_hash !== "unverified",
     ),
-    bundleHealthy: artifactHealth.checks.bundlePresent && artifactHealth.checks.schemaCompatible,
+    bundleHealthy:
+      artifactHealth.checks.bundlePresent &&
+      artifactHealth.checks.schemaCompatible,
     manifestHealthy: artifactHealth.checks.manifestPresent,
-    waterFallbackUsed: selected.waterSignal.fallbackUsed || selected.waterAuthority.authorityMode === 'fallback',
+    waterFallbackUsed:
+      selected.waterSignal.fallbackUsed ||
+      selected.waterAuthority.authorityMode === "fallback",
     carbonFallbackUsed: selected.carbonFallbackUsed,
     manifestDatasets,
-  })
+  });
   const operatingMode = resolveOperatingMode({
     signalConfidence,
     carbonFallbackUsed: selected.carbonFallbackUsed,
-    waterFallbackUsed: selected.waterSignal.fallbackUsed || selected.waterAuthority.authorityMode === 'fallback',
+    waterFallbackUsed:
+      selected.waterSignal.fallbackUsed ||
+      selected.waterAuthority.authorityMode === "fallback",
     disagreementPct: selected.carbonDisagreementPct,
     hardWaterBlock: bestGuardrail.hardBlock,
     noSafeRegion: !firstNonBlocked,
     precedenceProtected,
     criticality: normalizedRequest.criticality,
     allowDelay: delayWindow.allowed,
-  })
+  });
   const operatingModeDecision = applyOperatingModePolicy({
     mode: operatingMode,
     decision,
@@ -1372,7 +1525,9 @@ export async function createDecision(
     context: {
       signalConfidence,
       carbonFallbackUsed: selected.carbonFallbackUsed,
-      waterFallbackUsed: selected.waterSignal.fallbackUsed || selected.waterAuthority.authorityMode === 'fallback',
+      waterFallbackUsed:
+        selected.waterSignal.fallbackUsed ||
+        selected.waterAuthority.authorityMode === "fallback",
       disagreementPct: selected.carbonDisagreementPct,
       hardWaterBlock: bestGuardrail.hardBlock,
       noSafeRegion: !firstNonBlocked,
@@ -1380,19 +1535,23 @@ export async function createDecision(
       criticality: normalizedRequest.criticality,
       allowDelay: delayWindow.allowed,
     },
-  })
-  decision = operatingModeDecision.adjustedAction
-  reasonCode = operatingModeDecision.adjustedReasonCode
+  });
+  decision = operatingModeDecision.adjustedAction;
+  reasonCode = operatingModeDecision.adjustedReasonCode;
   const mss = buildMssState({
     candidate: selected,
     assurance,
     carbonFreshnessSec: selected.carbonFreshnessSec,
     waterFreshnessSec: selected.waterFreshnessSec,
     cacheStatus: selected.cacheStatus,
-  })
-  const sekedGovernance = (sekedPolicy.response as PolicyDirectiveResponse | null)?.governance ?? null
-  const externalGovernance = (externalPolicy.response as PolicyDirectiveResponse | null)?.governance ?? null
-  const policyGovernance = sekedGovernance ?? externalGovernance
+  });
+  const sekedGovernance =
+    (sekedPolicy.response as PolicyDirectiveResponse | null)?.governance ??
+    null;
+  const externalGovernance =
+    (externalPolicy.response as PolicyDirectiveResponse | null)?.governance ??
+    null;
+  const policyGovernance = sekedGovernance ?? externalGovernance;
   const policyTrace = {
     ...bestGuardrail.trace,
     delayWindow,
@@ -1402,7 +1561,7 @@ export async function createDecision(
         ...sekedApplied.reasonCodes,
         ...externalApplied.reasonCodes,
         ...operatingModeDecision.reasonCodes,
-      ])
+      ]),
     ),
     sekedPolicy: {
       enabled: sekedPolicy.enabled,
@@ -1424,7 +1583,10 @@ export async function createDecision(
         : null,
       thresholds: sekedGovernance?.thresholds
         ? Object.fromEntries(
-            Object.entries(sekedGovernance.thresholds).map(([key, value]) => [key, value ?? null])
+            Object.entries(sekedGovernance.thresholds).map(([key, value]) => [
+              key,
+              value ?? null,
+            ]),
           )
         : null,
       policyReference: sekedPolicy.policyReference,
@@ -1449,7 +1611,9 @@ export async function createDecision(
         : null,
       thresholds: externalGovernance?.thresholds
         ? Object.fromEntries(
-            Object.entries(externalGovernance.thresholds).map(([key, value]) => [key, value ?? null])
+            Object.entries(externalGovernance.thresholds).map(
+              ([key, value]) => [key, value ?? null],
+            ),
           )
         : null,
       policyReference: externalPolicy.policyReference,
@@ -1469,13 +1633,18 @@ export async function createDecision(
             : null,
           thresholds: policyGovernance.thresholds
             ? Object.fromEntries(
-                Object.entries(policyGovernance.thresholds).map(([key, value]) => [key, value ?? null])
+                Object.entries(policyGovernance.thresholds).map(
+                  ([key, value]) => [key, value ?? null],
+                ),
               )
             : null,
-          policyReference: sekedPolicy.policyReference ?? externalPolicy.policyReference ?? null,
+          policyReference:
+            sekedPolicy.policyReference ??
+            externalPolicy.policyReference ??
+            null,
         }
       : null,
-  }
+  };
   const decisionExplanation = buildDecisionExplanation({
     decision,
     reasonCode,
@@ -1483,67 +1652,135 @@ export async function createDecision(
     baseline,
     candidates: candidateEvaluations,
     profile: normalizedRequest.waterPolicyProfile as WaterPolicyProfile,
-  })
-  recordTelemetryMetric(telemetryMetricNames.policyEvaluationCount, 'counter', 1, {
-    decision_action: decision,
-    criticality: normalizedRequest.criticality,
-    critical_path: normalizedRequest.criticalPath,
-  })
-  recordTelemetryMetric(telemetryMetricNames.authorizationActionCount, 'counter', 1, {
-    action: decision,
-    runtime: transport.runtime,
-    transport: transport.transport,
-  })
+  });
+  recordTelemetryMetric(
+    telemetryMetricNames.policyEvaluationCount,
+    "counter",
+    1,
+    {
+      decision_action: decision,
+      criticality: normalizedRequest.criticality,
+      critical_path: normalizedRequest.criticalPath,
+    },
+  );
+  recordTelemetryMetric(
+    telemetryMetricNames.authorizationActionCount,
+    "counter",
+    1,
+    {
+      action: decision,
+      runtime: transport.runtime,
+      transport: transport.transport,
+    },
+  );
   recordTelemetryMetric(
     telemetryMetricNames.authorizationDisagreementPct,
-    'gauge',
+    "gauge",
     selected.carbonDisagreementPct,
     {
       action: decision,
       runtime: transport.runtime,
-    }
-  )
-  if (externalPolicy.hardFailure || sekedPolicy.hardFailure || decision === 'deny') {
-    recordTelemetryMetric(telemetryMetricNames.authorizationFailClosedCount, 'counter', 1, {
-      reason_code: reasonCode,
-      criticality: normalizedRequest.criticality,
-    })
+    },
+  );
+  if (
+    externalPolicy.hardFailure ||
+    sekedPolicy.hardFailure ||
+    decision === "deny"
+  ) {
+    recordTelemetryMetric(
+      telemetryMetricNames.authorizationFailClosedCount,
+      "counter",
+      1,
+      {
+        reason_code: reasonCode,
+        criticality: normalizedRequest.criticality,
+      },
+    );
   }
   const providerSnapshotRefs = Array.from(
-    new Set(candidateEvaluations.map((candidate) => candidate.providerSnapshotRef))
-  )
-  const waterAuthority = selected.waterAuthority
-  if (normalizedRequest.decisionMode === 'scenario_planning') {
-    recordTelemetryMetric(telemetryMetricNames.waterScenarioPlanningCount, 'counter', 1, {
-      scenario: waterAuthority.scenario,
-      authority_mode: waterAuthority.authorityMode,
-    })
+    new Set(
+      candidateEvaluations.map((candidate) => candidate.providerSnapshotRef),
+    ),
+  );
+  const waterAuthority = selected.waterAuthority;
+  if (normalizedRequest.decisionMode === "scenario_planning") {
+    recordTelemetryMetric(
+      telemetryMetricNames.waterScenarioPlanningCount,
+      "counter",
+      1,
+      {
+        scenario: waterAuthority.scenario,
+        authority_mode: waterAuthority.authorityMode,
+      },
+    );
   }
   if (precedenceOverrideApplied) {
-    recordTelemetryMetric(telemetryMetricNames.precedenceOverrideCount, 'counter', 1, {
-      reason_code: reasonCode,
-      scenario: waterAuthority.scenario,
-    })
+    recordTelemetryMetric(
+      telemetryMetricNames.precedenceOverrideCount,
+      "counter",
+      1,
+      {
+        reason_code: reasonCode,
+        scenario: waterAuthority.scenario,
+      },
+    );
   }
-  if (selected.waterSignal.fallbackUsed || waterAuthority.authorityMode === 'fallback') {
-    recordTelemetryMetric(telemetryMetricNames.waterSupplierFallbackRate, 'counter', 1, {
-      scenario: waterAuthority.scenario,
-      region: selected.region,
-    })
+  if (
+    selected.waterSignal.fallbackUsed ||
+    waterAuthority.authorityMode === "fallback"
+  ) {
+    recordTelemetryMetric(
+      telemetryMetricNames.waterSupplierFallbackRate,
+      "counter",
+      1,
+      {
+        scenario: waterAuthority.scenario,
+        region: selected.region,
+      },
+    );
   }
-  if (selected.waterSignal.fallbackUsed || selected.carbonFallbackUsed || waterAuthority.authorityMode === 'fallback') {
-    recordTelemetryMetric(telemetryMetricNames.authorizationFallbackCount, 'counter', 1, {
-      action: decision,
-      runtime: transport.runtime,
-    })
+  if (
+    selected.waterSignal.fallbackUsed ||
+    selected.carbonFallbackUsed ||
+    waterAuthority.authorityMode === "fallback"
+  ) {
+    recordTelemetryMetric(
+      telemetryMetricNames.authorizationFallbackCount,
+      "counter",
+      1,
+      {
+        action: decision,
+        runtime: transport.runtime,
+      },
+    );
   }
   if (policyTrace.guardrailTriggered) {
-    recordTelemetryMetric(telemetryMetricNames.waterGuardrailTriggeredCount, 'counter', 1, {
-      action: decision,
-      profile: normalizedRequest.waterPolicyProfile,
-      runtime: transport.runtime,
-    })
+    recordTelemetryMetric(
+      telemetryMetricNames.waterGuardrailTriggeredCount,
+      "counter",
+      1,
+      {
+        action: decision,
+        profile: normalizedRequest.waterPolicyProfile,
+        runtime: transport.runtime,
+      },
+    );
   }
+  const requestAt = new Date(timestampIso);
+  const kubernetesEnforcementBase = buildKubernetesEnforcementPlan({
+    decisionFrameId,
+    decision,
+    decisionMode: normalizedRequest.decisionMode as WaterDecisionMode,
+    reasonCode,
+    selectedRegion: selected.region,
+    policyProfile: normalizedRequest.waterPolicyProfile,
+    criticality: normalizedRequest.criticality,
+    generatedAt: now,
+    notBefore: delayWindow.notBefore,
+    delayMinutes: delayWindow.delayMinutes ?? undefined,
+    waterAuthorityMode: waterAuthority.authorityMode,
+    waterScenario: waterAuthority.scenario,
+  });
   const proofHash = buildDecisionProofHash({
     request: normalizedRequest as unknown as Record<string, unknown>,
     selected: {
@@ -1559,21 +1796,30 @@ export async function createDecision(
       carbonIntensity: baseline.carbonIntensity,
     },
     policyTrace: policyTrace as unknown as Record<string, unknown>,
-    enforcementPlan: buildKubernetesEnforcementPlan({
-      decisionFrameId,
-      decision,
-      reasonCode,
-      selectedRegion: selected.region,
-      policyProfile: normalizedRequest.waterPolicyProfile,
-      criticality: normalizedRequest.criticality,
-      generatedAt: now,
-      notBefore: delayWindow.notBefore,
-      delayMinutes: delayWindow.delayMinutes ?? undefined,
-    }) as unknown as Record<string, unknown>,
+    enforcementPlan: kubernetesEnforcementBase as unknown as Record<
+      string,
+      unknown
+    >,
     providerSnapshotRefs,
     signalMode: selected.signalMode,
     accountingMethod: selected.accountingMethod,
-  })
+  });
+  const kubernetesEnforcement = {
+    ...kubernetesEnforcementBase,
+    annotations: {
+      ...kubernetesEnforcementBase.annotations,
+      "ecobe.io/proof-hash": proofHash,
+    },
+  };
+  const githubActionsEnforcement = buildGithubActionsEnforcementBundle({
+    decisionFrameId,
+    decision,
+    decisionMode: normalizedRequest.decisionMode as WaterDecisionMode,
+    selectedRegion: selected.region,
+    preferredRegions: normalizedRequest.preferredRegions,
+    criticality: normalizedRequest.criticality,
+    notBefore: kubernetesEnforcement.execution.notBefore,
+  });
   const response = buildCiResponse({
     data: normalizedRequest,
     requestId,
@@ -1591,7 +1837,7 @@ export async function createDecision(
     fallbackUsed:
       selected.waterSignal.fallbackUsed ||
       selected.carbonFallbackUsed ||
-      selected.waterAuthority.authorityMode === 'fallback',
+      selected.waterAuthority.authorityMode === "fallback",
     candidateEvaluations,
     proofHash,
     providerSnapshotRefs,
@@ -1600,26 +1846,33 @@ export async function createDecision(
     assurance,
     mss,
     decisionExplanation,
-  })
-  const doctrineAssemblyMs = Date.now() - doctrineAssemblyStarted
-  const traceAssemblyStarted = Date.now()
-  const sekedDirective = sekedPolicy.response as PolicyDirectiveResponse | null
-  const externalDirective = externalPolicy.response as PolicyDirectiveResponse | null
+    kubernetesEnforcement,
+    githubActionsEnforcement,
+    requestAt,
+  });
+  const doctrineAssemblyMs = Date.now() - doctrineAssemblyStarted;
+  const traceAssemblyStarted = Date.now();
+  const sekedDirective = sekedPolicy.response as PolicyDirectiveResponse | null;
+  const externalDirective =
+    externalPolicy.response as PolicyDirectiveResponse | null;
   const governanceSource = deriveGovernanceSource({
     sekedApplied: Boolean(sekedPolicy.enabled && sekedPolicy.evaluated),
-    externalApplied: Boolean(externalPolicy.enabled && externalPolicy.evaluated),
+    externalApplied: Boolean(
+      externalPolicy.enabled && externalPolicy.evaluated,
+    ),
     sekedSource: sekedDirective?.governance?.source ?? null,
     externalSource: externalDirective?.governance?.source ?? null,
-  })
+  });
   const governanceMetadata =
-    sekedDirective?.governance ?? externalDirective?.governance ?? null
-  const governanceThresholds: Record<string, number | null> | null = governanceMetadata?.thresholds
-    ? Object.fromEntries(
-        Object.entries(governanceMetadata.thresholds)
-          .filter(([, value]) => typeof value === 'number' || value == null)
-          .map(([key, value]) => [key, value ?? null] as const)
-      )
-    : null
+    sekedDirective?.governance ?? externalDirective?.governance ?? null;
+  const governanceThresholds: Record<string, number | null> | null =
+    governanceMetadata?.thresholds
+      ? Object.fromEntries(
+          Object.entries(governanceMetadata.thresholds)
+            .filter(([, value]) => typeof value === "number" || value == null)
+            .map(([key, value]) => [key, value ?? null] as const),
+        )
+      : null;
   const traceSeed: TraceEnvelopeSeed = {
     identity: {
       traceId: `trace:${decisionFrameId}`,
@@ -1653,11 +1906,13 @@ export async function createDecision(
         fallbackApplied:
           candidate.carbonFallbackUsed ||
           candidate.waterSignal.fallbackUsed ||
-          candidate.waterAuthority.authorityMode === 'fallback',
+          candidate.waterAuthority.authorityMode === "fallback",
       })),
     },
     decisionPath: {
-      evaluatedRegions: candidateEvaluations.map((candidate) => candidate.region),
+      evaluatedRegions: candidateEvaluations.map(
+        (candidate) => candidate.region,
+      ),
       rejectedRegions: candidateEvaluations
         .filter((candidate) => candidate.region !== selected.region)
         .map((candidate) => ({
@@ -1666,7 +1921,7 @@ export async function createDecision(
             new Set([
               ...(candidate.guardrailReasons ?? []),
               ...(candidate.defensibleReasonCodes ?? []),
-            ])
+            ]),
           ),
         })),
       selectedRegion: selected.region,
@@ -1684,7 +1939,7 @@ export async function createDecision(
       },
     },
     governance: {
-      label: 'SAIQ',
+      label: "SAIQ",
       source: governanceSource,
       strict: Boolean(sekedPolicy.strict || externalPolicy.strict),
       score: governanceMetadata?.score ?? null,
@@ -1699,14 +1954,12 @@ export async function createDecision(
         : null,
       thresholds: governanceThresholds,
       constraintsApplied: Array.from(
-        new Set([
-          ...sekedApplied.reasonCodes,
-          ...externalApplied.reasonCodes,
-        ])
+        new Set([...sekedApplied.reasonCodes, ...externalApplied.reasonCodes]),
       ),
-      policyReferences: [sekedPolicy.policyReference, externalPolicy.policyReference].filter(
-        (reference): reference is string => Boolean(reference)
-      ),
+      policyReferences: [
+        sekedPolicy.policyReference,
+        externalPolicy.policyReference,
+      ].filter((reference): reference is string => Boolean(reference)),
       seked: {
         enabled: sekedPolicy.enabled,
         strict: sekedPolicy.strict,
@@ -1737,8 +1990,8 @@ export async function createDecision(
       supplierRefs: waterAuthority.supplierSet,
       adapter: transport,
     },
-  }
-  const traceAssemblyMs = Date.now() - traceAssemblyStarted
+  };
+  const traceAssemblyMs = Date.now() - traceAssemblyStarted;
 
   const stageTimings: DecisionStageTimings = {
     artifactSnapshotMs,
@@ -1746,53 +1999,53 @@ export async function createDecision(
     policyHookMs,
     doctrineAssemblyMs,
     traceAssemblyMs,
-  }
+  };
 
   recordTelemetryMetric(
     telemetryMetricNames.authorizationArtifactSnapshotLatencyMs,
-    'histogram',
+    "histogram",
     artifactSnapshotMs,
     {
       runtime: transport.runtime,
       transport: transport.transport,
-    }
-  )
+    },
+  );
   recordTelemetryMetric(
     telemetryMetricNames.authorizationCandidateEvaluationLatencyMs,
-    'histogram',
+    "histogram",
     candidateEvaluationMs,
     {
       runtime: transport.runtime,
       transport: transport.transport,
-    }
-  )
+    },
+  );
   recordTelemetryMetric(
     telemetryMetricNames.authorizationPolicyHookLatencyMs,
-    'histogram',
+    "histogram",
     policyHookMs,
     {
       runtime: transport.runtime,
       transport: transport.transport,
-    }
-  )
+    },
+  );
   recordTelemetryMetric(
     telemetryMetricNames.authorizationDoctrineAssemblyLatencyMs,
-    'histogram',
+    "histogram",
     doctrineAssemblyMs,
     {
       runtime: transport.runtime,
       transport: transport.transport,
-    }
-  )
+    },
+  );
   recordTelemetryMetric(
     telemetryMetricNames.authorizationTraceAssemblyLatencyMs,
-    'histogram',
+    "histogram",
     traceAssemblyMs,
     {
       runtime: transport.runtime,
       transport: transport.transport,
-    }
-  )
+    },
+  );
 
   return {
     response,
@@ -1811,10 +2064,12 @@ export async function createDecision(
       waterArtifactMetadata: artifactHealth.artifactMetadata,
       traceSeed,
     },
-  }
+  };
 }
 
-function buildTraceProviderTimings(candidateEvaluations: CandidateEvaluation[]) {
+function buildTraceProviderTimings(
+  candidateEvaluations: CandidateEvaluation[],
+) {
   return candidateEvaluations.map((candidate) => ({
     region: candidate.region,
     latencyMs: candidate.providerResolutionMs,
@@ -1823,23 +2078,23 @@ function buildTraceProviderTimings(candidateEvaluations: CandidateEvaluation[]) 
     waterFreshnessSec: candidate.waterFreshnessSec,
     stalenessSec:
       candidate.carbonFreshnessSec ?? candidate.waterFreshnessSec ?? null,
-  }))
+  }));
 }
 
 async function reserveNextTraceSequence(tx: any): Promise<number> {
   const rows = (await tx.$queryRawUnsafe(
-    `SELECT nextval(pg_get_serial_sequence('"DecisionTraceEnvelope"', 'sequenceNumber'))::int AS value`
-  )) as Array<{ value: number | string }>
+    `SELECT nextval(pg_get_serial_sequence('"DecisionTraceEnvelope"', 'sequenceNumber'))::int AS value`,
+  )) as Array<{ value: number | string }>;
 
-  const value = Number(rows?.[0]?.value ?? 0)
+  const value = Number(rows?.[0]?.value ?? 0);
   if (!Number.isFinite(value) || value <= 0) {
-    throw new Error('TRACE_SEQUENCE_RESERVATION_FAILED')
+    throw new Error("TRACE_SEQUENCE_RESERVATION_FAILED");
   }
-  return value
+  return value;
 }
 
 function normalizeTraceRow(row: any) {
-  if (!row) return null
+  if (!row) return null;
 
   return {
     sequenceNumber: Number(row.sequenceNumber),
@@ -1849,29 +2104,31 @@ function normalizeTraceRow(row: any) {
     inputSignalHash: row.inputSignalHash,
     payload: row.payload as TraceEnvelope,
     createdAt:
-      row.createdAt instanceof Date ? row.createdAt.toISOString() : new Date(row.createdAt).toISOString(),
-  }
+      row.createdAt instanceof Date
+        ? row.createdAt.toISOString()
+        : new Date(row.createdAt).toISOString(),
+  };
 }
 
 async function getDecisionTraceRecord(decisionFrameId: string) {
   const trace = await prisma.decisionTraceEnvelope.findUnique({
     where: { decisionFrameId },
-  })
+  });
 
-  return normalizeTraceRow(trace)
+  return normalizeTraceRow(trace);
 }
 
 export async function finalizeCiDecisionResponse(
   result: Awaited<ReturnType<typeof createDecision>>,
   latencyMs?: { total: number; compute: number },
   options?: {
-    idempotencyReplayed?: boolean
-  }
+    idempotencyReplayed?: boolean;
+  },
 ) {
-  const endedAt = new Date()
+  const endedAt = new Date();
   const startedAt = latencyMs
     ? new Date(endedAt.getTime() - Math.max(0, latencyMs.total))
-    : endedAt
+    : endedAt;
   const span = buildDecisionSpanRecord({
     startedAt,
     endedAt,
@@ -1886,12 +2143,17 @@ export async function finalizeCiDecisionResponse(
     adapterId: result.response.decisionEnvelope.transport.adapterId,
     transport: result.response.decisionEnvelope.transport.transport,
     traceId: result.persistable.request.telemetryContext?.traceId,
-  })
-  const exportEnabled = Boolean(env.OTEL_EXPORT_ENABLED && env.OTEL_EXPORT_ENDPOINT)
+  });
+  const exportEnabled = Boolean(
+    env.OTEL_EXPORT_ENABLED && env.OTEL_EXPORT_ENDPOINT,
+  );
   if (exportEnabled) {
     void exportDecisionSpanRecord(span).catch((error) => {
-      console.warn('Failed to export decision span record asynchronously:', error)
-    })
+      console.warn(
+        "Failed to export decision span record asynchronously:",
+        error,
+      );
+    });
   }
 
   const responsePayload = {
@@ -1909,7 +2171,7 @@ export async function finalizeCiDecisionResponse(
           providerResolution: result.persistable.selected.providerResolutionMs,
           cacheStatus: result.persistable.selected.cacheStatus,
           influencedDecision:
-            result.persistable.selected.cacheStatus !== 'live' ||
+            result.persistable.selected.cacheStatus !== "live" ||
             result.persistable.selected.carbonFallbackUsed ||
             result.persistable.selected.waterSignal.fallbackUsed,
         }
@@ -1927,68 +2189,79 @@ export async function finalizeCiDecisionResponse(
         endpoint: exportEnabled ? env.OTEL_EXPORT_ENDPOINT : null,
       },
     },
-  }
+  };
 
-  return CiResponseV2Schema.parse(responsePayload)
+  return CiResponseV2Schema.parse(responsePayload);
 }
 
 async function persistCIDecisionRow(
   decisionFrameId: string,
-  data: any
+  data: any,
 ): Promise<{ id: string }> {
-  return withDecisionPersistenceRetry(`persist core CI decision ${decisionFrameId}`, async () => {
-    const existing = await prisma.cIDecision.findFirst({
-      where: { decisionFrameId },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true },
-    })
+  return withDecisionPersistenceRetry(
+    `persist core CI decision ${decisionFrameId}`,
+    async () => {
+      const existing = await prisma.cIDecision.findFirst({
+        where: { decisionFrameId },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
 
-    if (existing) {
-      return existing
-    }
+      if (existing) {
+        return existing;
+      }
 
-    return prisma.cIDecision.create({
-      data,
-      select: { id: true },
-    })
-  })
+      return prisma.cIDecision.create({
+        data,
+        select: { id: true },
+      });
+    },
+  );
 }
 
 async function persistDecisionTraceEnvelope(
   decisionFrameId: string,
   data: {
-    sequenceNumber: number
-    traceHash: string
-    previousTraceHash: string | null
-    inputSignalHash: string
-    payload: TraceEnvelope
-  }
+    sequenceNumber: number;
+    traceHash: string;
+    previousTraceHash: string | null;
+    inputSignalHash: string;
+    payload: TraceEnvelope;
+  },
 ) {
-  return withDecisionPersistenceRetry(`persist decision trace ${decisionFrameId}`, async () =>
-    prisma.decisionTraceEnvelope.upsert({
-      where: { decisionFrameId },
-      update: {},
-      create: {
-        sequenceNumber: data.sequenceNumber,
-        decisionFrameId,
-        traceHash: data.traceHash,
-        previousTraceHash: data.previousTraceHash,
-        inputSignalHash: data.inputSignalHash,
-        payload: data.payload,
-      },
-      select: { traceHash: true },
-    })
-  )
+  return withDecisionPersistenceRetry(
+    `persist decision trace ${decisionFrameId}`,
+    async () =>
+      prisma.decisionTraceEnvelope.upsert({
+        where: { decisionFrameId },
+        update: {},
+        create: {
+          sequenceNumber: data.sequenceNumber,
+          decisionFrameId,
+          traceHash: data.traceHash,
+          previousTraceHash: data.previousTraceHash,
+          inputSignalHash: data.inputSignalHash,
+          payload: data.payload,
+        },
+        select: { traceHash: true },
+      }),
+  );
 }
 
 async function persistCiAncillaryDecisionArtifacts(input: {
-  persistedDecisionId: string
-  validatedResponse: CiResponseV2
-  result: Awaited<ReturnType<typeof createDecision>>
-  manifestDatasets: WaterManifestDataset[]
-  waterArtifacts: WaterArtifactMetadata
+  persistedDecisionId: string;
+  validatedResponse: CiResponseV2;
+  result: Awaited<ReturnType<typeof createDecision>>;
+  manifestDatasets: WaterManifestDataset[];
+  waterArtifacts: WaterArtifactMetadata;
 }) {
-  const { persistedDecisionId, validatedResponse, result, manifestDatasets, waterArtifacts } = input
+  const {
+    persistedDecisionId,
+    validatedResponse,
+    result,
+    manifestDatasets,
+    waterArtifacts,
+  } = input;
 
   const eventPayload = buildDecisionEvaluatedEvent({
     decisionId: persistedDecisionId,
@@ -2004,34 +2277,38 @@ async function persistCiAncillaryDecisionArtifacts(input: {
     sourceProvenance: manifestDatasets as unknown as Record<string, unknown>[],
     canonicalDecision: validatedResponse.decisionEnvelope,
     proof: validatedResponse.proofEnvelope,
-    adapter: validatedResponse.adapterContext ?? validatedResponse.decisionEnvelope.transport,
+    adapter:
+      validatedResponse.adapterContext ??
+      validatedResponse.decisionEnvelope.transport,
     timestamp: validatedResponse.proofRecord.timestamp,
-  })
+  });
 
-  const providerSnapshots = validatedResponse.waterAuthority.supplierSet.map((supplier) => ({
-    provider: supplier,
-    authorityRole:
-      supplier === 'aqueduct'
-        ? 'baseline'
-        : supplier.startsWith('facility:')
-          ? 'facility'
-          : 'overlay',
-    region: validatedResponse.selectedRegion,
-    scenario: validatedResponse.waterAuthority.scenario,
-    authorityMode: validatedResponse.waterAuthority.authorityMode,
-    confidence: validatedResponse.waterAuthority.confidence,
-    evidenceRefs: validatedResponse.waterAuthority.evidenceRefs,
-    observedAt: new Date(
-      validatedResponse.waterAuthority.telemetryRef
-        ? new Date().toISOString()
-        : waterArtifacts.bundleGeneratedAt ?? new Date().toISOString()
-    ),
-    metadata: {
-      facilityId: validatedResponse.waterAuthority.facilityId,
-      bundleHash: waterArtifacts.bundleHash,
-      manifestHash: waterArtifacts.manifestHash,
-    },
-  }))
+  const providerSnapshots = validatedResponse.waterAuthority.supplierSet.map(
+    (supplier) => ({
+      provider: supplier,
+      authorityRole:
+        supplier === "aqueduct"
+          ? "baseline"
+          : supplier.startsWith("facility:")
+            ? "facility"
+            : "overlay",
+      region: validatedResponse.selectedRegion,
+      scenario: validatedResponse.waterAuthority.scenario,
+      authorityMode: validatedResponse.waterAuthority.authorityMode,
+      confidence: validatedResponse.waterAuthority.confidence,
+      evidenceRefs: validatedResponse.waterAuthority.evidenceRefs,
+      observedAt: new Date(
+        validatedResponse.waterAuthority.telemetryRef
+          ? new Date().toISOString()
+          : (waterArtifacts.bundleGeneratedAt ?? new Date().toISOString()),
+      ),
+      metadata: {
+        facilityId: validatedResponse.waterAuthority.facilityId,
+        bundleHash: waterArtifacts.bundleHash,
+        manifestHash: waterArtifacts.manifestHash,
+      },
+    }),
+  );
 
   const ancillaryWrites = await Promise.allSettled([
     withDecisionPersistenceRetry(
@@ -2040,7 +2317,7 @@ async function persistCiAncillaryDecisionArtifacts(input: {
       {
         attempts: 4,
         baseDelayMs: 50,
-      }
+      },
     ),
     prisma.waterPolicyEvidence.create({
       data: {
@@ -2051,8 +2328,10 @@ async function persistCiAncillaryDecisionArtifacts(input: {
         facilityId: validatedResponse.waterAuthority.facilityId,
         supplierRefs: validatedResponse.waterAuthority.supplierSet,
         evidenceRefs: validatedResponse.waterAuthority.evidenceRefs,
-        providerSnapshotRefs: validatedResponse.proofRecord.provider_snapshot_refs,
-        externalPolicyRefs: validatedResponse.proofRecord.external_policy_refs ?? [],
+        providerSnapshotRefs:
+          validatedResponse.proofRecord.provider_snapshot_refs,
+        externalPolicyRefs:
+          validatedResponse.proofRecord.external_policy_refs ?? [],
         bundleHash: validatedResponse.proofRecord.water_bundle_hash ?? null,
         manifestHash: validatedResponse.proofRecord.water_manifest_hash ?? null,
         metadata: {
@@ -2068,7 +2347,7 @@ async function persistCiAncillaryDecisionArtifacts(input: {
           data: providerSnapshots,
         })
       : Promise.resolve({ count: 0 }),
-    validatedResponse.decisionMode === 'scenario_planning'
+    validatedResponse.decisionMode === "scenario_planning"
       ? prisma.waterScenarioRun.create({
           data: {
             decisionFrameId: validatedResponse.decisionFrameId,
@@ -2078,7 +2357,7 @@ async function persistCiAncillaryDecisionArtifacts(input: {
           },
         })
       : Promise.resolve(null),
-    validatedResponse.waterAuthority.authorityMode === 'facility_overlay' &&
+    validatedResponse.waterAuthority.authorityMode === "facility_overlay" &&
     validatedResponse.waterAuthority.facilityId
       ? prisma.facilityWaterTelemetry.create({
           data: {
@@ -2096,65 +2375,74 @@ async function persistCiAncillaryDecisionArtifacts(input: {
           },
         })
       : Promise.resolve(null),
-  ])
+  ]);
 
   ancillaryWrites.forEach((result, index) => {
-    if (result.status !== 'rejected') {
-      return
+    if (result.status !== "rejected") {
+      return;
     }
 
     const labels = [
-      'decision event outbox',
-      'water policy evidence',
-      'water provider snapshots',
-      'water scenario run',
-      'facility telemetry',
-    ] as const
+      "decision event outbox",
+      "water policy evidence",
+      "water provider snapshots",
+      "water scenario run",
+      "facility telemetry",
+    ] as const;
     console.warn(
-      `Failed ancillary CI persistence (${labels[index] ?? 'unknown'}) for ${validatedResponse.decisionFrameId}:`,
-      result.reason
-    )
-  })
+      `Failed ancillary CI persistence (${labels[index] ?? "unknown"}) for ${validatedResponse.decisionFrameId}:`,
+      result.reason,
+    );
+  });
 }
 
 export async function persistCiDecisionResult(
   result: Awaited<ReturnType<typeof createDecision>>,
   latencyMs?: { total: number; compute: number },
   options?: {
-    idempotencyReplayed?: boolean
-  }
+    idempotencyReplayed?: boolean;
+  },
 ): Promise<{ response: CiResponseV2; traceHash: string }> {
-  const validatedResponse = await finalizeCiDecisionResponse(result, latencyMs, options)
-  const manifestDatasets = result.persistable.manifestDatasets
-  const waterArtifacts = result.persistable.waterArtifactMetadata
+  const validatedResponse = await finalizeCiDecisionResponse(
+    result,
+    latencyMs,
+    options,
+  );
+  const manifestDatasets = result.persistable.manifestDatasets;
+  const waterArtifacts = result.persistable.waterArtifactMetadata;
   const traceSequenceNumber = await withDecisionPersistenceRetry(
     `reserve trace sequence ${validatedResponse.decisionFrameId}`,
-    () => reserveNextTraceSequence(prisma)
-  )
-  const previousTrace = await withDecisionPersistenceRetry<{ traceHash: string } | null>(
-    `read previous trace ${validatedResponse.decisionFrameId}`,
-    () =>
-      prisma.decisionTraceEnvelope.findFirst({
-        where: {
-          sequenceNumber: {
-            lt: traceSequenceNumber,
-          },
+    () => reserveNextTraceSequence(prisma),
+  );
+  const previousTrace = await withDecisionPersistenceRetry<{
+    traceHash: string;
+  } | null>(`read previous trace ${validatedResponse.decisionFrameId}`, () =>
+    prisma.decisionTraceEnvelope.findFirst({
+      where: {
+        sequenceNumber: {
+          lt: traceSequenceNumber,
         },
-        orderBy: { sequenceNumber: 'desc' },
-        select: { traceHash: true },
-      })
-  )
+      },
+      orderBy: { sequenceNumber: "desc" },
+      select: { traceHash: true },
+    }),
+  );
   const traceEnvelope = finalizeTraceEnvelope(result.persistable.traceSeed, {
     sequenceNumber: traceSequenceNumber,
     totalMs: latencyMs?.total ?? null,
     computeMs: latencyMs?.compute ?? null,
     stageTimings: result.persistable.stageTimings,
-    providerTimings: buildTraceProviderTimings(result.persistable.candidateEvaluations),
-    cacheHit: result.persistable.candidateEvaluations.some((candidate) =>
-      ['warm', 'redis', 'lkg', 'degraded-safe'].includes(candidate.cacheStatus)
+    providerTimings: buildTraceProviderTimings(
+      result.persistable.candidateEvaluations,
     ),
-  })
-  const traceHashes = buildTraceHashes(traceEnvelope, previousTrace?.traceHash ?? null)
+    cacheHit: result.persistable.candidateEvaluations.some((candidate) =>
+      ["warm", "redis", "lkg", "degraded-safe"].includes(candidate.cacheStatus),
+    ),
+  });
+  const traceHashes = buildTraceHashes(
+    traceEnvelope,
+    previousTrace?.traceHash ?? null,
+  );
 
   const [persistedDecision, persistedTrace] = await Promise.all([
     persistCIDecisionRow(validatedResponse.decisionFrameId, {
@@ -2193,7 +2481,8 @@ export async function persistCiDecisionResult(
         datasetProvenance: manifestDatasets,
         waterArtifacts,
         decisionAction: validatedResponse.decision,
-        selectedReliabilityMultiplier: result.persistable.selected.reliabilityMultiplier,
+        selectedReliabilityMultiplier:
+          result.persistable.selected.reliabilityMultiplier,
         decisionEnvelope: validatedResponse.decisionEnvelope,
         proofEnvelope: validatedResponse.proofEnvelope,
         telemetryBridge: validatedResponse.telemetryBridge,
@@ -2214,43 +2503,48 @@ export async function persistCiDecisionResult(
       inputSignalHash: traceHashes.inputSignalHash,
       payload: traceEnvelope,
     }),
-  ])
+  ]);
 
-  scheduleCiAncillaryPersistence(`decision ${validatedResponse.decisionFrameId}`, async () =>
-    persistCiAncillaryDecisionArtifacts({
-      persistedDecisionId: persistedDecision.id,
-      validatedResponse,
-      result,
-      manifestDatasets,
-      waterArtifacts,
-    })
-  )
+  scheduleCiAncillaryPersistence(
+    `decision ${validatedResponse.decisionFrameId}`,
+    async () =>
+      persistCiAncillaryDecisionArtifacts({
+        persistedDecisionId: persistedDecision.id,
+        validatedResponse,
+        result,
+        manifestDatasets,
+        waterArtifacts,
+      }),
+  );
 
   return {
     response: validatedResponse,
     traceHash: persistedTrace.traceHash ?? traceHashes.traceHash,
-  }
+  };
 }
 
 async function routeDecisionHandler(req: Request, res: Response) {
-  const requestStarted = Date.now()
-  let computeStarted: number | null = null
-  let computeMs: number | null = null
+  const requestStarted = Date.now();
+  let computeStarted: number | null = null;
+  let computeMs: number | null = null;
 
   try {
-    if (!verifySignedDecisionRequest(req, res)) return
+    if (!verifySignedDecisionRequest(req, res)) return;
 
-    const data = requestSchema.parse(req.body)
+    const data = requestSchema.parse(req.body);
     const idempotencyCacheKey = data.idempotencyKey
       ? buildIdempotencyCacheKey({
-          namespace: 'decision-api-v1',
+          namespace: "decision-api-v1",
           callerId: data.caller?.id ?? null,
           idempotencyKey: data.idempotencyKey,
         })
-      : null
+      : null;
 
     if (idempotencyCacheKey) {
-      const cached = await readIdempotentResponse<Record<string, unknown>>(idempotencyCacheKey)
+      const cached =
+        await readIdempotentResponse<Record<string, unknown>>(
+          idempotencyCacheKey,
+        );
       if (cached) {
         const replayed = CiResponseV2Schema.parse({
           ...cached,
@@ -2262,30 +2556,38 @@ async function routeDecisionHandler(req: Request, res: Response) {
               replayed: true,
             },
           },
-        })
-        recordTelemetryMetric(telemetryMetricNames.idempotencyReplayCount, 'counter', 1, {
-          adapter_id: replayed.decisionEnvelope.transport.adapterId,
-          transport: replayed.decisionEnvelope.transport.transport,
-        })
-        await applyDecisionTraceHeaders(res, replayed.decisionFrameId)
-        return res.json(replayed)
+        });
+        recordTelemetryMetric(
+          telemetryMetricNames.idempotencyReplayCount,
+          "counter",
+          1,
+          {
+            adapter_id: replayed.decisionEnvelope.transport.adapterId,
+            transport: replayed.decisionEnvelope.transport.transport,
+          },
+        );
+        await applyDecisionTraceHeaders(res, replayed.decisionFrameId);
+        return res.json(replayed);
       }
     }
 
-    computeStarted = Date.now()
-    const result = await createDecision(data)
-    computeMs = Date.now() - computeStarted
-    const isFastSimulationRequest = isInternalFastSimulationRequest(req, result.persistable.request)
-    let validatedResponse: CiResponseV2
-    let persistedTraceHash: string | null = null
+    computeStarted = Date.now();
+    const result = await createDecision(data);
+    computeMs = Date.now() - computeStarted;
+    const isFastSimulationRequest = isInternalFastSimulationRequest(
+      req,
+      result.persistable.request,
+    );
+    let validatedResponse: CiResponseV2;
+    let persistedTraceHash: string | null = null;
 
     if (isFastSimulationRequest) {
-      const totalMs = Date.now() - requestStarted
+      const totalMs = Date.now() - requestStarted;
       validatedResponse = await finalizeCiDecisionResponse(result, {
         total: totalMs,
         compute: computeMs,
-      })
-      res.setHeader('x-co2router-simulation-persisted', 'false')
+      });
+      res.setHeader("x-co2router-simulation-persisted", "false");
     } else {
       try {
         const persisted = await persistCiDecisionResult(
@@ -2296,26 +2598,31 @@ async function routeDecisionHandler(req: Request, res: Response) {
           },
           {
             idempotencyReplayed: false,
-          }
-        )
-        validatedResponse = persisted.response
-        persistedTraceHash = persisted.traceHash
-        res.setHeader('x-co2router-simulation-persisted', 'true')
+          },
+        );
+        validatedResponse = persisted.response;
+        persistedTraceHash = persisted.traceHash;
+        res.setHeader("x-co2router-simulation-persisted", "true");
       } catch (dbError) {
-        console.warn('Failed to persist CI decision:', dbError)
+        console.warn("Failed to persist CI decision:", dbError);
         validatedResponse = await finalizeCiDecisionResponse(result, {
           total: Date.now() - requestStarted,
           compute: computeMs,
-        })
-        if (result.persistable.request.decisionMode === 'runtime_authorization') {
-          throw dbError
+        });
+        if (
+          result.persistable.request.decisionMode === "runtime_authorization"
+        ) {
+          throw dbError;
         }
-        validatedResponse.policyTrace.reasonCodes.push('DB_PERSIST_FAILED_LOCAL_RESPONSE_ONLY')
-        res.setHeader('x-co2router-simulation-persisted', 'false')
+        validatedResponse.policyTrace.reasonCodes.push(
+          "DB_PERSIST_FAILED_LOCAL_RESPONSE_ONLY",
+        );
+        res.setHeader("x-co2router-simulation-persisted", "false");
       }
     }
 
-    const recordedTotalMs = validatedResponse.latencyMs?.total ?? (Date.now() - requestStarted)
+    const recordedTotalMs =
+      validatedResponse.latencyMs?.total ?? Date.now() - requestStarted;
 
     logSlowDecision({
       computeMs,
@@ -2325,121 +2632,158 @@ async function routeDecisionHandler(req: Request, res: Response) {
       reasonCode: result.response.reasonCode,
       stageTimings: result.persistable.stageTimings,
       providerResolutionMs: result.persistable.selected.providerResolutionMs,
-    })
+    });
 
     if (idempotencyCacheKey) {
       try {
-        await writeIdempotentResponse(idempotencyCacheKey, validatedResponse)
+        await writeIdempotentResponse(idempotencyCacheKey, validatedResponse);
       } catch (cacheError) {
-        console.warn('Failed to write idempotent CI response cache:', cacheError)
+        console.warn(
+          "Failed to write idempotent CI response cache:",
+          cacheError,
+        );
       }
     }
 
-    recordLatency(recordedTotalMs, computeMs)
-    recordTelemetryMetric(telemetryMetricNames.authorizationDecisionCount, 'counter', 1, {
-      action: validatedResponse.decision,
-      signal_mode: validatedResponse.signalMode,
-      accounting_method: validatedResponse.accountingMethod,
-      critical_path: Boolean(req.body?.criticalPath),
-    })
-    recordTelemetryMetric(telemetryMetricNames.authorizationDecisionLatencyMs, 'histogram', recordedTotalMs, {
-      action: validatedResponse.decision,
-      cache_status: validatedResponse.latencyMs?.cacheStatus ?? 'live',
-    })
+    recordLatency(recordedTotalMs, computeMs);
+    recordTelemetryMetric(
+      telemetryMetricNames.authorizationDecisionCount,
+      "counter",
+      1,
+      {
+        action: validatedResponse.decision,
+        signal_mode: validatedResponse.signalMode,
+        accounting_method: validatedResponse.accountingMethod,
+        critical_path: Boolean(req.body?.criticalPath),
+      },
+    );
+    recordTelemetryMetric(
+      telemetryMetricNames.authorizationDecisionLatencyMs,
+      "histogram",
+      recordedTotalMs,
+      {
+        action: validatedResponse.decision,
+        cache_status: validatedResponse.latencyMs?.cacheStatus ?? "live",
+      },
+    );
     if (!isFastSimulationRequest) {
-      res.setHeader('Replay-Trace-ID', validatedResponse.decisionFrameId)
+      res.setHeader("Replay-Trace-ID", validatedResponse.decisionFrameId);
       if (persistedTraceHash) {
-        res.setHeader('X-CO2Router-Trace-Hash', persistedTraceHash)
+        res.setHeader("X-CO2Router-Trace-Hash", persistedTraceHash);
       } else {
-        await applyDecisionTraceHeaders(res, validatedResponse.decisionFrameId)
+        await applyDecisionTraceHeaders(res, validatedResponse.decisionFrameId);
       }
     }
-    return res.json(validatedResponse)
+    return res.json(validatedResponse);
   } catch (error) {
     const fallbackRegion = getFallbackRegion(
-      Array.isArray(req.body?.preferredRegions) ? req.body.preferredRegions : ['us-east-1']
-    )
-    const fallbackDecisionFrameId = `fallback-${Date.now()}`
-    const totalMs = Date.now() - requestStarted
+      Array.isArray(req.body?.preferredRegions)
+        ? req.body.preferredRegions
+        : ["us-east-1"],
+    );
+    const fallbackDecisionFrameId = `fallback-${Date.now()}`;
+    const totalMs = Date.now() - requestStarted;
     const transport = (() => {
       try {
-        return resolveCanonicalTransportMetadata(req.body?.transport)
+        return resolveCanonicalTransportMetadata(req.body?.transport);
       } catch {
-        return resolveCanonicalTransportMetadata()
+        return resolveCanonicalTransportMetadata();
       }
-    })()
-    const providerSnapshotRef = `${fallbackRegion}:STATIC_FALLBACK:${new Date().toISOString()}`
+    })();
+    const providerSnapshotRef = `${fallbackRegion}:STATIC_FALLBACK:${new Date().toISOString()}`;
     const fallbackProofHash = buildDecisionProofHash({
-      request: req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {},
+      request:
+        req.body && typeof req.body === "object"
+          ? (req.body as Record<string, unknown>)
+          : {},
       selected: { region: fallbackRegion, carbonIntensity: 500 },
       baseline: { region: fallbackRegion, carbonIntensity: 500 },
       policyTrace: {
         policyVersion: WATER_POLICY_VERSION,
-        reasonCode: 'FALLBACK_INPUT_OR_RUNTIME_ERROR',
+        reasonCode: "FALLBACK_INPUT_OR_RUNTIME_ERROR",
       },
       enforcementPlan: buildKubernetesEnforcementPlan({
         decisionFrameId: fallbackDecisionFrameId,
-        decision: 'deny',
-        reasonCode: 'FALLBACK_INPUT_OR_RUNTIME_ERROR',
+        decision: "deny",
+        reasonCode: "FALLBACK_INPUT_OR_RUNTIME_ERROR",
         selectedRegion: fallbackRegion,
-        policyProfile: 'default',
-        criticality: 'standard',
+        policyProfile: "default",
+        criticality: "standard",
       }) as unknown as Record<string, unknown>,
       providerSnapshotRefs: [providerSnapshotRef],
-      signalMode: 'fallback',
-      accountingMethod: 'average',
-    })
+      signalMode: "fallback",
+      accountingMethod: "average",
+    });
 
     const fallbackComputeMs =
       computeMs ??
-      (computeStarted !== null ? Math.max(0, Date.now() - computeStarted) : totalMs)
+      (computeStarted !== null
+        ? Math.max(0, Date.now() - computeStarted)
+        : totalMs);
 
-    recordLatency(totalMs, fallbackComputeMs)
-    recordTelemetryMetric(telemetryMetricNames.authorizationDecisionCount, 'counter', 1, {
-      action: 'deny',
-      signal_mode: 'fallback',
-      accounting_method: 'average',
-      critical_path: Boolean(req.body?.criticalPath),
-    })
-    recordTelemetryMetric(telemetryMetricNames.authorizationFailClosedCount, 'counter', 1, {
-      reason_code: 'FALLBACK_INPUT_OR_RUNTIME_ERROR',
-      criticality: 'standard',
-    })
-    recordTelemetryMetric(telemetryMetricNames.authorizationDecisionLatencyMs, 'histogram', totalMs, {
-      action: 'deny',
-      cache_status: 'fallback',
-    })
+    recordLatency(totalMs, fallbackComputeMs);
+    recordTelemetryMetric(
+      telemetryMetricNames.authorizationDecisionCount,
+      "counter",
+      1,
+      {
+        action: "deny",
+        signal_mode: "fallback",
+        accounting_method: "average",
+        critical_path: Boolean(req.body?.criticalPath),
+      },
+    );
+    recordTelemetryMetric(
+      telemetryMetricNames.authorizationFailClosedCount,
+      "counter",
+      1,
+      {
+        reason_code: "FALLBACK_INPUT_OR_RUNTIME_ERROR",
+        criticality: "standard",
+      },
+    );
+    recordTelemetryMetric(
+      telemetryMetricNames.authorizationDecisionLatencyMs,
+      "histogram",
+      totalMs,
+      {
+        action: "deny",
+        cache_status: "fallback",
+      },
+    );
 
     return res.status(200).json({
-      decision: 'deny',
-      decisionMode: 'runtime_authorization',
+      decision: "deny",
+      decisionMode: "runtime_authorization",
       doctrineVersion: DECISION_DOCTRINE_VERSION,
-      operatingMode: 'CRISIS',
-      reasonCode: 'FALLBACK_INPUT_OR_RUNTIME_ERROR',
+      operatingMode: "CRISIS",
+      reasonCode: "FALLBACK_INPUT_OR_RUNTIME_ERROR",
       decisionFrameId: fallbackDecisionFrameId,
-      selectedRunner: RUNNER_REGIONS[fallbackRegion]?.[0] ?? 'ubuntu-latest',
+      selectedRunner: RUNNER_REGIONS[fallbackRegion]?.[0] ?? "ubuntu-latest",
       selectedRegion: fallbackRegion,
-      recommendation: 'Conservative fallback path used',
+      recommendation: "Conservative fallback path used",
       signalConfidence: 0.05,
       fallbackUsed: true,
-      signalMode: 'fallback',
-      accountingMethod: 'average',
+      signalMode: "fallback",
+      accountingMethod: "average",
       decisionEnvelope: buildCanonicalDecisionEnvelope({
         requestId: req.body?.requestId ?? fallbackDecisionFrameId,
         decisionFrameId: fallbackDecisionFrameId,
-        action: 'deny',
-        reasonCode: 'FALLBACK_INPUT_OR_RUNTIME_ERROR',
+        action: "deny",
+        reasonCode: "FALLBACK_INPUT_OR_RUNTIME_ERROR",
         selectedRegion: fallbackRegion,
-        selectedRunner: RUNNER_REGIONS[fallbackRegion]?.[0] ?? 'ubuntu-latest',
+        selectedRunner: RUNNER_REGIONS[fallbackRegion]?.[0] ?? "ubuntu-latest",
         baselineRegion: fallbackRegion,
         runtime: transport.runtime,
         provider:
-          typeof req.body?.runtimeTarget?.provider === 'string' ? req.body.runtimeTarget.provider : 'generic',
+          typeof req.body?.runtimeTarget?.provider === "string"
+            ? req.body.runtimeTarget.provider
+            : "generic",
         signalConfidence: 0.05,
-        decisionMode: 'runtime_authorization',
+        decisionMode: "runtime_authorization",
         fallbackUsed: true,
         doctrineVersion: DECISION_DOCTRINE_VERSION,
-        operatingMode: 'CRISIS',
+        operatingMode: "CRISIS",
         hierarchy: [...DETERMINISTIC_CONFLICT_HIERARCHY],
         transport,
         notBefore: null,
@@ -2448,7 +2792,7 @@ async function routeDecisionHandler(req: Request, res: Response) {
         idempotencyKey: req.body?.idempotencyKey ?? null,
       }),
       proofEnvelope: buildCanonicalProofEnvelope({
-        posture: 'degraded',
+        posture: "degraded",
         proofHash: fallbackProofHash,
         mssSnapshotId: `mss-${fallbackDecisionFrameId}`,
         baseline: {
@@ -2463,22 +2807,22 @@ async function routeDecisionHandler(req: Request, res: Response) {
           waterImpactLiters: 0,
           waterScarcityImpact: 0,
         },
-        carbonProvider: 'STATIC_FALLBACK',
-        waterAuthorityMode: 'fallback',
+        carbonProvider: "STATIC_FALLBACK",
+        waterAuthorityMode: "fallback",
         fallbackUsed: true,
         disagreementPct: 0,
-        datasetVersions: { fallback: 'conservative_defaults_v1' },
+        datasetVersions: { fallback: "conservative_defaults_v1" },
         providerSnapshotRefs: [providerSnapshotRef],
         transport,
       }),
       notBefore: null,
       proofHash: fallbackProofHash,
       waterAuthority: {
-        authorityMode: 'fallback',
-        scenario: 'current',
+        authorityMode: "fallback",
+        scenario: "current",
         confidence: 0.05,
-        supplierSet: ['fallback_conservative'],
-        evidenceRefs: ['water:fallback:conservative-defaults'],
+        supplierSet: ["fallback_conservative"],
+        evidenceRefs: ["water:fallback:conservative-defaults"],
         facilityId: null,
         telemetryRef: null,
         bundleHash: null,
@@ -2487,38 +2831,39 @@ async function routeDecisionHandler(req: Request, res: Response) {
       assurance: {
         operationallyUsable: false,
         assuranceReady: false,
-        status: 'degraded',
-        issues: ['REQUEST_VALIDATION_OR_RUNTIME_FAILURE'],
+        status: "degraded",
+        issues: ["REQUEST_VALIDATION_OR_RUNTIME_FAILURE"],
       },
       mss: {
         snapshotId: `mss-${fallbackDecisionFrameId}`,
-        carbonProvider: 'STATIC_FALLBACK',
-        carbonProviderHealth: 'FAILED',
-        waterAuthorityHealth: 'FAILED',
+        carbonProvider: "STATIC_FALLBACK",
+        carbonProviderHealth: "FAILED",
+        waterAuthorityHealth: "FAILED",
         carbonFreshnessSec: null,
         waterFreshnessSec: null,
-        cacheStatus: 'fallback',
+        cacheStatus: "fallback",
         disagreement: {
           flag: false,
           pct: 0,
         },
         lastKnownGoodApplied: true,
-        carbonLineage: ['STATIC_FALLBACK'],
-        waterLineage: ['fallback_conservative'],
+        carbonLineage: ["STATIC_FALLBACK"],
+        waterLineage: ["fallback_conservative"],
       },
       decisionExplanation: {
         hierarchy: [...DETERMINISTIC_CONFLICT_HIERARCHY],
-        whyAction: 'The request failed validation or runtime evaluation, so the engine denied execution through the conservative fallback path.',
+        whyAction:
+          "The request failed validation or runtime evaluation, so the engine denied execution through the conservative fallback path.",
         whyTarget: `The fallback region ${fallbackRegion} was selected because no validated runtime decision could be produced.`,
         rejectedAlternatives: [],
       },
       policyTrace: {
-        capabilityId: 'ci.route.authorization',
-        authorizationMode: 'pre_action',
+        capabilityId: "ci.route.authorization",
+        authorizationMode: "pre_action",
         policyPacks: [`water.default.${WATER_POLICY_VERSION}`],
         scenarioPlanningActive: false,
         policyVersion: WATER_POLICY_VERSION,
-        profile: 'default',
+        profile: "default",
         thresholds: {
           stressDeny: 4.7,
           stressDelay: 4.0,
@@ -2529,18 +2874,18 @@ async function routeDecisionHandler(req: Request, res: Response) {
         fallbackUsed: true,
         strictMode: true,
         reasonCodes: [
-          'REQUEST_VALIDATION_OR_RUNTIME_FAILURE',
-          error instanceof Error ? error.message : 'Unknown error',
+          "REQUEST_VALIDATION_OR_RUNTIME_FAILURE",
+          error instanceof Error ? error.message : "Unknown error",
         ],
         conflictHierarchy: [...DETERMINISTIC_CONFLICT_HIERARCHY],
-        operatingMode: 'CRISIS',
+        operatingMode: "CRISIS",
         externalPolicy: {
           enabled: false,
           strict: true,
           evaluated: false,
           applied: false,
-          hookStatus: 'skipped',
-          reasonCodes: ['EXTERNAL_POLICY_NOT_EVALUATED_FALLBACK_PATH'],
+          hookStatus: "skipped",
+          reasonCodes: ["EXTERNAL_POLICY_NOT_EVALUATED_FALLBACK_PATH"],
           policyReference: null,
         },
         sekedPolicy: {
@@ -2548,8 +2893,8 @@ async function routeDecisionHandler(req: Request, res: Response) {
           strict: true,
           evaluated: false,
           applied: false,
-          hookStatus: 'skipped',
-          reasonCodes: ['SEKED_POLICY_NOT_EVALUATED_FALLBACK_PATH'],
+          hookStatus: "skipped",
+          reasonCodes: ["SEKED_POLICY_NOT_EVALUATED_FALLBACK_PATH"],
           policyReference: null,
         },
       },
@@ -2579,51 +2924,51 @@ async function routeDecisionHandler(req: Request, res: Response) {
         qualityIndex: null,
         droughtRiskIndex: null,
         confidence: 0.05,
-        source: ['fallback_conservative'],
-        datasetVersion: { fallback: 'conservative_defaults_v1' },
+        source: ["fallback_conservative"],
+        datasetVersion: { fallback: "conservative_defaults_v1" },
         guardrailTriggered: true,
         fallbackUsed: true,
       },
       kubernetesEnforcement: buildKubernetesEnforcementPlan({
         decisionFrameId: fallbackDecisionFrameId,
-        decision: 'deny',
-        decisionMode: 'runtime_authorization',
-        reasonCode: 'FALLBACK_INPUT_OR_RUNTIME_ERROR',
+        decision: "deny",
+        decisionMode: "runtime_authorization",
+        reasonCode: "FALLBACK_INPUT_OR_RUNTIME_ERROR",
         selectedRegion: fallbackRegion,
-        policyProfile: 'default',
-        criticality: 'standard',
-        waterAuthorityMode: 'fallback',
-        waterScenario: 'current',
+        policyProfile: "default",
+        criticality: "standard",
+        waterAuthorityMode: "fallback",
+        waterScenario: "current",
         proofHash: fallbackProofHash,
       }),
       enforcementBundle: {
         kubernetes: buildKubernetesEnforcementPlan({
           decisionFrameId: fallbackDecisionFrameId,
-          decision: 'deny',
-          decisionMode: 'runtime_authorization',
-          reasonCode: 'FALLBACK_INPUT_OR_RUNTIME_ERROR',
+          decision: "deny",
+          decisionMode: "runtime_authorization",
+          reasonCode: "FALLBACK_INPUT_OR_RUNTIME_ERROR",
           selectedRegion: fallbackRegion,
-          policyProfile: 'default',
-          criticality: 'standard',
-          waterAuthorityMode: 'fallback',
-          waterScenario: 'current',
+          policyProfile: "default",
+          criticality: "standard",
+          waterAuthorityMode: "fallback",
+          waterScenario: "current",
           proofHash: fallbackProofHash,
         }),
         githubActions: buildGithubActionsEnforcementBundle({
           decisionFrameId: fallbackDecisionFrameId,
-          decision: 'deny',
-          decisionMode: 'runtime_authorization',
+          decision: "deny",
+          decisionMode: "runtime_authorization",
           selectedRegion: fallbackRegion,
           preferredRegions: [fallbackRegion],
-          criticality: 'standard',
+          criticality: "standard",
           notBefore: null,
         }),
       },
       workflowOutputs: {
-        decision: 'deny',
-        reasonCode: 'FALLBACK_INPUT_OR_RUNTIME_ERROR',
+        decision: "deny",
+        reasonCode: "FALLBACK_INPUT_OR_RUNTIME_ERROR",
         selectedRegion: fallbackRegion,
-        selectedRunner: RUNNER_REGIONS[fallbackRegion]?.[0] ?? 'ubuntu-latest',
+        selectedRunner: RUNNER_REGIONS[fallbackRegion]?.[0] ?? "ubuntu-latest",
         carbonIntensity: 500,
         carbonBaseline: 500,
         carbonReductionPct: 0,
@@ -2635,18 +2980,18 @@ async function routeDecisionHandler(req: Request, res: Response) {
         signalConfidence: 0.05,
         decisionFrameId: fallbackDecisionFrameId,
         waterPolicyVersion: WATER_POLICY_VERSION,
-        signalMode: 'fallback',
-        accountingMethod: 'average',
+        signalMode: "fallback",
+        accountingMethod: "average",
         proofHash: fallbackProofHash,
-        decisionMode: 'runtime_authorization',
-        waterAuthorityMode: 'fallback',
-        waterScenario: 'current',
+        decisionMode: "runtime_authorization",
+        waterAuthorityMode: "fallback",
+        waterScenario: "current",
         githubActionsExecutable: true,
         githubActionsMaxParallel: 0,
-        githubActionsEnvironment: 'ecobe-blocked',
+        githubActionsEnvironment: "ecobe-blocked",
         githubActionsNotBefore: null,
         kubernetesRegion: fallbackRegion,
-        kubernetesDecision: 'blocked',
+        kubernetesDecision: "blocked",
         kubernetesNotBefore: null,
         kubernetesReplicaFactor: 0,
         selectedRegionReliabilityMultiplier: 1,
@@ -2660,12 +3005,12 @@ async function routeDecisionHandler(req: Request, res: Response) {
           scarcityImpact: 0,
           reliabilityMultiplier: 1,
           defensiblePenalty: 100,
-          defensibleReasonCodes: ['FALLBACK_CONSERVATIVE_MODE'],
-          supplierSet: ['fallback_conservative'],
-          evidenceRefs: ['water:fallback:conservative-defaults'],
-          authorityMode: 'fallback',
+          defensibleReasonCodes: ["FALLBACK_CONSERVATIVE_MODE"],
+          supplierSet: ["fallback_conservative"],
+          evidenceRefs: ["water:fallback:conservative-defaults"],
+          authorityMode: "fallback",
           guardrailCandidateBlocked: true,
-          guardrailReasons: ['FALLBACK_CONSERVATIVE_MODE'],
+          guardrailReasons: ["FALLBACK_CONSERVATIVE_MODE"],
         },
       ],
       proofRecord: {
@@ -2674,20 +3019,20 @@ async function routeDecisionHandler(req: Request, res: Response) {
         selected_region: fallbackRegion,
         carbon_delta: 0,
         water_delta: 0,
-        signals_used: ['fallback_conservative'],
+        signals_used: ["fallback_conservative"],
         timestamp: new Date().toISOString(),
-        dataset_versions: { fallback: 'conservative_defaults_v1' },
+        dataset_versions: { fallback: "conservative_defaults_v1" },
         confidence_score: 0.05,
         proof_hash: fallbackProofHash,
         provider_snapshot_refs: [providerSnapshotRef],
         mss_snapshot_id: `mss-${fallbackDecisionFrameId}`,
         water_bundle_hash: null,
         water_manifest_hash: null,
-        supplier_refs: ['fallback_conservative'],
+        supplier_refs: ["fallback_conservative"],
         facility_telemetry_refs: [],
-        water_scenario: 'current',
+        water_scenario: "current",
         external_policy_refs: [],
-        water_evidence_refs: ['water:fallback:conservative-defaults'],
+        water_evidence_refs: ["water:fallback:conservative-defaults"],
         transport: transport.transport,
         adapter_id: transport.adapterId,
         adapter_version: transport.adapterVersion,
@@ -2695,22 +3040,24 @@ async function routeDecisionHandler(req: Request, res: Response) {
         observed_runtime_target: transport.observedRuntimeTarget ?? null,
       },
       telemetryBridge: {
-        spanName: 'ecobe.decision.authorize',
-        serviceName: 'ecobe-engine',
-        traceId: req.body?.telemetryContext?.traceId ?? `fallback-${fallbackDecisionFrameId}`,
-        spanId: fallbackDecisionFrameId.replace(/-/g, '').slice(0, 16),
+        spanName: "ecobe.decision.authorize",
+        serviceName: "ecobe-engine",
+        traceId:
+          req.body?.telemetryContext?.traceId ??
+          `fallback-${fallbackDecisionFrameId}`,
+        spanId: fallbackDecisionFrameId.replace(/-/g, "").slice(0, 16),
         durationMs: totalMs,
         attributes: {
-          'ecobe.decision_frame_id': fallbackDecisionFrameId,
-          'ecobe.action': 'deny',
-          'ecobe.reason_code': 'FALLBACK_INPUT_OR_RUNTIME_ERROR',
-          'ecobe.operating_mode': 'CRISIS',
-          'ecobe.proof_hash': fallbackProofHash,
-          'ecobe.fallback_used': true,
-          'ecobe.runtime': transport.runtime,
-          'ecobe.region_selected': fallbackRegion,
-          'ecobe.adapter_id': transport.adapterId,
-          'ecobe.transport': transport.transport,
+          "ecobe.decision_frame_id": fallbackDecisionFrameId,
+          "ecobe.action": "deny",
+          "ecobe.reason_code": "FALLBACK_INPUT_OR_RUNTIME_ERROR",
+          "ecobe.operating_mode": "CRISIS",
+          "ecobe.proof_hash": fallbackProofHash,
+          "ecobe.fallback_used": true,
+          "ecobe.runtime": transport.runtime,
+          "ecobe.region_selected": fallbackRegion,
+          "ecobe.adapter_id": transport.adapterId,
+          "ecobe.transport": transport.transport,
         },
         export: {
           enabled: false,
@@ -2722,87 +3069,117 @@ async function routeDecisionHandler(req: Request, res: Response) {
         total: totalMs,
         compute: fallbackComputeMs,
         providerResolution: 0,
-        cacheStatus: 'fallback',
+        cacheStatus: "fallback",
         influencedDecision: true,
       },
       adapterContext: transport,
-    })
+    });
   }
 }
 
-async function applyDecisionTraceHeaders(res: Response, decisionFrameId: string | null | undefined) {
-  if (!decisionFrameId) return
+async function applyDecisionTraceHeaders(
+  res: Response,
+  decisionFrameId: string | null | undefined,
+) {
+  if (!decisionFrameId) return;
 
-  res.setHeader('Replay-Trace-ID', decisionFrameId)
+  res.setHeader("Replay-Trace-ID", decisionFrameId);
 
   try {
-    const traceRecord = await getDecisionTraceRecord(decisionFrameId)
+    const traceRecord = await getDecisionTraceRecord(decisionFrameId);
     if (traceRecord?.traceHash) {
-      res.setHeader('X-CO2Router-Trace-Hash', traceRecord.traceHash)
+      res.setHeader("X-CO2Router-Trace-Hash", traceRecord.traceHash);
     }
   } catch (error) {
-    console.warn(`Failed to apply trace hash header for ${decisionFrameId}:`, error)
+    console.warn(
+      `Failed to apply trace hash header for ${decisionFrameId}:`,
+      error,
+    );
   }
 }
 
-router.post(['/route', '/carbon-route', '/authorize'], routeDecisionHandler)
+router.post(["/route", "/carbon-route", "/authorize"], routeDecisionHandler);
 
 const k8sEnforcementSchema = z.object({
   decisionFrameId: z.string().min(1),
-  decision: z.enum(['run_now', 'reroute', 'delay', 'throttle', 'deny']),
-  decisionMode: z.enum(['runtime_authorization', 'scenario_planning']).optional(),
+  decision: z.enum(["run_now", "reroute", "delay", "throttle", "deny"]),
+  decisionMode: z
+    .enum(["runtime_authorization", "scenario_planning"])
+    .optional(),
   reasonCode: z.string().min(1),
   selectedRegion: z.string().min(1),
-  policyProfile: z.enum(['default', 'drought_sensitive', 'eu_data_center_reporting', 'high_water_sensitivity']),
-  criticality: z.enum(['critical', 'standard', 'batch']),
+  policyProfile: z.enum([
+    "default",
+    "drought_sensitive",
+    "eu_data_center_reporting",
+    "high_water_sensitivity",
+  ]),
+  criticality: z.enum(["critical", "standard", "batch"]),
   delayMinutes: z.number().int().positive().max(1440).optional(),
   throttleFactor: z.number().min(0.1).max(1).optional(),
-  waterAuthorityMode: z.enum(['basin', 'facility_overlay', 'fallback']).optional(),
-  waterScenario: z.enum(['current', '2030', '2050', '2080']).optional(),
+  waterAuthorityMode: z
+    .enum(["basin", "facility_overlay", "fallback"])
+    .optional(),
+  waterScenario: z.enum(["current", "2030", "2050", "2080"]).optional(),
   proofHash: z.string().optional(),
-})
+});
 
-router.get('/spec', (_req, res) => {
+router.get("/spec", (_req, res) => {
   res.json({
-    version: 'DecisionApiV1',
-    canonicalPath: '/api/v1/ci/authorize',
-    aliases: ['/api/v1/ci/route', '/api/v1/ci/carbon-route'],
-    actions: ['run_now', 'reroute', 'delay', 'throttle', 'deny'],
-    runtimes: ['http', 'event', 'queue', 'lambda', 'kubernetes', 'github_actions'],
+    version: "DecisionApiV1",
+    canonicalPath: "/api/v1/ci/authorize",
+    aliases: ["/api/v1/ci/route", "/api/v1/ci/carbon-route"],
+    actions: ["run_now", "reroute", "delay", "throttle", "deny"],
+    runtimes: [
+      "http",
+      "event",
+      "queue",
+      "lambda",
+      "kubernetes",
+      "github_actions",
+    ],
     controlPoints: {
-      http: ['gateway_preflight', 'app_middleware', 'orchestrator_pre_dispatch'],
-      event: ['event_bus', 'scheduler_ingress', 'workflow_engine'],
-      queue: ['dispatcher', 'consumer_wrapper', 'cron_entrypoint'],
-      lambda: ['lambda_wrapper', 'lambda_extension'],
-      kubernetes: ['admission_controller', 'scheduler_hint', 'operator_metadata'],
-      githubActions: ['pre_job', 'runner_wrapper'],
+      http: [
+        "gateway_preflight",
+        "app_middleware",
+        "orchestrator_pre_dispatch",
+      ],
+      event: ["event_bus", "scheduler_ingress", "workflow_engine"],
+      queue: ["dispatcher", "consumer_wrapper", "cron_entrypoint"],
+      lambda: ["lambda_wrapper", "lambda_extension"],
+      kubernetes: [
+        "admission_controller",
+        "scheduler_hint",
+        "operator_metadata",
+      ],
+      githubActions: ["pre_job", "runner_wrapper"],
     },
     requestFields: [
-      'requestId',
-      'idempotencyKey',
-      'timeoutMs',
-      'caller',
-      'runtimeTarget',
-      'transport',
-      'telemetryContext',
-      'preferredRegions',
-      'criticality',
-      'waterPolicyProfile',
-      'signalPolicy',
+      "requestId",
+      "idempotencyKey",
+      "timeoutMs",
+      "caller",
+      "runtimeTarget",
+      "transport",
+      "telemetryContext",
+      "preferredRegions",
+      "criticality",
+      "waterPolicyProfile",
+      "signalPolicy",
     ],
     responseFields: [
-      'decisionEnvelope',
-      'proofEnvelope',
-      'telemetryBridge',
-      'proofRecord',
-      'enforcementBundle',
+      "decisionEnvelope",
+      "proofEnvelope",
+      "telemetryBridge",
+      "proofRecord",
+      "enforcementBundle",
     ],
-  })
-})
+  });
+});
 
-router.post('/k8s/enforce', internalServiceGuard, (req, res) => {
+router.post("/k8s/enforce", internalServiceGuard, (req, res) => {
   try {
-    const payload = k8sEnforcementSchema.parse(req.body)
+    const payload = k8sEnforcementSchema.parse(req.body);
     const plan = buildKubernetesEnforcementPlan({
       decisionFrameId: payload.decisionFrameId,
       decision: payload.decision,
@@ -2816,26 +3193,31 @@ router.post('/k8s/enforce', internalServiceGuard, (req, res) => {
       waterAuthorityMode: payload.waterAuthorityMode,
       waterScenario: payload.waterScenario,
       proofHash: payload.proofHash,
-    })
-    recordTelemetryMetric(telemetryMetricNames.enforcementApplicationCount, 'counter', 1, {
-      decision: payload.decision,
-      criticality: payload.criticality,
-    })
+    });
+    recordTelemetryMetric(
+      telemetryMetricNames.enforcementApplicationCount,
+      "counter",
+      1,
+      {
+        decision: payload.decision,
+        criticality: payload.criticality,
+      },
+    );
     res.json({
       ...plan,
       policyVersion: WATER_POLICY_VERSION,
-    })
+    });
   } catch (error) {
     res.status(400).json({
-      error: 'Invalid Kubernetes enforcement request',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    })
+      error: "Invalid Kubernetes enforcement request",
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
   }
-})
+});
 
-router.post('/k8s/enforcement-bundle', internalServiceGuard, (req, res) => {
+router.post("/k8s/enforcement-bundle", internalServiceGuard, (req, res) => {
   try {
-    const payload = k8sEnforcementSchema.parse(req.body)
+    const payload = k8sEnforcementSchema.parse(req.body);
     const plan = buildKubernetesEnforcementPlan({
       decisionFrameId: payload.decisionFrameId,
       decision: payload.decision,
@@ -2849,21 +3231,26 @@ router.post('/k8s/enforcement-bundle', internalServiceGuard, (req, res) => {
       waterAuthorityMode: payload.waterAuthorityMode,
       waterScenario: payload.waterScenario,
       proofHash: payload.proofHash,
-    })
+    });
     const githubActions = buildGithubActionsEnforcementBundle({
       decisionFrameId: payload.decisionFrameId,
       decision: payload.decision,
-      decisionMode: payload.decisionMode ?? 'runtime_authorization',
+      decisionMode: payload.decisionMode ?? "runtime_authorization",
       selectedRegion: payload.selectedRegion,
       preferredRegions: [payload.selectedRegion],
       criticality: payload.criticality,
       notBefore: plan.execution.notBefore,
-    })
-    recordTelemetryMetric(telemetryMetricNames.enforcementApplicationCount, 'counter', 1, {
-      decision: payload.decision,
-      criticality: payload.criticality,
-      target: 'gatekeeper',
-    })
+    });
+    recordTelemetryMetric(
+      telemetryMetricNames.enforcementApplicationCount,
+      "counter",
+      1,
+      {
+        decision: payload.decision,
+        criticality: payload.criticality,
+        target: "gatekeeper",
+      },
+    );
     res.json({
       policyVersion: WATER_POLICY_VERSION,
       enforcement: plan,
@@ -2877,40 +3264,40 @@ router.post('/k8s/enforcement-bundle', internalServiceGuard, (req, res) => {
         githubActionsMaxParallel: githubActions.maxParallel,
         githubActionsEnvironment: githubActions.environment,
       },
-    })
+    });
   } catch (error) {
     res.status(400).json({
-      error: 'Invalid Kubernetes enforcement bundle request',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    })
+      error: "Invalid Kubernetes enforcement bundle request",
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
   }
-})
+});
 
-router.get('/health', async (_req, res) => {
+router.get("/health", async (_req, res) => {
   try {
-    const artifactHealth = validateWaterArtifacts()
-    const { manifest } = loadWaterArtifacts()
-    const provenance = inspectWaterDatasetProvenance()
-    let dbAvailable = true
+    const artifactHealth = validateWaterArtifacts();
+    const { manifest } = loadWaterArtifacts();
+    const provenance = inspectWaterDatasetProvenance();
+    let dbAvailable = true;
     try {
-      await prisma.$queryRaw`SELECT 1`
+      await prisma.$queryRaw`SELECT 1`;
     } catch {
-      dbAvailable = false
+      dbAvailable = false;
     }
 
     const unhashedDatasets = manifest.datasets.filter(
-      (dataset) => !dataset.file_hash || dataset.file_hash === 'unverified'
-    )
+      (dataset) => !dataset.file_hash || dataset.file_hash === "unverified",
+    );
     const provenanceBlockingDatasets = provenance.datasets
-      .filter((dataset) => dataset.verificationStatus !== 'verified')
-      .map((dataset) => dataset.name)
+      .filter((dataset) => dataset.verificationStatus !== "verified")
+      .map((dataset) => dataset.name);
     const assuranceReady =
       artifactHealth.healthy &&
       dbAvailable &&
       unhashedDatasets.length === 0 &&
-      provenanceBlockingDatasets.length === 0
-    const operationallyUsable = artifactHealth.healthy && dbAvailable
-    const status = operationallyUsable ? 'healthy' : 'degraded'
+      provenanceBlockingDatasets.length === 0;
+    const operationallyUsable = artifactHealth.healthy && dbAvailable;
+    const status = operationallyUsable ? "healthy" : "degraded";
 
     res.status(operationallyUsable ? 200 : 503).json({
       status,
@@ -2924,7 +3311,11 @@ router.get('/health', async (_req, res) => {
       assurance: {
         operationallyUsable,
         assuranceReady,
-        status: assuranceReady ? 'assurance_ready' : operationallyUsable ? 'operational' : 'degraded',
+        status: assuranceReady
+          ? "assurance_ready"
+          : operationallyUsable
+            ? "operational"
+            : "degraded",
         unhashedDatasets: unhashedDatasets.map((dataset) => dataset.name),
         provenanceBlockingDatasets,
       },
@@ -2935,63 +3326,70 @@ router.get('/health', async (_req, res) => {
         totalP95: sloState.budget.totalP95Ms,
         computeP95: sloState.budget.computeP95Ms,
       },
-    })
+    });
   } catch (error) {
     res.status(503).json({
-      status: 'degraded',
-      error: 'Failed to compute CI health',
-      message: error instanceof Error ? error.message : 'Unknown error',
+      status: "degraded",
+      error: "Failed to compute CI health",
+      message: error instanceof Error ? error.message : "Unknown error",
       timestamp: new Date().toISOString(),
-    })
+    });
   }
-})
+});
 
-router.get('/slo', async (_req, res) => {
-  let totalSamples = sloState.totalMs
-  let computeSamples = sloState.computeMs
-  let sampleSource: 'memory' | 'persisted' | 'none' = 'memory'
-  let persistedWindow: PersistedLatencyWindow | null = null
+router.get("/slo", async (_req, res) => {
+  let totalSamples = sloState.totalMs;
+  let computeSamples = sloState.computeMs;
+  let sampleSource: "memory" | "persisted" | "none" = "memory";
+  let persistedWindow: PersistedLatencyWindow | null = null;
 
   if (totalSamples.length === 0 || computeSamples.length === 0) {
-    persistedWindow = await getPersistedLatencyWindow()
+    persistedWindow = await getPersistedLatencyWindow();
     if (totalSamples.length === 0 && persistedWindow.totalMs.length > 0) {
-      totalSamples = persistedWindow.totalMs
+      totalSamples = persistedWindow.totalMs;
     }
     if (computeSamples.length === 0 && persistedWindow.computeMs.length > 0) {
-      computeSamples = persistedWindow.computeMs
+      computeSamples = persistedWindow.computeMs;
     }
     sampleSource =
       totalSamples.length > 0 || computeSamples.length > 0
-        ? 'persisted'
-        : 'none'
+        ? "persisted"
+        : "none";
   }
 
-  const p50Total = percentile(totalSamples, 50)
-  const p95Total = percentile(totalSamples, 95)
-  const p99Total = percentile(totalSamples, 99)
-  const p50Compute = percentile(computeSamples, 50)
-  const p95Compute = percentile(computeSamples, 95)
-  const p99Compute = percentile(computeSamples, 99)
-  const currentTotal = totalSamples[totalSamples.length - 1] ?? 0
-  const currentCompute = computeSamples[computeSamples.length - 1] ?? 0
+  const p50Total = percentile(totalSamples, 50);
+  const p95Total = percentile(totalSamples, 95);
+  const p99Total = percentile(totalSamples, 99);
+  const p50Compute = percentile(computeSamples, 50);
+  const p95Compute = percentile(computeSamples, 95);
+  const p99Compute = percentile(computeSamples, 99);
+  const currentTotal = totalSamples[totalSamples.length - 1] ?? 0;
+  const currentCompute = computeSamples[computeSamples.length - 1] ?? 0;
   const samples =
-    sampleSource === 'persisted'
-      ? (persistedWindow?.sampleCount ?? Math.max(totalSamples.length, computeSamples.length))
-      : Math.max(totalSamples.length, computeSamples.length)
+    sampleSource === "persisted"
+      ? (persistedWindow?.sampleCount ??
+        Math.max(totalSamples.length, computeSamples.length))
+      : Math.max(totalSamples.length, computeSamples.length);
   res.json({
     samples,
     sampleSource,
     selection:
-      sampleSource === 'persisted'
-        ? persistedWindow?.selection ?? 'recent_history'
-        : sampleSource === 'memory'
-          ? 'memory_window'
-          : 'none',
+      sampleSource === "persisted"
+        ? (persistedWindow?.selection ?? "recent_history")
+        : sampleSource === "memory"
+          ? "memory_window"
+          : "none",
     window: {
-      startedAt: sampleSource === 'persisted' ? persistedWindow?.windowStart ?? null : null,
-      endedAt: sampleSource === 'persisted' ? persistedWindow?.windowEnd ?? null : null,
+      startedAt:
+        sampleSource === "persisted"
+          ? (persistedWindow?.windowStart ?? null)
+          : null,
+      endedAt:
+        sampleSource === "persisted"
+          ? (persistedWindow?.windowEnd ?? null)
+          : null,
       activeWindowMinutes:
-        sampleSource === 'persisted' ? SLO_ACTIVE_WINDOW_MINUTES : null,
+        sampleSource === "persisted" ? SLO_ACTIVE_WINDOW_MINUTES : null,
     },
     p50: {
       totalMs: Number(p50Total.toFixed(3)),
@@ -3036,10 +3434,10 @@ router.get('/slo', async (_req, res) => {
       totalSamples: totalSamples.length,
       computeSamples: computeSamples.length,
     },
-  })
-})
+  });
+});
 
-router.get('/telemetry', (_req, res) => {
+router.get("/telemetry", (_req, res) => {
   res.json({
     generatedAt: new Date().toISOString(),
     otel: {
@@ -3048,13 +3446,13 @@ router.get('/telemetry', (_req, res) => {
       serviceName: env.OTEL_SERVICE_NAME,
     },
     metrics: getTelemetrySnapshot(),
-  })
-})
+  });
+});
 
-router.get('/regions', async (_req, res) => {
+router.get("/regions", async (_req, res) => {
   res.json({
     regions: Object.entries(RUNNER_REGIONS).map(([region, runners]) => {
-      const water = resolveWaterSignal(region)
+      const water = resolveWaterSignal(region);
       return {
         region,
         runners,
@@ -3062,17 +3460,17 @@ router.get('/regions', async (_req, res) => {
         waterStressIndex: water.waterStressIndex,
         waterIntensityLPerKwh: water.waterIntensityLPerKwh,
         waterConfidence: water.confidence,
-      }
+      };
     }),
     totalRegions: Object.keys(RUNNER_REGIONS).length,
-  })
-})
+  });
+});
 
-router.get('/decisions', async (req, res) => {
+router.get("/decisions", async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit as string, 10) || 50
+    const limit = parseInt(req.query.limit as string, 10) || 50;
     const decisions = await prisma.cIDecision.findMany({
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       take: limit,
       select: {
         decisionFrameId: true,
@@ -3101,16 +3499,18 @@ router.get('/decisions', async (req, res) => {
         metadata: true,
         createdAt: true,
       },
-    })
+    });
     const decisionFrameIds = Array.from(
       new Set(
         decisions
           .map((decision: any) => decision.decisionFrameId)
-          .filter((decisionFrameId: string | null | undefined): decisionFrameId is string =>
-            Boolean(decisionFrameId)
-          )
-      )
-    )
+          .filter(
+            (
+              decisionFrameId: string | null | undefined,
+            ): decisionFrameId is string => Boolean(decisionFrameId),
+          ),
+      ),
+    );
     const traceRows =
       decisionFrameIds.length > 0
         ? await prisma.decisionTraceEnvelope.findMany({
@@ -3125,192 +3525,271 @@ router.get('/decisions', async (req, res) => {
               payload: true,
             },
           })
-        : []
+        : [];
     const traceByFrameId = new Map<string, any>(
-      traceRows.map((trace: any) => [trace.decisionFrameId, trace])
-    )
+      traceRows.map((trace: any) => [trace.decisionFrameId, trace]),
+    );
 
     res.json({
       decisions: decisions.map((decision: any) => ({
         ...decision,
-        action: decision.decisionAction ?? (decision.metadata as any)?.response?.decision ?? 'run_now',
-        decisionMode: decision.decisionMode ?? (decision.metadata as any)?.response?.decisionMode ?? 'runtime_authorization',
-        reasonCode: decision.reasonCode ?? (decision.metadata as any)?.response?.reasonCode ?? 'UNKNOWN',
-        signalMode: (decision.metadata as any)?.response?.signalMode ?? 'fallback',
-        accountingMethod: (decision.metadata as any)?.response?.accountingMethod ?? 'average',
+        action:
+          decision.decisionAction ??
+          (decision.metadata as any)?.response?.decision ??
+          "run_now",
+        decisionMode:
+          decision.decisionMode ??
+          (decision.metadata as any)?.response?.decisionMode ??
+          "runtime_authorization",
+        reasonCode:
+          decision.reasonCode ??
+          (decision.metadata as any)?.response?.reasonCode ??
+          "UNKNOWN",
+        signalMode:
+          (decision.metadata as any)?.response?.signalMode ?? "fallback",
+        accountingMethod:
+          (decision.metadata as any)?.response?.accountingMethod ?? "average",
         notBefore: (decision.metadata as any)?.response?.notBefore ?? null,
-        proofHash: decision.proofHash ?? (decision.metadata as any)?.response?.proofHash ?? null,
-        waterAuthorityMode: decision.waterAuthorityMode ?? (decision.metadata as any)?.response?.waterAuthority?.authorityMode ?? 'fallback',
-        waterScenario: decision.waterScenario ?? (decision.metadata as any)?.response?.waterAuthority?.scenario ?? 'current',
-        facilityId: decision.facilityId ?? (decision.metadata as any)?.response?.waterAuthority?.facilityId ?? null,
-        waterEvidenceRefs: decision.waterEvidenceRefs ?? (decision.metadata as any)?.response?.waterAuthority?.evidenceRefs ?? [],
+        proofHash:
+          decision.proofHash ??
+          (decision.metadata as any)?.response?.proofHash ??
+          null,
+        waterAuthorityMode:
+          decision.waterAuthorityMode ??
+          (decision.metadata as any)?.response?.waterAuthority?.authorityMode ??
+          "fallback",
+        waterScenario:
+          decision.waterScenario ??
+          (decision.metadata as any)?.response?.waterAuthority?.scenario ??
+          "current",
+        facilityId:
+          decision.facilityId ??
+          (decision.metadata as any)?.response?.waterAuthority?.facilityId ??
+          null,
+        waterEvidenceRefs:
+          decision.waterEvidenceRefs ??
+          (decision.metadata as any)?.response?.waterAuthority?.evidenceRefs ??
+          [],
         latencyMs: (decision.metadata as any)?.response?.latencyMs ?? null,
-        decisionEnvelope: (decision.metadata as any)?.response?.decisionEnvelope ?? null,
-        proofEnvelope: (decision.metadata as any)?.response?.proofEnvelope ?? null,
-        telemetryBridge: (decision.metadata as any)?.response?.telemetryBridge ?? null,
-        adapterContext: (decision.metadata as any)?.response?.adapterContext ?? null,
+        decisionEnvelope:
+          (decision.metadata as any)?.response?.decisionEnvelope ?? null,
+        proofEnvelope:
+          (decision.metadata as any)?.response?.proofEnvelope ?? null,
+        telemetryBridge:
+          (decision.metadata as any)?.response?.telemetryBridge ?? null,
+        adapterContext:
+          (decision.metadata as any)?.response?.adapterContext ?? null,
         traceAvailable: traceByFrameId.has(decision.decisionFrameId),
         governanceSource:
-          (traceByFrameId.get(decision.decisionFrameId)?.payload as any)?.governance?.source ?? 'NONE',
-        traceHash: traceByFrameId.get(decision.decisionFrameId)?.traceHash ?? null,
+          (traceByFrameId.get(decision.decisionFrameId)?.payload as any)
+            ?.governance?.source ?? "NONE",
+        traceHash:
+          traceByFrameId.get(decision.decisionFrameId)?.traceHash ?? null,
       })),
       total: decisions.length,
       limit,
-    })
+    });
   } catch (error) {
     res.status(500).json({
-      error: 'Failed to fetch CI decisions',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    })
+      error: "Failed to fetch CI decisions",
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
   }
-})
+});
 
-router.get('/decisions/:decisionFrameId/trace', internalServiceGuard, async (req, res) => {
-  try {
-    const traceRecord = await getDecisionTraceRecord(req.params.decisionFrameId)
-    if (!traceRecord) {
+router.get(
+  "/decisions/:decisionFrameId/trace",
+  internalServiceGuard,
+  async (req, res) => {
+    try {
+      const traceRecord = await getDecisionTraceRecord(
+        req.params.decisionFrameId,
+      );
+      if (!traceRecord) {
+        const decision = await prisma.cIDecision.findFirst({
+          where: { decisionFrameId: req.params.decisionFrameId },
+          select: { decisionFrameId: true },
+        });
+        return res.status(decision ? 404 : 404).json({
+          error: decision
+            ? "Trace not available for legacy decision"
+            : "Decision not found",
+          code: decision ? "TRACE_NOT_AVAILABLE" : "DECISION_NOT_FOUND",
+          legacy: Boolean(decision),
+        });
+      }
+
+      return res.json(buildCuratedTraceEnvelopeView(traceRecord));
+    } catch (error) {
+      return res.status(500).json({
+        error: "Failed to fetch decision trace",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  },
+);
+
+router.get(
+  "/decisions/:decisionFrameId/trace/raw",
+  internalServiceGuard,
+  async (req, res) => {
+    try {
+      const traceRecord = await getDecisionTraceRecord(
+        req.params.decisionFrameId,
+      );
+      if (!traceRecord) {
+        const decision = await prisma.cIDecision.findFirst({
+          where: { decisionFrameId: req.params.decisionFrameId },
+          select: { decisionFrameId: true },
+        });
+        return res.status(404).json({
+          error: decision
+            ? "Trace not available for legacy decision"
+            : "Decision not found",
+          code: decision ? "TRACE_NOT_AVAILABLE" : "DECISION_NOT_FOUND",
+          legacy: Boolean(decision),
+        });
+      }
+
+      return res.json(traceRecord);
+    } catch (error) {
+      return res.status(500).json({
+        error: "Failed to fetch raw decision trace",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  },
+);
+
+router.get(
+  "/decisions/:decisionFrameId/replay",
+  internalServiceGuard,
+  async (req, res) => {
+    try {
       const decision = await prisma.cIDecision.findFirst({
         where: { decisionFrameId: req.params.decisionFrameId },
-        select: { decisionFrameId: true },
-      })
-      return res.status(decision ? 404 : 404).json({
-        error: decision ? 'Trace not available for legacy decision' : 'Decision not found',
-        code: decision ? 'TRACE_NOT_AVAILABLE' : 'DECISION_NOT_FOUND',
-        legacy: Boolean(decision),
-      })
+        orderBy: { createdAt: "desc" },
+      });
+      if (!decision) {
+        return res.status(404).json({
+          error: "Decision not found",
+          code: "DECISION_NOT_FOUND",
+        });
+      }
+
+      const metadata = (decision.metadata ?? {}) as any;
+      const requestPayload = metadata.request;
+      if (!requestPayload) {
+        return res.status(422).json({
+          error: "Decision does not contain replay payload",
+          code: "REPLAY_PAYLOAD_MISSING",
+        });
+      }
+
+      const traceRecord = await getDecisionTraceRecord(
+        decision.decisionFrameId,
+      );
+
+      const replayTimestamp =
+        traceRecord?.payload.identity.createdAt ??
+        (typeof requestPayload.timestamp === "string"
+          ? requestPayload.timestamp
+          : typeof metadata.response?.proofRecord?.timestamp === "string"
+            ? metadata.response.proofRecord.timestamp
+            : decision.createdAt.toISOString());
+
+      const replayResult = await createDecision(
+        requestSchema.parse(requestPayload),
+        {
+          decisionFrameId: decision.decisionFrameId,
+          nowIso: replayTimestamp,
+          resolvedCandidateOverrides:
+            traceRecord?.payload.inputSignals.resolvedCandidates,
+        },
+      );
+      const replayResultForVerification = traceRecord
+        ? {
+            ...replayResult,
+            response: pinReplayProofHash(
+              replayResult.response,
+              traceRecord.payload.proof.proofHash,
+            ) as typeof replayResult.response,
+          }
+        : replayResult;
+      const replayResponse = await finalizeCiDecisionResponse(
+        replayResultForVerification,
+      );
+      const mismatches = [
+        (metadata.response?.decision ?? null) === replayResponse.decision
+          ? null
+          : "decision",
+        (metadata.response?.selectedRegion ?? null) ===
+        replayResponse.selectedRegion
+          ? null
+          : "selectedRegion",
+        (metadata.response?.reasonCode ?? null) === replayResponse.reasonCode
+          ? null
+          : "reasonCode",
+        (metadata.response?.proofHash ?? null) === replayResponse.proofHash
+          ? null
+          : "proofHash",
+      ].filter((value): value is string => Boolean(value));
+
+      if (mismatches.length === 0) {
+        recordTelemetryMetric(
+          telemetryMetricNames.replayConsistencyCount,
+          "counter",
+          1,
+          {
+            decision_frame_id: decision.decisionFrameId,
+          },
+        );
+      } else {
+        recordTelemetryMetric(
+          telemetryMetricNames.replayMismatchCount,
+          "counter",
+          1,
+          {
+            decision_frame_id: decision.decisionFrameId,
+            mismatches: mismatches.join(","),
+          },
+        );
+      }
+
+      return res.json({
+        decisionFrameId: decision.decisionFrameId,
+        storedResponse: metadata.response ?? null,
+        replayedResponse: replayResponse,
+        persisted: metadata.response ?? null,
+        replay: replayResponse,
+        consistent: mismatches.length === 0,
+        deterministicMatch: mismatches.length === 0,
+        traceBacked: Boolean(traceRecord),
+        legacy: !traceRecord,
+        mismatches,
+        replayedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      return res.status(500).json({
+        error: "Replay failed",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
     }
+  },
+);
 
-    return res.json(buildCuratedTraceEnvelopeView(traceRecord))
-  } catch (error) {
-    return res.status(500).json({
-      error: 'Failed to fetch decision trace',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    })
-  }
-})
-
-router.get('/decisions/:decisionFrameId/trace/raw', internalServiceGuard, async (req, res) => {
-  try {
-    const traceRecord = await getDecisionTraceRecord(req.params.decisionFrameId)
-    if (!traceRecord) {
-      const decision = await prisma.cIDecision.findFirst({
-        where: { decisionFrameId: req.params.decisionFrameId },
-        select: { decisionFrameId: true },
-      })
-      return res.status(404).json({
-        error: decision ? 'Trace not available for legacy decision' : 'Decision not found',
-        code: decision ? 'TRACE_NOT_AVAILABLE' : 'DECISION_NOT_FOUND',
-        legacy: Boolean(decision),
-      })
-    }
-
-    return res.json(traceRecord)
-  } catch (error) {
-    return res.status(500).json({
-      error: 'Failed to fetch raw decision trace',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    })
-  }
-})
-
-router.get('/decisions/:decisionFrameId/replay', internalServiceGuard, async (req, res) => {
-  try {
-    const decision = await prisma.cIDecision.findFirst({
-      where: { decisionFrameId: req.params.decisionFrameId },
-      orderBy: { createdAt: 'desc' },
-    })
-    if (!decision) {
-      return res.status(404).json({
-        error: 'Decision not found',
-        code: 'DECISION_NOT_FOUND',
-      })
-    }
-
-    const metadata = (decision.metadata ?? {}) as any
-    const requestPayload = metadata.request
-    if (!requestPayload) {
-      return res.status(422).json({
-        error: 'Decision does not contain replay payload',
-        code: 'REPLAY_PAYLOAD_MISSING',
-      })
-    }
-
-    const traceRecord = await getDecisionTraceRecord(decision.decisionFrameId)
-
-    const replayTimestamp =
-      traceRecord?.payload.identity.createdAt ??
-      (typeof requestPayload.timestamp === 'string'
-        ? requestPayload.timestamp
-        : typeof metadata.response?.proofRecord?.timestamp === 'string'
-          ? metadata.response.proofRecord.timestamp
-          : decision.createdAt.toISOString())
-
-    const replayResult = await createDecision(requestSchema.parse(requestPayload), {
-      decisionFrameId: decision.decisionFrameId,
-      nowIso: replayTimestamp,
-      resolvedCandidateOverrides: traceRecord?.payload.inputSignals.resolvedCandidates,
-    })
-    const replayResultForVerification = traceRecord
-      ? {
-          ...replayResult,
-          response: pinReplayProofHash(
-            replayResult.response,
-            traceRecord.payload.proof.proofHash
-          ) as typeof replayResult.response,
-        }
-      : replayResult
-    const replayResponse = await finalizeCiDecisionResponse(replayResultForVerification)
-    const mismatches = [
-      (metadata.response?.decision ?? null) === replayResponse.decision ? null : 'decision',
-      (metadata.response?.selectedRegion ?? null) === replayResponse.selectedRegion ? null : 'selectedRegion',
-      (metadata.response?.reasonCode ?? null) === replayResponse.reasonCode ? null : 'reasonCode',
-      (metadata.response?.proofHash ?? null) === replayResponse.proofHash ? null : 'proofHash',
-    ].filter((value): value is string => Boolean(value))
-
-    if (mismatches.length === 0) {
-      recordTelemetryMetric(telemetryMetricNames.replayConsistencyCount, 'counter', 1, {
-        decision_frame_id: decision.decisionFrameId,
-      })
-    } else {
-      recordTelemetryMetric(telemetryMetricNames.replayMismatchCount, 'counter', 1, {
-        decision_frame_id: decision.decisionFrameId,
-        mismatches: mismatches.join(','),
-      })
-    }
-
-    return res.json({
-      decisionFrameId: decision.decisionFrameId,
-      storedResponse: metadata.response ?? null,
-      replayedResponse: replayResponse,
-      persisted: metadata.response ?? null,
-      replay: replayResponse,
-      consistent: mismatches.length === 0,
-      deterministicMatch: mismatches.length === 0,
-      traceBacked: Boolean(traceRecord),
-      legacy: !traceRecord,
-      mismatches,
-      replayedAt: new Date().toISOString(),
-    })
-  } catch (error) {
-    return res.status(500).json({
-      error: 'Replay failed',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    })
-  }
-})
-
-router.post('/exports/proof', internalServiceGuard, async (req, res) => {
+router.post("/exports/proof", internalServiceGuard, async (req, res) => {
   try {
     const body = z
       .object({
         limit: z.number().int().positive().max(1000).default(100),
       })
-      .parse(req.body ?? {})
+      .parse(req.body ?? {});
 
     const decisions = await prisma.cIDecision.findMany({
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       take: body.limit,
-    })
+    });
 
     const payload = {
       exportedAt: new Date().toISOString(),
@@ -3328,9 +3807,12 @@ router.post('/exports/proof', internalServiceGuard, async (req, res) => {
         waterScenario: decision.waterScenario ?? null,
         facilityId: decision.facilityId ?? null,
         waterEvidenceRefs: decision.waterEvidenceRefs ?? [],
-        decisionEnvelope: (decision.metadata as any)?.response?.decisionEnvelope ?? null,
-        proofEnvelope: (decision.metadata as any)?.response?.proofEnvelope ?? null,
-        telemetryBridge: (decision.metadata as any)?.response?.telemetryBridge ?? null,
+        decisionEnvelope:
+          (decision.metadata as any)?.response?.decisionEnvelope ?? null,
+        proofEnvelope:
+          (decision.metadata as any)?.response?.proofEnvelope ?? null,
+        telemetryBridge:
+          (decision.metadata as any)?.response?.telemetryBridge ?? null,
         adapterContext:
           (decision.metadata as any)?.response?.adapterContext ??
           (decision.metadata as any)?.adapterContext ??
@@ -3343,26 +3825,32 @@ router.post('/exports/proof', internalServiceGuard, async (req, res) => {
       })),
       waterArtifactVersion: (() => {
         try {
-          const { bundle, manifest } = loadWaterArtifacts()
-          const artifacts = getWaterArtifactMetadata()
+          const { bundle, manifest } = loadWaterArtifacts();
+          const artifacts = getWaterArtifactMetadata();
           return {
             bundleSchema: bundle.schema_version,
             manifestSchema: manifest.schema_version,
             builtAt: manifest.built_at,
             bundleHash: artifacts.bundleHash,
             manifestHash: artifacts.manifestHash,
-          }
+          };
         } catch {
-          return { bundleSchema: 'fallback', manifestSchema: 'fallback', builtAt: null, bundleHash: null, manifestHash: null }
+          return {
+            bundleSchema: "fallback",
+            manifestSchema: "fallback",
+            builtAt: null,
+            bundleHash: null,
+            manifestHash: null,
+          };
         }
       })(),
-    }
+    };
 
-    const batchId = `ci-proof-${new Date().toISOString().replace(/[:.]/g, '-')}`
-    const chain = persistExportBatch(batchId, payload)
-    recordTelemetryMetric(telemetryMetricNames.proofExportCount, 'counter', 1, {
+    const batchId = `ci-proof-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+    const chain = persistExportBatch(batchId, payload);
+    recordTelemetryMetric(telemetryMetricNames.proofExportCount, "counter", 1, {
       exported_records: decisions.length,
-    })
+    });
 
     return res.json({
       batchId,
@@ -3372,13 +3860,13 @@ router.post('/exports/proof', internalServiceGuard, async (req, res) => {
       exportedRecords: decisions.length,
       batchPath: chain.batchPath,
       createdAt: new Date().toISOString(),
-    })
+    });
   } catch (error) {
     return res.status(500).json({
-      error: 'Failed to export proof batch',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    })
+      error: "Failed to export proof batch",
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
   }
-})
+});
 
-export default router
+export default router;
