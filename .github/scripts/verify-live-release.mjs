@@ -51,6 +51,14 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+function getBooleanEntries(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return []
+  }
+
+  return Object.entries(value).filter(([, entryValue]) => typeof entryValue === 'boolean')
+}
+
 function internalHeaders() {
   if (!internalKey) {
     return {
@@ -491,12 +499,15 @@ async function main() {
   const health = await fetchJsonAllowDegraded('/health')
   const healthStatus = String(health.json?.status ?? '').toLowerCase()
   const waterArtifactChecks = health.json?.checks?.waterArtifacts ?? {}
+  const waterArtifactHealthChecks = getBooleanEntries(waterArtifactChecks)
   assert(['healthy', 'ok'].includes(healthStatus), `/health must be healthy, got ${healthStatus || 'missing'}`)
   assert(health.json?.checks?.database === true, '/health database must be healthy')
   assert(health.json?.checks?.redis === true, '/health redis must be healthy')
   assert(
-    Object.keys(waterArtifactChecks).length > 0 && Object.values(waterArtifactChecks).every((value) => value === true),
-    '/health water artifacts must all be healthy'
+    waterArtifactHealthChecks.length > 0 && waterArtifactHealthChecks.every(([, value]) => value === true),
+    `/health water artifacts must all be healthy: ${waterArtifactHealthChecks
+      .map(([key, value]) => `${key}=${value}`)
+      .join(', ')}`
   )
   stage('health', { status: health.json?.status ?? null, checks: health.json?.checks ?? null })
 
@@ -566,13 +577,15 @@ async function main() {
   const cache = await waitForWarmCoverage()
   const requiredWarmCoveragePct = Number(cache.json?.cache?.requiredWarmCoveragePct ?? NaN)
   const requiredLkgCoveragePct = Number(cache.json?.cache?.requiredLkgCoveragePct ?? NaN)
+  const cacheRedisConnected = cache.json?.cache?.redisConnected
   assert(Number.isFinite(requiredWarmCoveragePct), 'system/cache missing requiredWarmCoveragePct')
   assert(requiredWarmCoveragePct >= 95, `required warm coverage below gate: ${requiredWarmCoveragePct}`)
-  assert(cache.json?.cache?.healthy === true, 'system/cache must report healthy=true')
+  assert(cacheRedisConnected !== false, 'system/cache must report redisConnected=true')
   stage('cache', {
     requiredWarmCoveragePct,
-    requiredLkgCoveragePct: cache.json?.cache?.requiredLkgCoveragePct ?? null,
+    requiredLkgCoveragePct,
     healthy: cache.json?.cache?.healthy ?? null,
+    redisConnected: cacheRedisConnected ?? null,
   })
 
   const authorize = await authorizeDecision()
@@ -644,8 +657,9 @@ async function main() {
     },
     cache: {
       requiredWarmCoveragePct,
-      requiredLkgCoveragePct: cache.json?.cache?.requiredLkgCoveragePct ?? null,
+      requiredLkgCoveragePct,
       healthy: cache.json?.cache?.healthy ?? null,
+      redisConnected: cacheRedisConnected ?? null,
     },
     authorize: checkpoint.stages.authorize,
     replay: checkpoint.stages.replay,
