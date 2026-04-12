@@ -178,6 +178,7 @@ const sloState = {
   },
 }
 
+const CI_PROCESS_BOOTED_AT = new Date()
 const SLO_PERSISTED_WINDOW_LIMIT = 250
 const SLO_ACTIVE_WINDOW_MINUTES = Math.max(
   5,
@@ -191,6 +192,12 @@ type PersistedLatencyWindow = {
   windowStart: string | null
   windowEnd: string | null
   selection: 'latest_active_window' | 'recent_history'
+}
+
+type PersistedLatencySample = {
+  createdAt: Date
+  totalMs: number | null
+  computeMs: number | null
 }
 
 function resolveRequestId(data: RoutingRequest) {
@@ -382,6 +389,13 @@ async function getPersistedLatencyWindow(limit = SLO_PERSISTED_WINDOW_LIMIT): Pr
     }
   }
 
+  return selectPersistedLatencyWindow(latencySamples)
+}
+
+export function selectPersistedLatencyWindow(
+  latencySamples: PersistedLatencySample[],
+  bootedAt = CI_PROCESS_BOOTED_AT
+): PersistedLatencyWindow {
   if (latencySamples.length === 0) {
     return {
       totalMs: [],
@@ -393,15 +407,30 @@ async function getPersistedLatencyWindow(limit = SLO_PERSISTED_WINDOW_LIMIT): Pr
     }
   }
 
-  const newestSampleAt = latencySamples[0].createdAt
+  const orderedSamples = [...latencySamples].sort(
+    (left, right) => right.createdAt.getTime() - left.createdAt.getTime()
+  )
+  const postBootSamples = orderedSamples.filter((sample) => sample.createdAt >= bootedAt)
+  if (postBootSamples.length === 0) {
+    return {
+      totalMs: [],
+      computeMs: [],
+      sampleCount: 0,
+      windowStart: null,
+      windowEnd: null,
+      selection: 'recent_history',
+    }
+  }
+
+  const newestSampleAt = postBootSamples[0].createdAt
   const activeWindowStart = new Date(
     newestSampleAt.getTime() - SLO_ACTIVE_WINDOW_MINUTES * 60 * 1000
   )
-  const activeWindowSamples = latencySamples.filter(
+  const activeWindowSamples = postBootSamples.filter(
     (sample) => sample.createdAt >= activeWindowStart
   )
   const selectedSamples =
-    activeWindowSamples.length > 0 ? activeWindowSamples : latencySamples
+    activeWindowSamples.length > 0 ? activeWindowSamples : postBootSamples
 
   return {
     totalMs: selectedSamples
