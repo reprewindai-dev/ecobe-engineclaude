@@ -100,7 +100,7 @@ router.post('/queue/dispatch', async (req, res) => {
     })
 
     const result = await createDecision(request)
-    const response = await persistCiDecisionResult(result)
+    const { response } = await persistCiDecisionResult(result)
 
     return res.json({
       job: payload.job,
@@ -164,7 +164,7 @@ router.post('/lambda/invoke', async (req, res) => {
     })
 
     const result = await createDecision(request)
-    const response = await persistCiDecisionResult(result)
+    const { response } = await persistCiDecisionResult(result)
 
     return res.json({
       functionName: payload.functionName,

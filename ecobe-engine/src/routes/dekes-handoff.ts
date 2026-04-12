@@ -87,7 +87,7 @@ async function maybeCreateAutoHandoff(prospect: {
     },
   })
   const totalMs = Date.now() - started
-  const response = await persistCiDecisionResult(decisionResult, {
+  const { response } = await persistCiDecisionResult(decisionResult, {
     total: totalMs,
     compute: totalMs,
   })

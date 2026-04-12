@@ -120,7 +120,7 @@ router.post('/ingest', async (req, res) => {
     }
 
     const result = await createDecision(request)
-    const response = await persistCiDecisionResult(result)
+    const { response } = await persistCiDecisionResult(result)
     const outboundDecisionEvent = buildCanonicalDecisionCloudEvent({
       decision: response.decisionEnvelope,
       proof: response.proofEnvelope,

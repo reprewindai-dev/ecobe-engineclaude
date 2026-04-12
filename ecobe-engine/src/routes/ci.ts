@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { providerRouter } from '../lib/carbon/provider-router'
 import { toRoutingCacheBucket } from '../lib/cache/routing-cache-bucket'
 import { applyLowestDefensibleSignalPenalty } from '../lib/ci/conflict-resolver'
-import { CiResponseV2Schema } from '../lib/ci/contracts'
+import { CiResponseV2Schema, type CiResponseV2 } from '../lib/ci/contracts'
 import {
   buildCanonicalDecisionEnvelope,
   buildCanonicalProofEnvelope,
@@ -1798,10 +1798,11 @@ export async function persistCiDecisionResult(
   options?: {
     idempotencyReplayed?: boolean
   }
-) {
+): Promise<{ response: CiResponseV2; traceHash: string }> {
   const validatedResponse = await finalizeCiDecisionResponse(result, latencyMs, options)
   const manifestDatasets = result.persistable.manifestDatasets
   const waterArtifacts = result.persistable.waterArtifactMetadata
+  let persistedTraceHash = ''
   await prisma.$transaction(async (tx: any) => {
     const previousTrace = await tx.decisionTraceEnvelope.findFirst({
       orderBy: { sequenceNumber: 'desc' },
@@ -1883,6 +1884,7 @@ export async function persistCiDecisionResult(
         payload: traceEnvelope,
       },
     })
+    persistedTraceHash = traceHashes.traceHash
 
     const eventPayload = buildDecisionEvaluatedEvent({
       decisionId: persisted.id,
@@ -1990,11 +1992,16 @@ export async function persistCiDecisionResult(
     }
   })
 
-  return validatedResponse
+  return {
+    response: validatedResponse,
+    traceHash: persistedTraceHash,
+  }
 }
 
 async function routeDecisionHandler(req: Request, res: Response) {
   const requestStarted = Date.now()
+  let computeStarted: number | null = null
+  let computeMs: number | null = null
 
   try {
     if (!verifySignedDecisionRequest(req, res)) return
@@ -2031,11 +2038,12 @@ async function routeDecisionHandler(req: Request, res: Response) {
       }
     }
 
-    const computeStarted = Date.now()
+    computeStarted = Date.now()
     const result = await createDecision(data)
-    const computeMs = Date.now() - computeStarted
+    computeMs = Date.now() - computeStarted
     const isFastSimulationRequest = isInternalFastSimulationRequest(req, result.persistable.request)
-    let validatedResponse
+    let validatedResponse: CiResponseV2
+    let persistedTraceHash: string | null = null
 
     if (isFastSimulationRequest) {
       const totalMs = Date.now() - requestStarted
@@ -2046,7 +2054,7 @@ async function routeDecisionHandler(req: Request, res: Response) {
       res.setHeader('x-co2router-simulation-persisted', 'false')
     } else {
       try {
-        validatedResponse = await persistCiDecisionResult(
+        const persisted = await persistCiDecisionResult(
           result,
           {
             total: Date.now() - requestStarted,
@@ -2056,6 +2064,8 @@ async function routeDecisionHandler(req: Request, res: Response) {
             idempotencyReplayed: false,
           }
         )
+        validatedResponse = persisted.response
+        persistedTraceHash = persisted.traceHash
         res.setHeader('x-co2router-simulation-persisted', 'true')
       } catch (dbError) {
         console.warn('Failed to persist CI decision:', dbError)
@@ -2084,7 +2094,11 @@ async function routeDecisionHandler(req: Request, res: Response) {
     })
 
     if (idempotencyCacheKey) {
-      await writeIdempotentResponse(idempotencyCacheKey, validatedResponse)
+      try {
+        await writeIdempotentResponse(idempotencyCacheKey, validatedResponse)
+      } catch (cacheError) {
+        console.warn('Failed to write idempotent CI response cache:', cacheError)
+      }
     }
 
     recordLatency(recordedTotalMs, computeMs)
@@ -2099,7 +2113,12 @@ async function routeDecisionHandler(req: Request, res: Response) {
       cache_status: validatedResponse.latencyMs?.cacheStatus ?? 'live',
     })
     if (!isFastSimulationRequest) {
-      await applyDecisionTraceHeaders(res, validatedResponse.decisionFrameId)
+      res.setHeader('Replay-Trace-ID', validatedResponse.decisionFrameId)
+      if (persistedTraceHash) {
+        res.setHeader('X-CO2Router-Trace-Hash', persistedTraceHash)
+      } else {
+        await applyDecisionTraceHeaders(res, validatedResponse.decisionFrameId)
+      }
     }
     return res.json(validatedResponse)
   } catch (error) {
@@ -2137,7 +2156,11 @@ async function routeDecisionHandler(req: Request, res: Response) {
       accountingMethod: 'average',
     })
 
-    recordLatency(totalMs, totalMs)
+    const fallbackComputeMs =
+      computeMs ??
+      (computeStarted !== null ? Math.max(0, Date.now() - computeStarted) : totalMs)
+
+    recordLatency(totalMs, fallbackComputeMs)
     recordTelemetryMetric(telemetryMetricNames.authorizationDecisionCount, 'counter', 1, {
       action: 'deny',
       signal_mode: 'fallback',
@@ -2463,7 +2486,7 @@ async function routeDecisionHandler(req: Request, res: Response) {
       },
       latencyMs: {
         total: totalMs,
-        compute: totalMs,
+        compute: fallbackComputeMs,
         providerResolution: 0,
         cacheStatus: 'fallback',
         influencedDecision: true,
@@ -2478,9 +2501,13 @@ async function applyDecisionTraceHeaders(res: Response, decisionFrameId: string 
 
   res.setHeader('Replay-Trace-ID', decisionFrameId)
 
-  const traceRecord = await getDecisionTraceRecord(decisionFrameId)
-  if (traceRecord?.traceHash) {
-    res.setHeader('X-CO2Router-Trace-Hash', traceRecord.traceHash)
+  try {
+    const traceRecord = await getDecisionTraceRecord(decisionFrameId)
+    if (traceRecord?.traceHash) {
+      res.setHeader('X-CO2Router-Trace-Hash', traceRecord.traceHash)
+    }
+  } catch (error) {
+    console.warn(`Failed to apply trace hash header for ${decisionFrameId}:`, error)
   }
 }
 
