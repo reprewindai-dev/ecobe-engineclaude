@@ -10,6 +10,11 @@ const allowlistPrefixes = [
   'docs/public/',
   'docs/private/design-partner-program/',
 ]
+const allowlistExactPaths = new Set([
+  'Dockerfile',
+  'railway.json',
+  'start.sh',
+])
 const blockedPrefixes = [
   'dekes-saas/',
   'demo/',
@@ -157,6 +162,7 @@ function getTrackedGitlinks() {
 
 function isAllowedPath(filePath) {
   if (blockedPrefixes.some((prefix) => filePath.startsWith(prefix))) return false
+  if (allowlistExactPaths.has(filePath)) return true
   return allowlistPrefixes.some((prefix) => filePath.startsWith(prefix))
 }
 
