@@ -207,9 +207,25 @@ router.get('/cache', async (req: Request, res: Response) => {
     })
   } catch (error) {
     console.error('Error getting cache stats:', error)
-    res.status(500).json({
+    res.status(503).json({
+      status: 'degraded',
       error: error instanceof Error ? error.message : 'Failed to get cache statistics',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      cache: {
+        totalKeys: 0,
+        keyTypes: {},
+        regions: {},
+        l1: {
+          routingSignalEntries: 0,
+          routingLkgEntries: 0,
+        },
+        regionCount: 0,
+        requiredWarmCoveragePct: 0,
+        requiredLkgCoveragePct: 0,
+        requiredRegions: [],
+        healthy: false,
+        redisConnected: false,
+      }
     })
   }
 })

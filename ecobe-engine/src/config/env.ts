@@ -3,6 +3,35 @@ import dotenv from 'dotenv'
 
 dotenv.config()
 
+export function resolveProductionEnvIssues(input: {
+  NODE_ENV: 'development' | 'production' | 'test'
+  DIRECT_DATABASE_URL?: string
+  ECOBE_INTERNAL_API_KEY?: string
+  DECISION_API_SIGNATURE_SECRET?: string
+  SEKED_POLICY_ADAPTER_ENABLED?: string
+}) {
+  if (input.NODE_ENV !== 'production') {
+    return []
+  }
+
+  const issues: string[] = []
+
+  if (!input.DIRECT_DATABASE_URL?.trim()) {
+    issues.push('DIRECT_DATABASE_URL is required in production')
+  }
+  if (!input.ECOBE_INTERNAL_API_KEY?.trim()) {
+    issues.push('ECOBE_INTERNAL_API_KEY is required in production')
+  }
+  if (!input.DECISION_API_SIGNATURE_SECRET?.trim()) {
+    issues.push('DECISION_API_SIGNATURE_SECRET is required in production')
+  }
+  if (input.SEKED_POLICY_ADAPTER_ENABLED !== 'true') {
+    issues.push('SEKED_POLICY_ADAPTER_ENABLED must be true in production')
+  }
+
+  return issues
+}
+
 const envSchema = z.object({
   PORT: z.string().default('3000'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -147,6 +176,16 @@ const parsed = envSchema.safeParse(process.env)
 if (!parsed.success) {
   console.error('❌ Invalid environment variables:')
   console.error(JSON.stringify(parsed.error.format(), null, 2))
+  process.exit(1)
+}
+
+const productionEnvIssues = resolveProductionEnvIssues(parsed.data)
+
+if (productionEnvIssues.length > 0) {
+  console.error('❌ Invalid production environment variables:')
+  for (const issue of productionEnvIssues) {
+    console.error(`- ${issue}`)
+  }
   process.exit(1)
 }
 

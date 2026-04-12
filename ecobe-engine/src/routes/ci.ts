@@ -3,6 +3,7 @@ import type { Request, Response } from 'express'
 import { Router } from 'express'
 import { z } from 'zod'
 import { providerRouter } from '../lib/carbon/provider-router'
+import { toRoutingCacheBucket } from '../lib/cache/routing-cache-bucket'
 import { applyLowestDefensibleSignalPenalty } from '../lib/ci/conflict-resolver'
 import { CiResponseV2Schema } from '../lib/ci/contracts'
 import {
@@ -64,7 +65,6 @@ import { evaluateSekedPolicyAdapter } from '../lib/policy/seked-policy-adapter'
 import { persistExportBatch } from '../lib/proof/export-chain'
 import { env } from '../config/env'
 import { trackRecentRoutingRegions } from '../lib/cache-warmer'
-import { toRoutingCacheBucket } from '../lib/grid-signals/grid-signal-cache'
 import {
   buildWaterAuthority,
   getWaterArtifactMetadata,
@@ -2550,43 +2550,63 @@ router.post('/k8s/enforcement-bundle', internalServiceGuard, (req, res) => {
 })
 
 router.get('/health', async (_req, res) => {
-  const artifactHealth = validateWaterArtifacts()
-  const { manifest } = loadWaterArtifacts()
-  const provenance = inspectWaterDatasetProvenance()
-  let dbAvailable = true
   try {
-    await prisma.$queryRaw`SELECT 1`
-  } catch {
-    dbAvailable = false
-  }
+    const artifactHealth = validateWaterArtifacts()
+    const { manifest } = loadWaterArtifacts()
+    const provenance = inspectWaterDatasetProvenance()
+    let dbAvailable = true
+    try {
+      await prisma.$queryRaw`SELECT 1`
+    } catch {
+      dbAvailable = false
+    }
 
-  const unhashedDatasets = manifest.datasets.filter(
-    (dataset) => !dataset.file_hash || dataset.file_hash === 'unverified'
-  )
-  const assuranceReady = artifactHealth.healthy && dbAvailable && unhashedDatasets.length === 0
-  const status = artifactHealth.healthy && dbAvailable ? 'healthy' : 'degraded'
-  res.status(artifactHealth.healthy && dbAvailable ? 200 : 503).json({
-    status,
-    timestamp: new Date().toISOString(),
-    checks: {
-      database: dbAvailable,
-      waterArtifacts: artifactHealth.checks,
-      assuranceReady,
-    },
-    assurance: {
-      operationallyUsable: artifactHealth.healthy && dbAvailable,
-      assuranceReady,
-      status: assuranceReady ? 'assurance_ready' : artifactHealth.healthy && dbAvailable ? 'operational' : 'degraded',
-      unhashedDatasets: unhashedDatasets.map((dataset) => dataset.name),
-    },
-    provenance: provenance.summary,
-    errors: artifactHealth.errors,
-    sloBudgetMs: {
-      ...sloState.budget,
-      totalP95: sloState.budget.totalP95Ms,
-      computeP95: sloState.budget.computeP95Ms,
-    },
-  })
+    const unhashedDatasets = manifest.datasets.filter(
+      (dataset) => !dataset.file_hash || dataset.file_hash === 'unverified'
+    )
+    const provenanceBlockingDatasets = provenance.datasets
+      .filter((dataset) => dataset.verificationStatus !== 'verified')
+      .map((dataset) => dataset.name)
+    const assuranceReady =
+      artifactHealth.healthy &&
+      dbAvailable &&
+      unhashedDatasets.length === 0 &&
+      provenanceBlockingDatasets.length === 0
+    const operationallyUsable = artifactHealth.healthy && dbAvailable
+    const status = operationallyUsable ? 'healthy' : 'degraded'
+
+    res.status(operationallyUsable ? 200 : 503).json({
+      status,
+      timestamp: new Date().toISOString(),
+      checks: {
+        database: dbAvailable,
+        waterArtifacts: artifactHealth.checks,
+        provenanceVerified: provenanceBlockingDatasets.length === 0,
+        assuranceReady,
+      },
+      assurance: {
+        operationallyUsable,
+        assuranceReady,
+        status: assuranceReady ? 'assurance_ready' : operationallyUsable ? 'operational' : 'degraded',
+        unhashedDatasets: unhashedDatasets.map((dataset) => dataset.name),
+        provenanceBlockingDatasets,
+      },
+      provenance: provenance.summary,
+      errors: artifactHealth.errors,
+      sloBudgetMs: {
+        ...sloState.budget,
+        totalP95: sloState.budget.totalP95Ms,
+        computeP95: sloState.budget.computeP95Ms,
+      },
+    })
+  } catch (error) {
+    res.status(503).json({
+      status: 'degraded',
+      error: 'Failed to compute CI health',
+      message: error instanceof Error ? error.message : 'Unknown error',
+      timestamp: new Date().toISOString(),
+    })
+  }
 })
 
 router.get('/slo', async (_req, res) => {

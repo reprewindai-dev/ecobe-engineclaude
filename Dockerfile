@@ -1,35 +1,32 @@
-# Use Node.js 22 Alpine for smaller image size (required by Prisma Accelerate)
+# Canonical engine deploy wrapper.
+# Build and run only from ecobe-engine/ so root deploys cannot drift from the
+# doctrine-complete engine source of truth.
 FROM node:22-alpine AS base
 RUN apk add --no-cache libc6-compat
 
-# Install dependencies once for the engine workspace
 FROM base AS deps
 WORKDIR /app/ecobe-engine
-COPY package.json ./package.json
-COPY package-lock.json* ./package-lock.json
+COPY ecobe-engine/package.json ./package.json
+COPY ecobe-engine/package-lock.json* ./package-lock.json
 RUN npm install --legacy-peer-deps
 
-# Build the application with Prisma client generation
 FROM base AS builder
 WORKDIR /app/ecobe-engine
 ARG BUILDTIME_DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=public"
 ENV DATABASE_URL=${BUILDTIME_DATABASE_URL}
 ENV DIRECT_DATABASE_URL=${BUILDTIME_DATABASE_URL}
 COPY --from=deps /app/ecobe-engine/node_modules ./node_modules
-COPY . ./
+COPY ecobe-engine/ ./
 RUN npx prisma generate
 RUN npm run build
 
-# Production runtime image
 FROM base AS runner
 WORKDIR /app/ecobe-engine
 ENV NODE_ENV=production
 
-# Harden container by running as non-root
 RUN addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 --ingroup nodejs ecobe
 
-# Copy built artifacts
 COPY --from=builder /app/ecobe-engine/dist ./dist
 COPY --from=builder /app/ecobe-engine/node_modules ./node_modules
 COPY --from=builder /app/ecobe-engine/package.json ./package.json
@@ -47,4 +44,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD node -e "const http = require('http'); const req = http.get('http://localhost:8080/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }); req.on('error', () => process.exit(1)); req.setTimeout(5000, () => process.exit(1));"
 
-CMD ["sh", "-c", "npx prisma migrate deploy || echo 'Migration failed, continuing...'; node dist/server.js"]
+CMD ["sh", "-c", "node -e \"if(!process.env.DATABASE_URL){console.error('Missing DATABASE_URL');process.exit(1)}; if(!process.env.DIRECT_DATABASE_URL){console.error('Missing DIRECT_DATABASE_URL');process.exit(1)}\" && npx prisma migrate deploy && node dist/server.js"]

@@ -47,7 +47,7 @@ function rawBodySaver(_req: express.Request, _res: express.Response, buf: Buffer
 }
 
 function attachHealthRoutes(app: express.Express) {
-  async function healthHandler(req: express.Request, res: express.Response) {
+  async function healthHandler(_req: express.Request, res: express.Response) {
     try {
       await prisma.$queryRaw`SELECT 1`
 
@@ -59,7 +59,7 @@ function attachHealthRoutes(app: express.Express) {
       }
 
       const waterArtifacts = validateWaterArtifacts()
-      const ok = waterArtifacts.healthy
+      const ok = waterArtifacts.healthy && redisOk
 
       res.status(ok ? 200 : 503).json({
         status: ok ? 'ok' : 'degraded',
@@ -80,6 +80,10 @@ function attachHealthRoutes(app: express.Express) {
           database: true,
           redis: redisOk,
           waterArtifacts: waterArtifacts.checks,
+        },
+        dependencies: {
+          database: true,
+          redis: redisOk,
         },
         waterArtifactErrors: waterArtifacts.errors,
       })

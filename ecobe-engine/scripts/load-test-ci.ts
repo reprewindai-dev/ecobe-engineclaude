@@ -8,20 +8,33 @@ import dotenv from 'dotenv'
 dotenv.config({ path: path.resolve(process.cwd(), '.env') })
 dotenv.config({ path: path.resolve(process.cwd(), '.env.local'), override: true })
 
-const DEFAULT_BASE_URL =
-  process.env.LOAD_TEST_BASE_URL ??
-  process.env.ECOBE_ENGINE_URL ??
-  'https://ecobe-engineclaude-production.up.railway.app'
-const DEFAULT_DASHBOARD_URL =
-  process.env.DASHBOARD_URL ??
-  process.env.DEFAULT_DASHBOARD_URL ??
-  'https://co2-router-dashboard-production.up.railway.app'
-const USE_DASHBOARD_PROXY = process.env.LOAD_TEST_USE_DASHBOARD_PROXY === 'true'
-const AUTHORIZE_URL =
-  process.env.LOAD_TEST_AUTHORIZE_URL ??
-  (USE_DASHBOARD_PROXY ? `${DEFAULT_DASHBOARD_URL.replace(/\/$/, '')}/api/ecobe/ci/authorize` : null)
-const DEFAULT_DIRECT_AUTHORIZE_URL = `${DEFAULT_BASE_URL.replace(/\/$/, '')}/api/v1/ci/authorize`
-const DASHBOARD_PROXY_BASE_URL = DEFAULT_DASHBOARD_URL.replace(/\/$/, '')
+function normalizeBaseUrl(value: string | undefined | null) {
+  const trimmed = String(value || '').trim().replace(/\/$/, '')
+  if (!trimmed) return ''
+
+  try {
+    const url = new URL(trimmed)
+    return url.origin
+  } catch {
+    return trimmed.replace(/\/api\/v1$/, '').replace(/\/api$/, '').replace(/\/$/, '')
+  }
+}
+
+const DEFAULT_ENGINE_URL = 'https://ecobe-engineclaude-production.up.railway.app'
+const FALLBACK_ENGINE_URL = 'https://ecobe-engineclaude-co2router.onrender.com'
+const DEFAULT_DASHBOARD_URL = 'https://co2-router-dashboard-production.up.railway.app'
+const requestedBaseUrl = normalizeBaseUrl(
+  process.env.LOAD_TEST_BASE_URL ?? process.env.ECOBE_ENGINE_URL ?? DEFAULT_ENGINE_URL
+)
+const configuredDashboardUrl = normalizeBaseUrl(
+  process.env.DASHBOARD_URL ?? process.env.DEFAULT_DASHBOARD_URL ?? DEFAULT_DASHBOARD_URL
+)
+const requestedDashboardProxy = process.env.LOAD_TEST_USE_DASHBOARD_PROXY === 'true'
+let resolvedBaseUrl = requestedBaseUrl
+let dashboardProxyAvailable = false
+let useDashboardProxy = false
+let authorizeUrl: string | null = null
+let dashboardProxyBaseUrl = configuredDashboardUrl
 
 const OUTPUT_DIR = path.resolve(process.cwd(), 'data', 'perf', 'ci-load-tests')
 const LATEST_PATH = path.join(OUTPUT_DIR, 'latest.json')
@@ -245,6 +258,60 @@ function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+async function resolveLiveBaseUrl() {
+  const candidates = Array.from(
+    new Set([requestedBaseUrl, process.env.ECOBE_ENGINE_URL, process.env.DEFAULT_ECOBE_ENGINE_URL, FALLBACK_ENGINE_URL]
+      .map((value) => normalizeBaseUrl(value))
+      .filter(Boolean))
+  )
+
+  const failures: string[] = []
+  for (const candidate of candidates) {
+    try {
+      const response = await axios.get(`${candidate}/health`, {
+        timeout: 10_000,
+        validateStatus: () => true,
+      })
+      const status = String(response.data?.status ?? '').toLowerCase()
+      if ((response.status === 200 || response.status === 503) && status && status !== 'error' && status !== 'unhealthy') {
+        resolvedBaseUrl = candidate
+        return
+      }
+      failures.push(`${candidate}/health returned ${response.status}${status ? ` (${status})` : ''}`)
+    } catch (error: any) {
+      failures.push(`${candidate}/health probe failed: ${error?.message ?? 'unknown error'}`)
+    }
+  }
+
+  throw new Error(`Unable to resolve a live engine base URL. Probes: ${failures.join(' | ')}`)
+}
+
+async function resolveDashboardProxyAvailability() {
+  dashboardProxyBaseUrl = configuredDashboardUrl
+  if (!dashboardProxyBaseUrl) {
+    useDashboardProxy = false
+    authorizeUrl = process.env.LOAD_TEST_AUTHORIZE_URL ?? null
+    return
+  }
+
+  try {
+    const response = await axios.get(`${dashboardProxyBaseUrl}/api/health`, {
+      timeout: 10_000,
+      validateStatus: () => true,
+    })
+    const status = String(response.data?.status ?? '').toLowerCase()
+    dashboardProxyAvailable =
+      response.status < 400 && (!status || status === 'ok' || status === 'healthy' || status === 'degraded')
+  } catch {
+    dashboardProxyAvailable = false
+  }
+
+  useDashboardProxy = requestedDashboardProxy && dashboardProxyAvailable
+  authorizeUrl =
+    process.env.LOAD_TEST_AUTHORIZE_URL ??
+    (useDashboardProxy ? `${dashboardProxyBaseUrl.replace(/\/$/, '')}/api/ecobe/ci/authorize` : null)
+}
+
 function buildPayload(scenarioId: ScenarioDefinition['id'], index: number) {
   const template = REQUEST_TEMPLATES[index % REQUEST_TEMPLATES.length]
   const requestId = `load-${scenarioId}-${index}-${Date.now()}`
@@ -263,7 +330,8 @@ function buildPayload(scenarioId: ScenarioDefinition['id'], index: number) {
 }
 
 function signBody(body: string) {
-  if (USE_DASHBOARD_PROXY || (AUTHORIZE_URL && AUTHORIZE_URL !== DEFAULT_DIRECT_AUTHORIZE_URL)) return null
+  const defaultDirectAuthorizeUrl = `${resolvedBaseUrl.replace(/\/$/, '')}/api/v1/ci/authorize`
+  if (useDashboardProxy || (authorizeUrl && authorizeUrl !== defaultDirectAuthorizeUrl)) return null
   const secret = process.env.DECISION_API_SIGNATURE_SECRET
   if (!secret) return null
   return crypto.createHmac('sha256', secret).update(body).digest('hex')
@@ -272,11 +340,11 @@ function signBody(body: string) {
 async function postAuthorizeRequest(baseUrl: string, payload: ReturnType<typeof buildPayload>, timeoutMs: number) {
   const body = JSON.stringify(payload)
   const signature = signBody(body)
-  const authorizeUrl = AUTHORIZE_URL ?? `${baseUrl}/api/v1/ci/authorize`
+  const targetAuthorizeUrl = authorizeUrl ?? `${baseUrl}/api/v1/ci/authorize`
   const requestStartedAt = performance.now()
 
   try {
-    const response = await axios.post(authorizeUrl, body, {
+    const response = await axios.post(targetAuthorizeUrl, body, {
       timeout: timeoutMs,
       validateStatus: () => true,
       headers: {
@@ -368,11 +436,11 @@ async function verifyReplaySamples(
       })
     } catch (error: any) {
       const status = error?.response?.status
-      if (status !== 401 || !USE_DASHBOARD_PROXY) {
+      if (status !== 401 || !useDashboardProxy) {
         throw error
       }
 
-      const proxyUrl = `${DASHBOARD_PROXY_BASE_URL}/api/ecobe/ci/decisions/${decisionFrameId}/${kind}`
+      const proxyUrl = `${dashboardProxyBaseUrl}/api/ecobe/ci/decisions/${decisionFrameId}/${kind}`
       return axios.get(proxyUrl, {
         timeout: 20_000,
       })
@@ -663,8 +731,14 @@ function assertReleaseGates(results: ScenarioResult[]) {
 }
 
 async function main() {
-  const baseUrl = DEFAULT_BASE_URL.replace(/\/$/, '')
+  await resolveLiveBaseUrl()
+  await resolveDashboardProxyAvailability()
+
+  const baseUrl = resolvedBaseUrl.replace(/\/$/, '')
   console.log(`Running CI load simulations against ${baseUrl}`)
+  if (requestedDashboardProxy && !dashboardProxyAvailable) {
+    console.log('Dashboard proxy unavailable; running release load gates directly against the engine.')
+  }
 
   const results: ScenarioResult[] = []
   for (const scenario of SCENARIOS) {

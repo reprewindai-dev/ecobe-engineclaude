@@ -19,7 +19,9 @@ function normalizeBaseUrl(value) {
 const configuredBaseUrl = normalizeBaseUrl(process.env.ECOBE_ENGINE_URL || process.env.DEFAULT_ECOBE_ENGINE_URL || '')
 const FALLBACK_ENGINE_URL = 'https://ecobe-engineclaude-co2router.onrender.com'
 let baseUrl = configuredBaseUrl
-const dashboardUrl = (process.env.DASHBOARD_URL || process.env.DEFAULT_DASHBOARD_URL || '').trim().replace(/\/$/, '')
+const dashboardUrl = normalizeBaseUrl(process.env.DASHBOARD_URL || process.env.DEFAULT_DASHBOARD_URL || '')
+let dashboardAvailable = false
+const REQUIRED_PROVENANCE_DATASETS = ['aqueduct', 'aware', 'wwf', 'nrel']
 const internalKey = (process.env.ECOBE_INTERNAL_API_KEY || process.env.ECOBE_ENGINE_API_KEY || '').trim()
 const signatureSecret = process.env.DECISION_API_SIGNATURE_SECRET?.trim() || ''
 const outputPath = process.env.RELEASE_PROOF_OUTPUT_PATH?.trim()
@@ -159,9 +161,50 @@ async function resolveBaseUrl() {
   throw new Error(`Unable to resolve a live engine base URL. Probes: ${errors.join(' | ')}`)
 }
 
-async function fetchDashboardProxyJson(pathname) {
+async function resolveDashboardAvailability() {
   if (!dashboardUrl) {
-    throw new Error('Dashboard signer bridge is not configured.')
+    stage('dashboardProxy', {
+      available: false,
+      dashboardUrl: null,
+      reason: 'Dashboard signer bridge is not configured.',
+    })
+    return
+  }
+
+  try {
+    const response = await fetch(`${dashboardUrl}/api/health`, {
+      headers: { Accept: 'application/json' },
+    })
+    const parsed = await parseJsonResponse(response)
+    const status = String(parsed.json?.status ?? '').toLowerCase()
+
+    if (!parsed.response.ok || (status && status !== 'ok' && status !== 'healthy' && status !== 'degraded')) {
+      stage('dashboardProxy', {
+        available: false,
+        dashboardUrl,
+        reason: `/api/health returned ${parsed.response.status}${status ? ` (${status})` : ''}`,
+      })
+      return
+    }
+
+    dashboardAvailable = true
+    stage('dashboardProxy', {
+      available: true,
+      dashboardUrl,
+      status: parsed.json?.status ?? null,
+    })
+  } catch (error) {
+    stage('dashboardProxy', {
+      available: false,
+      dashboardUrl,
+      reason: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+async function fetchDashboardProxyJson(pathname) {
+  if (!dashboardAvailable) {
+    throw new Error('Dashboard signer bridge is not reachable.')
   }
 
   const proxiedPath = pathname.replace(/^\/api\/v1\//, '')
@@ -254,7 +297,7 @@ async function waitForDecisionArtifact(pathname, headers = {}, retryStatuses = [
     try {
       return await fetchJson(pathname, headers)
     } catch (error) {
-      if (error?.status === 401 && dashboardUrl) {
+      if (error?.status === 401 && dashboardAvailable) {
         return fetchDashboardProxyJson(pathname)
       }
       lastError = error
@@ -350,8 +393,8 @@ async function tryDirectAuthorizeWithInternalKey(body) {
 }
 
 async function tryDashboardProxyAuthorize(body) {
-  if (!dashboardUrl) {
-    throw new Error('Dashboard signer bridge is not configured.')
+  if (!dashboardAvailable) {
+    throw new Error('Dashboard signer bridge is not reachable.')
   }
 
   const response = await fetch(`${dashboardUrl}/api/ecobe/ci/authorize`, {
@@ -406,10 +449,8 @@ async function authorizeDecision() {
   } catch (error) {
     const status = error?.status
     const payloadCode = error?.payload?.code
-    const shouldFallbackToDashboardProxy =
-      status === 401 && payloadCode === 'INVALID_REQUEST_SIGNATURE' && Boolean(dashboardUrl)
-
-    if (!shouldFallbackToDashboardProxy) {
+    const signatureRejected = status === 401 && payloadCode === 'INVALID_REQUEST_SIGNATURE'
+    if (!signatureRejected) {
       throw error
     }
 
@@ -417,26 +458,17 @@ async function authorizeDecision() {
       try {
         return await tryDirectAuthorizeWithInternalKey(body)
       } catch (internalKeyError) {
-        if (!dashboardUrl) {
+        if (!dashboardAvailable) {
           throw internalKeyError
         }
       }
     }
 
-    return tryDashboardProxyAuthorize(body)
-  }
-}
+    if (!dashboardAvailable) {
+      throw error
+    }
 
-async function getLatestDecisionFrameId() {
-  const recent = await fetchJson('/api/v1/ci/decisions?limit=1', internalHeaders())
-  const decisionFrameId = recent.json?.decisions?.[0]?.decisionFrameId
-  assert(
-    typeof decisionFrameId === 'string' && decisionFrameId.length > 0,
-    'Unable to resolve a fallback decisionFrameId from /api/v1/ci/decisions'
-  )
-  return {
-    decisionFrameId,
-    selectedRegion: recent.json?.decisions?.[0]?.selectedRegion ?? null,
+    return tryDashboardProxyAuthorize(body)
   }
 }
 
@@ -455,13 +487,32 @@ function writeResult(result) {
 
 async function main() {
   await resolveBaseUrl()
+  await resolveDashboardAvailability()
   const health = await fetchJsonAllowDegraded('/health')
-  assert(['healthy', 'ok', 'degraded'].includes(String(health.json?.status)), '/health missing valid status')
-  stage('health', { status: health.json?.status ?? null })
+  const healthStatus = String(health.json?.status ?? '').toLowerCase()
+  const waterArtifactChecks = health.json?.checks?.waterArtifacts ?? {}
+  assert(['healthy', 'ok'].includes(healthStatus), `/health must be healthy, got ${healthStatus || 'missing'}`)
+  assert(health.json?.checks?.database === true, '/health database must be healthy')
+  assert(health.json?.checks?.redis === true, '/health redis must be healthy')
+  assert(
+    Object.keys(waterArtifactChecks).length > 0 && Object.values(waterArtifactChecks).every((value) => value === true),
+    '/health water artifacts must all be healthy'
+  )
+  stage('health', { status: health.json?.status ?? null, checks: health.json?.checks ?? null })
 
   const ciHealth = await fetchJson('/api/v1/ci/health')
   assert(typeof ciHealth.json === 'object' && ciHealth.json !== null, '/api/v1/ci/health missing object payload')
-  stage('ciHealth', { status: ciHealth.json?.status ?? 'ok' })
+  assert(ciHealth.json?.assurance?.assuranceReady === true, '/api/v1/ci/health is not assurance-ready')
+  assert(
+    ciHealth.json?.assurance?.status === 'assurance_ready',
+    `/api/v1/ci/health returned ${ciHealth.json?.assurance?.status ?? 'missing assurance status'}`
+  )
+  assert(ciHealth.json?.checks?.provenanceVerified === true, '/api/v1/ci/health reports provenance blockers')
+  stage('ciHealth', {
+    status: ciHealth.json?.status ?? 'ok',
+    assuranceStatus: ciHealth.json?.assurance?.status ?? null,
+    checks: ciHealth.json?.checks ?? null,
+  })
 
   const slo = await fetchJson('/api/v1/ci/slo')
   const p95Total = Number(slo.json?.currentMs?.total?.p95 ?? NaN)
@@ -488,78 +539,60 @@ async function main() {
   )
   assert(Number.isFinite(provenanceVerified), 'water provenance verified count is invalid')
   assert(Number.isFinite(provenanceMismatch), 'water provenance mismatch count is invalid')
-  if (provenanceVerified >= 1 || provenanceMismatch >= 1) {
-    stage('provenance', { verified: provenanceVerified, mismatch: provenanceMismatch })
-  } else {
-    stage('provenance', {
-      verified: provenanceVerified,
-      mismatch: provenanceMismatch,
-      note: 'no provenance datasets reported yet',
-    })
-  }
+  const requiredDatasets = REQUIRED_PROVENANCE_DATASETS.map((datasetName) =>
+    provenance.json?.datasets?.find((dataset) => dataset?.name === datasetName)
+  )
+  assert(requiredDatasets.every(Boolean), `water provenance missing required datasets: ${REQUIRED_PROVENANCE_DATASETS.join(', ')}`)
+  assert(
+    requiredDatasets.every((dataset) => dataset?.verificationStatus === 'verified'),
+    `water provenance is not fully verified: ${requiredDatasets
+      .map((dataset) => `${dataset?.name}:${dataset?.verificationStatus ?? 'missing'}`)
+      .join(', ')}`
+  )
+  assert(provenanceMismatch === 0, `water provenance mismatch count must be zero, got ${provenanceMismatch}`)
+  assert(
+    provenanceVerified >= REQUIRED_PROVENANCE_DATASETS.length,
+    `water provenance verified count below gate: ${provenanceVerified}`
+  )
+  stage('provenance', {
+    verified: provenanceVerified,
+    mismatch: provenanceMismatch,
+    datasets: requiredDatasets.map((dataset) => ({
+      name: dataset.name,
+      verificationStatus: dataset.verificationStatus,
+    })),
+  })
 
   const cache = await waitForWarmCoverage()
   const requiredWarmCoveragePct = Number(cache.json?.cache?.requiredWarmCoveragePct ?? NaN)
   const requiredLkgCoveragePct = Number(cache.json?.cache?.requiredLkgCoveragePct ?? NaN)
   assert(Number.isFinite(requiredWarmCoveragePct), 'system/cache missing requiredWarmCoveragePct')
-  if (
-    Number.isFinite(requiredLkgCoveragePct) &&
-    requiredWarmCoveragePct === 0 &&
-    requiredLkgCoveragePct === 0
-  ) {
-    stage('cache', {
-      requiredWarmCoveragePct,
-      requiredLkgCoveragePct,
-      requiredRegions: cache.json?.cache?.requiredRegions ?? [],
-      healthy: cache.json?.cache?.healthy ?? null,
-      note: 'cache coverage gate skipped (redis unavailable)',
-    })
-  } else {
-    assert(requiredWarmCoveragePct >= 95, `required warm coverage below gate: ${requiredWarmCoveragePct}`)
-    stage('cache', {
-      requiredWarmCoveragePct,
-      requiredLkgCoveragePct: cache.json?.cache?.requiredLkgCoveragePct ?? null,
-      healthy: cache.json?.cache?.healthy ?? null,
-    })
-  }
+  assert(requiredWarmCoveragePct >= 95, `required warm coverage below gate: ${requiredWarmCoveragePct}`)
+  assert(cache.json?.cache?.healthy === true, 'system/cache must report healthy=true')
+  stage('cache', {
+    requiredWarmCoveragePct,
+    requiredLkgCoveragePct: cache.json?.cache?.requiredLkgCoveragePct ?? null,
+    healthy: cache.json?.cache?.healthy ?? null,
+  })
 
-  let decisionFrameId
-  try {
-    const authorize = await authorizeDecision()
-    decisionFrameId = authorize.json?.decisionFrameId
-    assert(typeof decisionFrameId === 'string' && decisionFrameId.length > 0, 'authorize response missing decisionFrameId')
-    assert(Boolean(authorize.response.headers.get('Replay-Trace-ID')), 'authorize response missing Replay-Trace-ID header')
-    assert(Boolean(authorize.response.headers.get('X-CO2Router-Trace-Hash')), 'authorize response missing X-CO2Router-Trace-Hash header')
-    stage('authorize', {
-      mode: authorize.mode,
-      decisionFrameId,
-      replayTraceId: authorize.response.headers.get('Replay-Trace-ID'),
-      traceHash: authorize.response.headers.get('X-CO2Router-Trace-Hash'),
-      governanceSource:
-        authorize.json?.policyTrace?.sekedPolicy?.source ??
-        authorize.json?.policyTrace?.governance?.source ??
-        authorize.json?.governance?.source ??
-        null,
-    })
-  } catch (authorizeError) {
-    const authorizeErrorMessage =
-      authorizeError instanceof Error ? authorizeError.message : String(authorizeError)
-    const shouldUseLatestDecisionFallback =
-      /dashboard proxy authorize returned 404/i.test(authorizeErrorMessage) ||
-      /application not found/i.test(authorizeErrorMessage)
-    if (!shouldUseLatestDecisionFallback) {
-      throw authorizeError
-    }
-
-    const latestDecision = await getLatestDecisionFrameId()
-    decisionFrameId = latestDecision.decisionFrameId
-    stage('authorize', {
-      mode: 'latest_decision_fallback',
-      decisionFrameId,
-      selectedRegion: latestDecision.selectedRegion,
-      note: 'authorize skipped: dashboard signer bridge unavailable',
-    })
-  }
+  const authorize = await authorizeDecision()
+  const decisionFrameId = authorize.json?.decisionFrameId
+  const governanceSource =
+    authorize.json?.policyTrace?.sekedPolicy?.source ??
+    authorize.json?.policyTrace?.governance?.source ??
+    authorize.json?.governance?.source ??
+    null
+  assert(typeof decisionFrameId === 'string' && decisionFrameId.length > 0, 'authorize response missing decisionFrameId')
+  assert(Boolean(authorize.response.headers.get('Replay-Trace-ID')), 'authorize response missing Replay-Trace-ID header')
+  assert(Boolean(authorize.response.headers.get('X-CO2Router-Trace-Hash')), 'authorize response missing X-CO2Router-Trace-Hash header')
+  assert(governanceSource === 'SEKED_INTERNAL_V1', `authorize governance source must be SEKED_INTERNAL_V1, got ${governanceSource ?? 'missing'}`)
+  stage('authorize', {
+    mode: authorize.mode,
+    decisionFrameId,
+    replayTraceId: authorize.response.headers.get('Replay-Trace-ID'),
+    traceHash: authorize.response.headers.get('X-CO2Router-Trace-Hash'),
+    governanceSource,
+  })
 
   const trace = await waitForDecisionArtifact(
     `/api/v1/ci/decisions/${decisionFrameId}/trace`,

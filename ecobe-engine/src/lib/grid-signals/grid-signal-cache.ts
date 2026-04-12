@@ -1,6 +1,9 @@
 import { env } from '../../config/env'
 import { redis } from '../redis'
+import { toRoutingCacheBucket, toRoutingCacheKey } from '../cache/routing-cache-bucket'
 import { GridSignalSnapshot } from './types'
+
+export { toRoutingCacheBucket, toRoutingCacheKey } from '../cache/routing-cache-bucket'
 
 export interface CacheOptions {
   ttl?: number // Time to live in seconds
@@ -39,16 +42,6 @@ export interface CachedRoutingSignalRecord {
   lastLatencyMs: number | null
   degraded: boolean
   cacheSource?: 'live' | 'warm' | 'redis' | 'lkg' | 'degraded-safe'
-}
-
-export function toRoutingCacheBucket(timestamp: Date | string) {
-  const bucket = new Date(timestamp)
-  bucket.setSeconds(0, 0)
-  return bucket
-}
-
-export function toRoutingCacheKey(timestamp: Date | string) {
-  return toRoutingCacheBucket(timestamp).toISOString()
 }
 
 function toRedisKeyList(value: unknown): string[] {

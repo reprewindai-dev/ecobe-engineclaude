@@ -1,32 +1,32 @@
 {
-  "built_at": "2026-03-30T20:33:52.420Z",
+  "built_at": "2026-04-12T07:26:00.213Z",
   "schema_version": "water_bundle_v2",
   "datasets": [
     {
       "name": "aqueduct",
       "source_url": "https://www.wri.org/data/aqueduct-global-maps-21-data",
-      "file_hash": "91f22cf2ed2b39cc912743cdcd458c18902c874e9e469fccc9e3ec67a79d00ed",
+      "file_hash": "dad8207364db1aa8c8449c88a2cde0e7e83b88b4c7f8c3fb6b159deeea68f226",
       "downloaded_at": "2026-03-28T00:00:00.000Z",
       "dataset_version": "aqueduct_2_1"
     },
     {
       "name": "aware",
       "source_url": "https://wulca-waterlca.org/aware/",
-      "file_hash": "94649ec3760b475e3980eba45e0731f52968d819264129525be24ea9f30f1aa4",
+      "file_hash": "91235ec021fe678f9fa478dd853b07cdfbf8369ba47623e9dcaae5bcbdca131e",
       "downloaded_at": "2026-03-28T00:00:00.000Z",
       "dataset_version": "aware_2_0"
     },
     {
       "name": "wwf",
       "source_url": "https://riskfilter.org/water/explore/countryprofiles",
-      "file_hash": "d86256f989a44f5761dfd0b31ad77bd9407ce6e0a25a17d1f912130ab0b82ba9",
+      "file_hash": "8e87134948bd916822db8c6d6d0e33dcea4b84920b74377a5aca18b1df58825a",
       "downloaded_at": "2026-03-28T00:00:00.000Z",
       "dataset_version": "wwf_water_risk_filter_v1"
     },
     {
       "name": "nrel",
       "source_url": "https://data.nrel.gov/",
-      "file_hash": "4de9ff55d52bfa74273c92c430c294888a7cc783658edaf2cba677586fe19e64",
+      "file_hash": "d86cdefdc43f74af8159a73b1762fd52b50d33e585216ebc59f4ffb4f24f84a7",
       "downloaded_at": "2026-03-28T00:00:00.000Z",
       "dataset_version": "nrel_water_factors_v1"
     }
