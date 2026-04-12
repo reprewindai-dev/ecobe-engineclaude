@@ -2,7 +2,7 @@ import { redis } from '../redis'
 
 export const REGION_RELIABILITY_HASH_KEY = 'ci:region-reliability:v1'
 export const REGION_RELIABILITY_META_KEY = 'ci:region-reliability:meta:v1'
-const REGION_RELIABILITY_CACHE_TTL_MS = 30_000
+const REGION_RELIABILITY_CACHE_TTL_MS = 5 * 60_000
 
 let regionReliabilityCache:
   | {
@@ -10,6 +10,7 @@ let regionReliabilityCache:
       values: Record<string, number>
     }
   | null = null
+let regionReliabilityLoadPromise: Promise<Record<string, number>> | null = null
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value))
@@ -50,17 +51,31 @@ export async function loadRegionReliabilityMultipliers(
   }
 
   try {
-    const hash = await redis.hgetall(REGION_RELIABILITY_HASH_KEY)
-    const cachedValues = Object.entries(hash ?? {}).reduce<Record<string, number>>((acc, [region, raw]) => {
-      const parsed = raw !== undefined ? Number(raw) : NaN
-      acc[region] = Number.isFinite(parsed) && parsed > 0 ? parsed : 1
-      return acc
-    }, {})
+    if (!regionReliabilityLoadPromise) {
+      regionReliabilityLoadPromise = (async () => {
+        const hash = await redis.hgetall(REGION_RELIABILITY_HASH_KEY)
+        const loadedAt = Date.now()
+        const cachedValues = Object.entries(hash ?? {}).reduce<Record<string, number>>(
+          (acc, [region, raw]) => {
+            const parsed = raw !== undefined ? Number(raw) : NaN
+            acc[region] = Number.isFinite(parsed) && parsed > 0 ? parsed : 1
+            return acc
+          },
+          {}
+        )
 
-    regionReliabilityCache = {
-      expiresAt: now + REGION_RELIABILITY_CACHE_TTL_MS,
-      values: cachedValues,
+        regionReliabilityCache = {
+          expiresAt: loadedAt + REGION_RELIABILITY_CACHE_TTL_MS,
+          values: cachedValues,
+        }
+
+        return cachedValues
+      })().finally(() => {
+        regionReliabilityLoadPromise = null
+      })
     }
+
+    const cachedValues = await regionReliabilityLoadPromise
 
     return regions.reduce<Record<string, number>>((acc, region) => {
       acc[region] = cachedValues[region] ?? 1
@@ -76,6 +91,7 @@ export async function loadRegionReliabilityMultipliers(
 
 export function resetRegionReliabilityCache() {
   regionReliabilityCache = null
+  regionReliabilityLoadPromise = null
 }
 
 export async function persistRegionReliabilityMultipliers(
@@ -90,6 +106,14 @@ export async function persistRegionReliabilityMultipliers(
     Object.fromEntries(entries.map(([k, v]) => [k, v.toString()]))
   )
   await redis.hset(REGION_RELIABILITY_META_KEY, metadata)
+
+  regionReliabilityCache = {
+    expiresAt: Date.now() + REGION_RELIABILITY_CACHE_TTL_MS,
+    values: {
+      ...(regionReliabilityCache?.values ?? {}),
+      ...scores,
+    },
+  }
 }
 
 export async function getRegionReliabilityMetadata(): Promise<Record<string, string>> {

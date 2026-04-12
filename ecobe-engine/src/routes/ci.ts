@@ -1887,7 +1887,12 @@ export async function finalizeCiDecisionResponse(
     transport: result.response.decisionEnvelope.transport.transport,
     traceId: result.persistable.request.telemetryContext?.traceId,
   })
-  const exportState = await exportDecisionSpanRecord(span)
+  const exportEnabled = Boolean(env.OTEL_EXPORT_ENABLED && env.OTEL_EXPORT_ENDPOINT)
+  if (exportEnabled) {
+    void exportDecisionSpanRecord(span).catch((error) => {
+      console.warn('Failed to export decision span record asynchronously:', error)
+    })
+  }
 
   const responsePayload = {
     ...result.response,
@@ -1917,11 +1922,9 @@ export async function finalizeCiDecisionResponse(
       durationMs: span.durationMs,
       attributes: span.attributes,
       export: {
-        enabled: exportState.enabled,
-        exported: exportState.exported,
-        endpoint: exportState.endpoint ?? null,
-        statusCode: 'statusCode' in exportState ? exportState.statusCode : undefined,
-        error: 'error' in exportState ? exportState.error : undefined,
+        enabled: exportEnabled,
+        exported: false,
+        endpoint: exportEnabled ? env.OTEL_EXPORT_ENDPOINT : null,
       },
     },
   }
