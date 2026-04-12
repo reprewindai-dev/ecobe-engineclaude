@@ -252,9 +252,29 @@ function resolveTransport(data: RoutingRequest): CanonicalTransportMetadata {
   })
 }
 
+export function isAuthorizedDecisionRequest(input: {
+  rawBody?: string
+  signatureHeader?: string
+  internalToken?: string | null
+}) {
+  const signatureValid = verifySignatureHeader(input.rawBody, input.signatureHeader)
+  const internalTokenValid =
+    Boolean(env.ECOBE_INTERNAL_API_KEY) && input.internalToken === env.ECOBE_INTERNAL_API_KEY
+
+  return signatureValid || internalTokenValid
+}
+
 function verifySignedDecisionRequest(req: Request, res: Response) {
   const signatureHeader = req.header('x-ecobe-signature')
-  if (!verifySignatureHeader((req as Request & { rawBody?: string }).rawBody, signatureHeader)) {
+  const internalToken = extractInternalToken(req)
+
+  if (
+    !isAuthorizedDecisionRequest({
+      rawBody: (req as Request & { rawBody?: string }).rawBody,
+      signatureHeader,
+      internalToken,
+    })
+  ) {
     res.status(401).json({
       error: 'Invalid request signature',
       code: 'INVALID_REQUEST_SIGNATURE',
