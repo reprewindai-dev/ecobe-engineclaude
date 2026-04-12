@@ -127,7 +127,7 @@ export class ProviderRouter {
       region,
       timestamp.toISOString()
     )
-    if (cached && !cached.record.degraded) {
+    if (cached) {
       return this.withCacheSource(cached.record, cached.source)
     }
 
@@ -145,10 +145,6 @@ export class ProviderRouter {
         this.withCacheSource(lastKnownGood.record, lastKnownGood.source),
         timestamp
       )
-    }
-
-    if (cached?.record) {
-      return this.buildDegradedSafeRecord(region, timestamp, cached.record)
     }
 
     return this.buildDegradedSafeRecord(region, timestamp)
