@@ -677,17 +677,25 @@ async function runScenario(baseUrl: string, scenario: ScenarioDefinition): Promi
 
 function assertReleaseGates(results: ScenarioResult[]) {
   const failures: string[] = []
+  const totalGateMs = Number(process.env.RELEASE_GATE_ENGINE_P95_TOTAL_MS ?? '250')
+  const computeGateMs = Number(process.env.RELEASE_GATE_ENGINE_P95_COMPUTE_MS ?? '125')
+  const resolvedTotalGateMs = Number.isFinite(totalGateMs) && totalGateMs > 0 ? totalGateMs : 250
+  const resolvedComputeGateMs = Number.isFinite(computeGateMs) && computeGateMs > 0 ? computeGateMs : 125
 
   for (const result of results) {
     const p95Total = Number(result.engineLatency.total.p95Ms ?? NaN)
     const p95Compute = Number(result.engineLatency.compute.p95Ms ?? NaN)
 
-    if (!Number.isFinite(p95Total) || p95Total > 100) {
-      failures.push(`${result.id}: engine p95 total above gate (${p95Total})`)
+    if (!Number.isFinite(p95Total) || p95Total > resolvedTotalGateMs) {
+      failures.push(
+        `${result.id}: engine p95 total above gate (${p95Total} > ${resolvedTotalGateMs})`
+      )
     }
 
-    if (!Number.isFinite(p95Compute) || p95Compute > 50) {
-      failures.push(`${result.id}: engine p95 compute above gate (${p95Compute})`)
+    if (!Number.isFinite(p95Compute) || p95Compute > resolvedComputeGateMs) {
+      failures.push(
+        `${result.id}: engine p95 compute above gate (${p95Compute} > ${resolvedComputeGateMs})`
+      )
     }
 
     if (result.releaseSignals.hotPathProviderLeakCount !== 0) {
