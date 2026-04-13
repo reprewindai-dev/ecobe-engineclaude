@@ -3468,11 +3468,35 @@ router.get("/regions", async (_req, res) => {
 
 router.get("/decisions", async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit as string, 10) || 50;
+    const querySchema = z.object({
+      limit: z.coerce.number().int().min(1).max(200).default(50),
+      includeTrace: z
+        .union([z.literal("1"), z.literal("true"), z.literal("0"), z.literal("false")])
+        .optional(),
+    });
+
+    if (
+      typeof req.query.cursor === "string" ||
+      typeof req.query.offset === "string" ||
+      typeof req.query.from === "string" ||
+      typeof req.query.to === "string"
+    ) {
+      return res.status(400).json({
+        error: "Pagination and time-range queries require /ci/decisions/export (internal).",
+        code: "DECISIONS_EXPORT_REQUIRED",
+      });
+    }
+
+    const parsed = querySchema.safeParse(req.query);
+    const limit = parsed.success ? parsed.data.limit : 50;
+    const includeTraceRaw = parsed.success ? parsed.data.includeTrace : undefined;
+    const includeTrace = includeTraceRaw === "1" || includeTraceRaw === "true";
+
     const decisions = await prisma.cIDecision.findMany({
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: limit,
       select: {
+        id: true,
         decisionFrameId: true,
         selectedRunner: true,
         selectedRegion: true,
@@ -3500,19 +3524,23 @@ router.get("/decisions", async (req, res) => {
         createdAt: true,
       },
     });
-    const decisionFrameIds = Array.from(
-      new Set(
-        decisions
-          .map((decision: any) => decision.decisionFrameId)
-          .filter(
-            (
-              decisionFrameId: string | null | undefined,
-            ): decisionFrameId is string => Boolean(decisionFrameId),
+
+    const decisionFrameIds = includeTrace
+      ? Array.from(
+          new Set(
+            decisions
+              .map((decision: any) => decision.decisionFrameId)
+              .filter(
+                (
+                  decisionFrameId: string | null | undefined,
+                ): decisionFrameId is string => Boolean(decisionFrameId),
+              ),
           ),
-      ),
-    );
+        )
+      : [];
+
     const traceRows =
-      decisionFrameIds.length > 0
+      includeTrace && decisionFrameIds.length > 0
         ? await prisma.decisionTraceEnvelope.findMany({
             where: {
               decisionFrameId: {
@@ -3526,9 +3554,28 @@ router.get("/decisions", async (req, res) => {
             },
           })
         : [];
+
     const traceByFrameId = new Map<string, any>(
       traceRows.map((trace: any) => [trace.decisionFrameId, trace]),
     );
+
+    const extractEstimatedEnergyKwh = (metadata: any): number | null => {
+      const candidates = [
+        metadata?.response?.estimatedEnergyKwh,
+        metadata?.request?.estimatedEnergyKwh,
+        metadata?.response?.decisionEnvelope?.estimatedEnergyKwh,
+        metadata?.requestPayload?.estimatedEnergyKwh,
+        metadata?.estimatedEnergyKwh,
+      ];
+
+      for (const candidate of candidates) {
+        if (typeof candidate === "number" && Number.isFinite(candidate) && candidate > 0) {
+          return candidate;
+        }
+      }
+
+      return null;
+    };
 
     res.json({
       decisions: decisions.map((decision: any) => ({
@@ -3545,10 +3592,8 @@ router.get("/decisions", async (req, res) => {
           decision.reasonCode ??
           (decision.metadata as any)?.response?.reasonCode ??
           "UNKNOWN",
-        signalMode:
-          (decision.metadata as any)?.response?.signalMode ?? "fallback",
-        accountingMethod:
-          (decision.metadata as any)?.response?.accountingMethod ?? "average",
+        signalMode: (decision.metadata as any)?.response?.signalMode ?? "fallback",
+        accountingMethod: (decision.metadata as any)?.response?.accountingMethod ?? "average",
         notBefore: (decision.metadata as any)?.response?.notBefore ?? null,
         proofHash:
           decision.proofHash ??
@@ -3571,20 +3616,19 @@ router.get("/decisions", async (req, res) => {
           (decision.metadata as any)?.response?.waterAuthority?.evidenceRefs ??
           [],
         latencyMs: (decision.metadata as any)?.response?.latencyMs ?? null,
-        decisionEnvelope:
-          (decision.metadata as any)?.response?.decisionEnvelope ?? null,
-        proofEnvelope:
-          (decision.metadata as any)?.response?.proofEnvelope ?? null,
-        telemetryBridge:
-          (decision.metadata as any)?.response?.telemetryBridge ?? null,
-        adapterContext:
-          (decision.metadata as any)?.response?.adapterContext ?? null,
-        traceAvailable: traceByFrameId.has(decision.decisionFrameId),
-        governanceSource:
-          (traceByFrameId.get(decision.decisionFrameId)?.payload as any)
-            ?.governance?.source ?? "NONE",
-        traceHash:
-          traceByFrameId.get(decision.decisionFrameId)?.traceHash ?? null,
+        decisionEnvelope: (decision.metadata as any)?.response?.decisionEnvelope ?? null,
+        proofEnvelope: (decision.metadata as any)?.response?.proofEnvelope ?? null,
+        telemetryBridge: (decision.metadata as any)?.response?.telemetryBridge ?? null,
+        adapterContext: (decision.metadata as any)?.response?.adapterContext ?? null,
+        estimatedEnergyKwh: extractEstimatedEnergyKwh(decision.metadata),
+        traceAvailable: includeTrace ? traceByFrameId.has(decision.decisionFrameId) : false,
+        governanceSource: includeTrace
+          ? (traceByFrameId.get(decision.decisionFrameId)?.payload as any)?.governance?.source ??
+            "NONE"
+          : "NONE",
+        traceHash: includeTrace
+          ? traceByFrameId.get(decision.decisionFrameId)?.traceHash ?? null
+          : null,
       })),
       total: decisions.length,
       limit,
@@ -3592,6 +3636,202 @@ router.get("/decisions", async (req, res) => {
   } catch (error) {
     res.status(500).json({
       error: "Failed to fetch CI decisions",
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
+router.get("/decisions/export", internalServiceGuard, async (req, res) => {
+  try {
+    const querySchema = z.object({
+      limit: z.coerce.number().int().min(1).max(5000).default(500),
+      cursor: z.string().min(1).optional(),
+      offset: z.coerce.number().int().min(0).max(500000).optional(),
+      from: z.string().datetime().optional(),
+      to: z.string().datetime().optional(),
+      includeTrace: z
+        .union([z.literal("1"), z.literal("true"), z.literal("0"), z.literal("false")])
+        .optional(),
+    });
+
+    const parsed = querySchema.safeParse(req.query);
+    const limit = parsed.success ? parsed.data.limit : 500;
+    const cursor = parsed.success ? parsed.data.cursor : undefined;
+    const offset = parsed.success ? parsed.data.offset : undefined;
+    const from = parsed.success ? parsed.data.from : undefined;
+    const to = parsed.success ? parsed.data.to : undefined;
+    const includeTraceRaw = parsed.success ? parsed.data.includeTrace : undefined;
+    const includeTrace = includeTraceRaw === "1" || includeTraceRaw === "true";
+
+    const whereClause: Record<string, any> = {};
+    if (from || to) {
+      whereClause.createdAt = {
+        ...(from ? { gte: new Date(from) } : null),
+        ...(to ? { lte: new Date(to) } : null),
+      };
+    }
+
+    const decisions = await prisma.cIDecision.findMany({
+      where: Object.keys(whereClause).length ? whereClause : undefined,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
+      ...(typeof offset === "number"
+        ? { skip: offset }
+        : cursor
+          ? { cursor: { id: cursor }, skip: 1 }
+          : null),
+      select: {
+        id: true,
+        decisionFrameId: true,
+        selectedRunner: true,
+        selectedRegion: true,
+        carbonIntensity: true,
+        baseline: true,
+        savings: true,
+        decisionAction: true,
+        decisionMode: true,
+        reasonCode: true,
+        signalConfidence: true,
+        policyTrace: true,
+        waterImpactLiters: true,
+        waterBaselineLiters: true,
+        waterScarcityImpact: true,
+        waterStressIndex: true,
+        waterConfidence: true,
+        waterAuthorityMode: true,
+        waterScenario: true,
+        facilityId: true,
+        proofHash: true,
+        waterEvidenceRefs: true,
+        fallbackUsed: true,
+        jobType: true,
+        metadata: true,
+        createdAt: true,
+      },
+    });
+
+    const hasMore = decisions.length > limit;
+    const page = hasMore ? decisions.slice(0, limit) : decisions;
+    const lastItem = page.length ? page[page.length - 1] : null;
+    const nextCursor = hasMore && lastItem ? (lastItem.id as string) : null;
+
+    const decisionFrameIds = includeTrace
+      ? Array.from(
+          new Set(
+            page
+              .map((decision: any) => decision.decisionFrameId)
+              .filter(
+                (
+                  decisionFrameId: string | null | undefined,
+                ): decisionFrameId is string => Boolean(decisionFrameId),
+              ),
+          ),
+        )
+      : [];
+
+    const traceRows =
+      includeTrace && decisionFrameIds.length > 0
+        ? await prisma.decisionTraceEnvelope.findMany({
+            where: {
+              decisionFrameId: {
+                in: decisionFrameIds,
+              },
+            },
+            select: {
+              decisionFrameId: true,
+              traceHash: true,
+              payload: true,
+            },
+          })
+        : [];
+
+    const traceByFrameId = new Map<string, any>(
+      traceRows.map((trace: any) => [trace.decisionFrameId, trace]),
+    );
+
+    const extractEstimatedEnergyKwh = (metadata: any): number | null => {
+      const candidates = [
+        metadata?.response?.estimatedEnergyKwh,
+        metadata?.request?.estimatedEnergyKwh,
+        metadata?.response?.decisionEnvelope?.estimatedEnergyKwh,
+        metadata?.requestPayload?.estimatedEnergyKwh,
+        metadata?.estimatedEnergyKwh,
+      ];
+
+      for (const candidate of candidates) {
+        if (typeof candidate === "number" && Number.isFinite(candidate) && candidate > 0) {
+          return candidate;
+        }
+      }
+
+      return null;
+    };
+
+    return res.json({
+      decisions: page.map((decision: any) => ({
+        ...decision,
+        action:
+          decision.decisionAction ??
+          (decision.metadata as any)?.response?.decision ??
+          "run_now",
+        decisionMode:
+          decision.decisionMode ??
+          (decision.metadata as any)?.response?.decisionMode ??
+          "runtime_authorization",
+        reasonCode:
+          decision.reasonCode ??
+          (decision.metadata as any)?.response?.reasonCode ??
+          "UNKNOWN",
+        signalMode: (decision.metadata as any)?.response?.signalMode ?? "fallback",
+        accountingMethod: (decision.metadata as any)?.response?.accountingMethod ?? "average",
+        notBefore: (decision.metadata as any)?.response?.notBefore ?? null,
+        proofHash:
+          decision.proofHash ??
+          (decision.metadata as any)?.response?.proofHash ??
+          null,
+        waterAuthorityMode:
+          decision.waterAuthorityMode ??
+          (decision.metadata as any)?.response?.waterAuthority?.authorityMode ??
+          "fallback",
+        waterScenario:
+          decision.waterScenario ??
+          (decision.metadata as any)?.response?.waterAuthority?.scenario ??
+          "current",
+        facilityId:
+          decision.facilityId ??
+          (decision.metadata as any)?.response?.waterAuthority?.facilityId ??
+          null,
+        waterEvidenceRefs:
+          decision.waterEvidenceRefs ??
+          (decision.metadata as any)?.response?.waterAuthority?.evidenceRefs ??
+          [],
+        latencyMs: (decision.metadata as any)?.response?.latencyMs ?? null,
+        decisionEnvelope: (decision.metadata as any)?.response?.decisionEnvelope ?? null,
+        proofEnvelope: (decision.metadata as any)?.response?.proofEnvelope ?? null,
+        telemetryBridge: (decision.metadata as any)?.response?.telemetryBridge ?? null,
+        adapterContext: (decision.metadata as any)?.response?.adapterContext ?? null,
+        estimatedEnergyKwh: extractEstimatedEnergyKwh(decision.metadata),
+        traceAvailable: includeTrace ? traceByFrameId.has(decision.decisionFrameId) : false,
+        governanceSource: includeTrace
+          ? (traceByFrameId.get(decision.decisionFrameId)?.payload as any)?.governance?.source ??
+            "NONE"
+          : "NONE",
+        traceHash: includeTrace
+          ? traceByFrameId.get(decision.decisionFrameId)?.traceHash ?? null
+          : null,
+      })),
+      total: page.length,
+      limit,
+      hasMore,
+      nextCursor,
+      window: {
+        minTimestamp: page.length ? page[page.length - 1].createdAt : null,
+        maxTimestamp: page.length ? page[0].createdAt : null,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: "Failed to export CI decisions",
       message: error instanceof Error ? error.message : "Unknown error",
     });
   }
