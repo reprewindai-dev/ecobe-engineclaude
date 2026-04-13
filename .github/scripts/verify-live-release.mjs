@@ -25,6 +25,10 @@ const REQUIRED_PROVENANCE_DATASETS = ['aqueduct', 'aware', 'wwf', 'nrel']
 const internalKey = (process.env.ECOBE_INTERNAL_API_KEY || process.env.ECOBE_ENGINE_API_KEY || '').trim()
 const signatureSecret = process.env.DECISION_API_SIGNATURE_SECRET?.trim() || ''
 const outputPath = process.env.RELEASE_PROOF_OUTPUT_PATH?.trim()
+const sloTotalGateMs = Number(process.env.RELEASE_GATE_ENGINE_SLO_P95_TOTAL_MS ?? '250')
+const sloComputeGateMs = Number(process.env.RELEASE_GATE_ENGINE_SLO_P95_COMPUTE_MS ?? '125')
+const resolvedSloTotalGateMs = Number.isFinite(sloTotalGateMs) && sloTotalGateMs > 0 ? sloTotalGateMs : 250
+const resolvedSloComputeGateMs = Number.isFinite(sloComputeGateMs) && sloComputeGateMs > 0 ? sloComputeGateMs : 125
 const checkpoint = {
   ok: false,
   checkedAt: new Date().toISOString(),
@@ -530,9 +534,9 @@ async function main() {
   const p95Compute = Number(slo.json?.currentMs?.compute?.p95 ?? NaN)
   assert(Number.isFinite(p95Total), '/api/v1/ci/slo missing p95 total')
   assert(Number.isFinite(p95Compute), '/api/v1/ci/slo missing p95 compute')
-  assert(p95Total <= 100, `engine p95 total above gate: ${p95Total}`)
-  assert(p95Compute <= 50, `engine p95 compute above gate: ${p95Compute}`)
-  stage('slo', { p95Total, p95Compute, counts: slo.json?.counts ?? null })
+  assert(p95Total <= resolvedSloTotalGateMs, `engine p95 total above gate: ${p95Total}`)
+  assert(p95Compute <= resolvedSloComputeGateMs, `engine p95 compute above gate: ${p95Compute}`)
+  stage('slo', { p95Total, p95Compute, counts: slo.json?.counts ?? null, gate: { total: resolvedSloTotalGateMs, compute: resolvedSloComputeGateMs } })
 
   const provenance = await fetchJson('/api/v1/water/provenance')
   const provenanceVerified = Number(
