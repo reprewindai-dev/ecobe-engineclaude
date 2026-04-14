@@ -35,6 +35,7 @@ import waterRoutes from './routes/water'
 import eventsRoutes from './routes/events'
 import adaptersRoutes from './routes/adapters'
 import internalPolicyRoutes from './routes/internal-policy'
+import doctrineRoutes from './routes/doctrine'
 import { recordTelemetryMetric, telemetryMetricNames } from './lib/observability/telemetry'
 import { validateWaterArtifacts } from './lib/water/bundle'
 
@@ -316,6 +317,7 @@ function attachApiRoutes(app: express.Express) {
   app.use('/api/v1/carbon-ledger', carbonLedgerRoutes)
   // CI/CD green routing
   app.use('/api/v1/ci', ciRoutes)
+  app.use('/api/v1/doctrine', doctrineRoutes)
   app.use('/api/v1/internal', internalPolicyRoutes)
   app.use('/api/v1/events', eventsRoutes)
   app.use('/api/v1/adapters', adaptersRoutes)

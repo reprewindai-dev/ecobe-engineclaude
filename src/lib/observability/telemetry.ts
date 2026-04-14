@@ -115,4 +115,11 @@ export const telemetryMetricNames = {
   otelSpanExportCount: 'ecobe.otel.span.export.count',
   otelSpanExportFailureCount: 'ecobe.otel.span.export.failure.count',
   outboxLagSeconds: 'ecobe.outbox.lag.seconds',
+  doctrineProposalCount: 'ecobe.doctrine.proposal.count',
+  doctrineApprovalLatencyMs: 'ecobe.doctrine.approval.latency.ms',
+  doctrineRejectCount: 'ecobe.doctrine.reject.count',
+  doctrineRollbackCount: 'ecobe.doctrine.rollback.count',
+  doctrineCacheHitCount: 'ecobe.doctrine.cache.hit.count',
+  doctrineCacheMissCount: 'ecobe.doctrine.cache.miss.count',
+  doctrineLoadFailureCount: 'ecobe.doctrine.load.failure.count',
 } as const

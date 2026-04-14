@@ -15,6 +15,8 @@ describe('CiResponseV2 contract freeze', () => {
         'decisionMode',
         'decisionFrameId',
         'doctrineVersion',
+        'doctrineVersionId',
+        'doctrineVersionNumber',
         'enforcementBundle',
         'fallbackUsed',
         'kubernetesEnforcement',

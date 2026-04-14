@@ -1,5 +1,8 @@
 import { redis } from '../redis'
 import { GridSignalSnapshot } from './types'
+import { toRoutingCacheBucket, toRoutingCacheKey } from '../cache/routing-cache-bucket'
+
+export { toRoutingCacheBucket, toRoutingCacheKey } from '../cache/routing-cache-bucket'
 
 export interface CacheOptions {
   ttl?: number // Time to live in seconds
@@ -37,16 +40,6 @@ export interface CachedRoutingSignalRecord {
   stalenessSec: number | null
   lastLatencyMs: number | null
   degraded: boolean
-}
-
-export function toRoutingCacheBucket(timestamp: Date | string) {
-  const bucket = new Date(timestamp)
-  bucket.setSeconds(0, 0)
-  return bucket
-}
-
-export function toRoutingCacheKey(timestamp: Date | string) {
-  return toRoutingCacheBucket(timestamp).toISOString()
 }
 
 export class GridSignalCache {

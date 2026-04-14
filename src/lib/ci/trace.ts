@@ -115,6 +115,8 @@ export interface TraceEnvelopeSeed {
     label: 'SAIQ'
     source: GovernanceSource
     strict: boolean
+    doctrineVersionId?: string
+    doctrineVersionNumber?: number
     score?: number | null
     zone?: 'green' | 'amber' | 'red' | null
     weights?: {

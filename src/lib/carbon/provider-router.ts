@@ -4,7 +4,11 @@ import { gbCarbonIntensity } from '../gb-carbon-intensity'
 import { denmarkCarbon } from '../denmark-carbon'
 import { finlandCarbon } from '../finland-carbon'
 import { env } from '../../config/env'
-import { CachedRoutingSignalRecord, GridSignalCache } from '../grid-signals/grid-signal-cache'
+import { toRoutingCacheBucket } from '../cache/routing-cache-bucket'
+import {
+  CachedRoutingSignalRecord,
+  GridSignalCache,
+} from '../grid-signals/grid-signal-cache'
 import { GridSignalAudit } from '../grid-signals/grid-signal-audit'
 import { getRegionMapping } from '../grid-signals/region-mapping'
 import { FuelMixParser } from '../grid-signals/fuel-mix-parser'
