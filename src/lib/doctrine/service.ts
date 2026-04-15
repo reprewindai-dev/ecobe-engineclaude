@@ -8,7 +8,6 @@ import { prisma } from "../db";
 import { redis } from "../redis";
 import { env } from "../../config/env";
 import {
-  DEFAULT_DOCTRINE_SETTINGS,
   doctrineVersionLabel,
   normalizeDoctrineSettings,
   type DoctrineProposalPayload,
@@ -54,8 +53,15 @@ type ActiveDoctrineRecord = {
 function parseDoctrineSettings(raw: unknown): DoctrineSettings {
   try {
     return normalizeDoctrineSettings(raw);
-  } catch {
-    return normalizeDoctrineSettings(DEFAULT_DOCTRINE_SETTINGS);
+  } catch (error) {
+    const rawType =
+      raw === null ? "null" : Array.isArray(raw) ? "array" : typeof raw;
+    const detail = error instanceof Error ? error.message : "unknown error";
+    throw new DoctrineServiceError(
+      `Invalid doctrine settings payload (${rawType}): ${detail}`,
+      "DOCTRINE_SETTINGS_INVALID",
+      503,
+    );
   }
 }
 
@@ -244,34 +250,41 @@ export async function createDoctrineProposal(input: {
     ? new Date(input.payload.effectiveAt)
     : null;
 
-  const proposal = await prisma.doctrineProposal.create({
-    data: {
-      orgId: input.orgId,
-      proposerOperatorId: input.actorOperatorId,
-      changeSummary: input.payload.changeSummary,
-      justification: input.payload.justification,
-      settings: settings as Prisma.InputJsonValue,
-      effectiveAt,
-      sourceIp: input.ipAddress ?? null,
-      sourceUserAgent: input.userAgent ?? null,
-      status: "PENDING_APPROVAL",
-    },
-  });
+  const proposal = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const created = await tx.doctrineProposal.create({
+      data: {
+        orgId: input.orgId,
+        proposerOperatorId: input.actorOperatorId,
+        changeSummary: input.payload.changeSummary,
+        justification: input.payload.justification,
+        settings: settings as Prisma.InputJsonValue,
+        effectiveAt,
+        sourceIp: input.ipAddress ?? null,
+        sourceUserAgent: input.userAgent ?? null,
+        status: "PENDING_APPROVAL",
+      },
+    });
 
-  await recordDoctrineAuditEvent({
-    orgId: input.orgId,
-    actorOperatorId: input.actorOperatorId,
-    eventType: "PROPOSAL_CREATED",
-    proposalId: proposal.id,
-    requestId: input.requestId,
-    ipAddress: input.ipAddress,
-    userAgent: input.userAgent,
-    afterJson: {
-      proposalId: proposal.id,
-      status: proposal.status,
-      settings,
-      effectiveAt: proposal.effectiveAt?.toISOString() ?? null,
-    },
+    await recordDoctrineAuditEvent(
+      {
+        orgId: input.orgId,
+        actorOperatorId: input.actorOperatorId,
+        eventType: "PROPOSAL_CREATED",
+        proposalId: created.id,
+        requestId: input.requestId,
+        ipAddress: input.ipAddress,
+        userAgent: input.userAgent,
+        afterJson: {
+          proposalId: created.id,
+          status: created.status,
+          settings,
+          effectiveAt: created.effectiveAt?.toISOString() ?? null,
+        },
+      },
+      tx,
+    );
+
+    return created;
   });
 
   recordTelemetryMetric(telemetryMetricNames.doctrineProposalCount, "counter", 1, {
@@ -455,48 +468,55 @@ export async function rejectDoctrineProposal(input: {
   ipAddress?: string | null;
   userAgent?: string | null;
 }) {
-  const proposal = await prisma.doctrineProposal.findFirst({
-    where: { id: input.proposalId, orgId: input.orgId },
-  });
-  if (!proposal) {
-    throw new DoctrineServiceError(
-      "Doctrine proposal not found.",
-      "DOCTRINE_PROPOSAL_NOT_FOUND",
-      404,
-    );
-  }
-  if (proposal.status !== "PENDING_APPROVAL") {
-    throw new DoctrineServiceError(
-      "Doctrine proposal is not pending approval.",
-      "DOCTRINE_PROPOSAL_NOT_PENDING",
-      409,
-    );
-  }
+  const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const proposal = await tx.doctrineProposal.findFirst({
+      where: { id: input.proposalId, orgId: input.orgId },
+    });
+    if (!proposal) {
+      throw new DoctrineServiceError(
+        "Doctrine proposal not found.",
+        "DOCTRINE_PROPOSAL_NOT_FOUND",
+        404,
+      );
+    }
+    if (proposal.status !== "PENDING_APPROVAL") {
+      throw new DoctrineServiceError(
+        "Doctrine proposal is not pending approval.",
+        "DOCTRINE_PROPOSAL_NOT_PENDING",
+        409,
+      );
+    }
 
-  const updated = await prisma.doctrineProposal.update({
-    where: { id: proposal.id },
-    data: {
-      status: "REJECTED",
-      approverOperatorId: input.actorOperatorId,
-      rejectionReason: input.reason,
-    },
-  });
+    const next = await tx.doctrineProposal.update({
+      where: { id: proposal.id },
+      data: {
+        status: "REJECTED",
+        approverOperatorId: input.actorOperatorId,
+        rejectionReason: input.reason,
+      },
+    });
 
-  await recordDoctrineAuditEvent({
-    orgId: input.orgId,
-    actorOperatorId: input.actorOperatorId,
-    eventType: "PROPOSAL_REJECTED",
-    proposalId: updated.id,
-    requestId: input.requestId,
-    ipAddress: input.ipAddress,
-    userAgent: input.userAgent,
-    beforeJson: {
-      status: proposal.status,
-    },
-    afterJson: {
-      status: updated.status,
-      reason: input.reason,
-    },
+    await recordDoctrineAuditEvent(
+      {
+        orgId: input.orgId,
+        actorOperatorId: input.actorOperatorId,
+        eventType: "PROPOSAL_REJECTED",
+        proposalId: next.id,
+        requestId: input.requestId,
+        ipAddress: input.ipAddress,
+        userAgent: input.userAgent,
+        beforeJson: {
+          status: proposal.status,
+        },
+        afterJson: {
+          status: next.status,
+          reason: input.reason,
+        },
+      },
+      tx,
+    );
+
+    return next;
   });
 
   await invalidateDoctrineCache(input.orgId);

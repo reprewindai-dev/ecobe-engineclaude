@@ -4,12 +4,25 @@ import { createHash, randomBytes } from 'crypto'
 import { z } from 'zod'
 import jwt from 'jsonwebtoken'
 import { env } from '../../config/env'
-import { OrganizationStatus, OrgPlanTier } from '@prisma/client'
+import { Organization, OrganizationStatus, OrgPlanTier } from '@prisma/client'
 
 // JWT Configuration
-const JWT_SECRET = env.JWT_SECRET || randomBytes(32).toString('hex')
+function requireJwtSecret(): string {
+  if (!env.JWT_SECRET) {
+    throw new Error('JWT_SECRET is required to initialize auth service')
+  }
+  return env.JWT_SECRET
+}
+const JWT_SECRET = requireJwtSecret()
 const JWT_EXPIRES_IN = '24h'
 const REFRESH_TOKEN_EXPIRES_IN = '30d'
+
+const authTokenPayloadSchema = z.object({
+  sub: z.string().min(1),
+  orgId: z.string().min(1),
+  planTier: z.nativeEnum(OrgPlanTier),
+  permissions: z.array(z.string()),
+})
 
 // Session Configuration
 const SESSION_PREFIX = 'session:'
@@ -129,7 +142,7 @@ export class AuthService {
    */
   static async validateApiKey(apiKey: string): Promise<{
     valid: boolean
-    organization?: any
+    organization?: Organization
     error?: string
   }> {
     try {
@@ -146,7 +159,12 @@ export class AuthService {
         const org = await prisma.organization.findUnique({
           where: { id: data.orgId },
         })
-        
+
+        if (!org || org.status !== OrganizationStatus.ACTIVE) {
+          await redis.del(`${API_KEY_PREFIX}${hashedKey}`)
+          return { valid: false, error: 'Organization suspended' }
+        }
+
         return { valid: true, organization: org }
       }
 
@@ -220,7 +238,7 @@ export class AuthService {
     })
 
     const refreshToken = jwt.sign(
-      { orgId: payload.orgId },
+      payload,
       JWT_SECRET,
       { expiresIn: REFRESH_TOKEN_EXPIRES_IN }
     )
@@ -233,7 +251,12 @@ export class AuthService {
    */
   static verifyToken(token: string): AuthTokenPayload | null {
     try {
-      return jwt.verify(token, JWT_SECRET) as AuthTokenPayload
+      const decoded = jwt.verify(token, JWT_SECRET)
+      const parsed = authTokenPayloadSchema.safeParse(decoded)
+      if (!parsed.success) {
+        return null
+      }
+      return parsed.data
     } catch {
       return null
     }
@@ -319,7 +342,15 @@ export class AuthService {
     if (!data) return null
 
     const session = JSON.parse(data) as Session
-    if (new Date(session.expiresAt) < new Date()) {
+    session.createdAt = new Date(session.createdAt)
+    session.expiresAt = new Date(session.expiresAt)
+
+    if (Number.isNaN(session.createdAt.getTime()) || Number.isNaN(session.expiresAt.getTime())) {
+      await this.invalidateSession(sessionId)
+      return null
+    }
+
+    if (session.expiresAt < new Date()) {
       await this.invalidateSession(sessionId)
       return null
     }
