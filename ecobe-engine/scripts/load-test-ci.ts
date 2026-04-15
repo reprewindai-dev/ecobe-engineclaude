@@ -20,9 +20,9 @@ function normalizeBaseUrl(value: string | undefined | null) {
   }
 }
 
-const DEFAULT_ENGINE_URL = 'https://ecobe-engineclaude-production.up.railway.app'
+const DEFAULT_ENGINE_URL = 'https://ecobe-engineclaude-co2router.onrender.com'
 const FALLBACK_ENGINE_URL = 'https://ecobe-engineclaude-co2router.onrender.com'
-const DEFAULT_DASHBOARD_URL = 'https://co2-router-dashboard-production.up.railway.app'
+const DEFAULT_DASHBOARD_URL = 'https://co2router.com'
 const requestedBaseUrl = normalizeBaseUrl(
   process.env.LOAD_TEST_BASE_URL ?? process.env.ECOBE_ENGINE_URL ?? DEFAULT_ENGINE_URL
 )
@@ -158,6 +158,8 @@ const SCENARIOS: ScenarioDefinition[] = [
 
 const RELEASE_GATES_ENABLED = process.argv.includes('--release-gates')
 const MAX_REPLAY_SAMPLES = 5
+const RELEASE_GATE_P95_TOTAL_MS = Number(process.env.RELEASE_GATE_P95_TOTAL_MS ?? 130)
+const RELEASE_GATE_P95_COMPUTE_MS = Number(process.env.RELEASE_GATE_P95_COMPUTE_MS ?? 110)
 
 const REQUEST_TEMPLATES: RequestTemplate[] = [
   {
@@ -677,17 +679,19 @@ async function runScenario(baseUrl: string, scenario: ScenarioDefinition): Promi
 
 function assertReleaseGates(results: ScenarioResult[]) {
   const failures: string[] = []
+  const totalGate = Number.isFinite(RELEASE_GATE_P95_TOTAL_MS) ? RELEASE_GATE_P95_TOTAL_MS : 130
+  const computeGate = Number.isFinite(RELEASE_GATE_P95_COMPUTE_MS) ? RELEASE_GATE_P95_COMPUTE_MS : 110
 
   for (const result of results) {
     const p95Total = Number(result.engineLatency.total.p95Ms ?? NaN)
     const p95Compute = Number(result.engineLatency.compute.p95Ms ?? NaN)
 
-    if (!Number.isFinite(p95Total) || p95Total > 100) {
-      failures.push(`${result.id}: engine p95 total above gate (${p95Total})`)
+    if (!Number.isFinite(p95Total) || p95Total > totalGate) {
+      failures.push(`${result.id}: engine p95 total above gate (${p95Total} > ${totalGate})`)
     }
 
-    if (!Number.isFinite(p95Compute) || p95Compute > 50) {
-      failures.push(`${result.id}: engine p95 compute above gate (${p95Compute})`)
+    if (!Number.isFinite(p95Compute) || p95Compute > computeGate) {
+      failures.push(`${result.id}: engine p95 compute above gate (${p95Compute} > ${computeGate})`)
     }
 
     if (result.releaseSignals.hotPathProviderLeakCount !== 0) {

@@ -29,8 +29,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  DEFAULT_ECOBE_ENGINE_URL: https://ecobe-engineclaude-production.up.railway.app
-  DEFAULT_DASHBOARD_URL: https://co2-router-dashboard-production.up.railway.app
+  DEFAULT_ECOBE_ENGINE_URL: https://ecobe-engineclaude-co2router.onrender.com
+  DEFAULT_DASHBOARD_URL: https://co2router.com
   ECOBE_ENGINE_URL: ${{ secrets.ECOBE_ENGINE_URL }}
   DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
   ECOBE_ENGINE_API_KEY: ${{ secrets.ECOBE_ENGINE_API_KEY }}
