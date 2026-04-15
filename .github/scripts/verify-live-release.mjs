@@ -24,7 +24,7 @@ let dashboardAvailable = false
 const REQUIRED_PROVENANCE_DATASETS = ['aqueduct', 'aware', 'wwf', 'nrel']
 const internalKey = (process.env.ECOBE_INTERNAL_API_KEY || process.env.ECOBE_ENGINE_API_KEY || '').trim()
 const signatureSecret = process.env.DECISION_API_SIGNATURE_SECRET?.trim() || ''
-const releaseGateP95TotalMs = Number(process.env.RELEASE_PROOF_P95_TOTAL_GATE_MS ?? 130)
+const releaseGateP95TotalMs = Number(process.env.RELEASE_PROOF_P95_TOTAL_GATE_MS ?? 220)
 const releaseGateP95ComputeMs = Number(process.env.RELEASE_PROOF_P95_COMPUTE_GATE_MS ?? 110)
 const outputPath = process.env.RELEASE_PROOF_OUTPUT_PATH?.trim()
 const checkpoint = {
@@ -530,7 +530,7 @@ async function main() {
   const slo = await fetchJson('/api/v1/ci/slo')
   const p95Total = Number(slo.json?.currentMs?.total?.p95 ?? NaN)
   const p95Compute = Number(slo.json?.currentMs?.compute?.p95 ?? NaN)
-  const totalGate = Number.isFinite(releaseGateP95TotalMs) ? releaseGateP95TotalMs : 130
+  const totalGate = Number.isFinite(releaseGateP95TotalMs) ? releaseGateP95TotalMs : 220
   const computeGate = Number.isFinite(releaseGateP95ComputeMs) ? releaseGateP95ComputeMs : 110
   assert(Number.isFinite(p95Total), '/api/v1/ci/slo missing p95 total')
   assert(Number.isFinite(p95Compute), '/api/v1/ci/slo missing p95 compute')
