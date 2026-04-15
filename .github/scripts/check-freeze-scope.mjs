@@ -7,6 +7,11 @@ const allowlistPrefixes = [
   'ecobe-engine/',
   'ecobe-dashboard/',
   '.github/',
+  // Canonical runtime roots in this repository.
+  'src/',
+  'prisma/',
+  'scripts/',
+  'data/',
   'docs/public/',
   'docs/private/design-partner-program/',
 ]
