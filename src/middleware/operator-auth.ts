@@ -1,13 +1,5 @@
-/**
- * Operator authentication + RBAC middleware.
- * Reads x-ecobe-operator-key header, resolves OperatorIdentity from DB,
- * attaches to req.operator. Enforces minimum role requirement.
- *
- * Roles: viewer < operator < admin
- */
-import { createHash } from 'crypto'
-import type { NextFunction, Request, Response } from 'express'
-import { prisma } from '../lib/db'
+import type { Request, Response, NextFunction } from 'express'
+import { resolveOperatorFromKey } from '../lib/doctrine/doctrine-service'
 
 export type OperatorRole = 'viewer' | 'operator' | 'admin'
 
@@ -17,75 +9,78 @@ declare global {
       operator?: {
         id: string
         orgId: string
-        email: string
+        displayName: string
         role: OperatorRole
       }
     }
   }
 }
 
-const ROLE_RANK: Record<OperatorRole, number> = {
-  viewer: 0,
-  operator: 1,
-  admin: 2,
+/**
+ * Resolves the calling operator from the x-ecobe-operator-key header.
+ * Attaches operator context to req.operator.
+ * Returns 401 if the key is missing or unknown, 403 if the account is inactive.
+ */
+export async function operatorAuthMiddleware(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  const rawKey = req.header('x-ecobe-operator-key')
+  if (!rawKey) {
+    return res.status(401).json({
+      success: false,
+      error: { code: 'OPERATOR_KEY_MISSING', message: 'x-ecobe-operator-key header is required' },
+    })
+  }
+
+  const operator = await resolveOperatorFromKey(rawKey)
+  if (!operator) {
+    return res.status(401).json({
+      success: false,
+      error: { code: 'OPERATOR_KEY_INVALID', message: 'Operator key not recognized' },
+    })
+  }
+  if (!operator.active) {
+    return res.status(403).json({
+      success: false,
+      error: { code: 'OPERATOR_INACTIVE', message: 'Operator account is inactive' },
+    })
+  }
+
+  req.operator = {
+    id: operator.id,
+    orgId: operator.orgId,
+    displayName: operator.displayName,
+    role: operator.role as OperatorRole,
+  }
+
+  return next()
 }
 
-function extractOperatorKey(req: Request): string | null {
-  const header = req.header('x-ecobe-operator-key')?.trim()
-  if (header) return header
-  const auth = req.header('authorization')
-  if (auth?.startsWith('Operator ')) return auth.slice('Operator '.length).trim()
-  return null
-}
-
-function hashKey(rawKey: string): string {
-  return createHash('sha256').update(rawKey).digest('hex')
-}
-
-export function operatorGuard(minRole: OperatorRole = 'operator') {
-  return async (req: Request, res: Response, next: NextFunction) => {
-    const rawKey = extractOperatorKey(req)
-    if (!rawKey) {
+/**
+ * Requires a minimum role level. Must be used after operatorAuthMiddleware.
+ */
+export function requireRole(minimum: OperatorRole) {
+  const hierarchy: OperatorRole[] = ['viewer', 'operator', 'admin']
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.operator) {
       return res.status(401).json({
-        error: 'Operator key required',
-        code: 'OPERATOR_KEY_MISSING',
+        success: false,
+        error: { code: 'UNAUTHORIZED', message: 'Operator not authenticated' },
       })
     }
-
-    const keyHash = hashKey(rawKey)
-    const identity = await prisma.operatorIdentity.findUnique({
-      where: { keyHash },
-      select: { id: true, orgId: true, email: true, role: true, active: true },
-    }).catch(() => null)
-
-    if (!identity || !identity.active) {
-      return res.status(401).json({
-        error: 'Invalid or inactive operator key',
-        code: 'OPERATOR_KEY_INVALID',
-      })
-    }
-
-    const operatorRole = identity.role as OperatorRole
-    if (ROLE_RANK[operatorRole] < ROLE_RANK[minRole]) {
+    const callerLevel = hierarchy.indexOf(req.operator.role)
+    const requiredLevel = hierarchy.indexOf(minimum)
+    if (callerLevel < requiredLevel) {
       return res.status(403).json({
-        error: `Role '${operatorRole}' insufficient — requires '${minRole}'`,
-        code: 'OPERATOR_ROLE_INSUFFICIENT',
+        success: false,
+        error: {
+          code: 'INSUFFICIENT_ROLE',
+          message: `This action requires role '${minimum}' or higher. Caller has role '${req.operator.role}'.`,
+        },
       })
     }
-
-    // Update lastSeenAt async — non-blocking
-    prisma.operatorIdentity.update({
-      where: { id: identity.id },
-      data: { lastSeenAt: new Date() },
-    }).catch(() => {})
-
-    req.operator = {
-      id: identity.id,
-      orgId: identity.orgId,
-      email: identity.email,
-      role: operatorRole,
-    }
-
     return next()
   }
 }

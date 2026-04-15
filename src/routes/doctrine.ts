@@ -1,262 +1,179 @@
-/**
- * Doctrine Write Path — POST /api/v1/doctrine/propose
- *                       POST /api/v1/doctrine/approve/:proposalId
- *                       POST /api/v1/doctrine/reject/:proposalId
- *                       POST /api/v1/doctrine/rollback/:versionId
- *                       GET  /api/v1/doctrine/active
- *                       GET  /api/v1/doctrine/history
- */
 import { Router } from 'express'
 import { z } from 'zod'
-import { prisma } from '../lib/db'
-import { operatorGuard } from '../middleware/operator-auth'
-import { getActiveDoctrine, invalidateDoctrine } from '../lib/doctrine/doctrine-cache'
+import {
+  proposeDoctrine,
+  approveDoctrine,
+  rejectDoctrine,
+  rollbackDoctrine,
+  getDoctrineHistory,
+  getPendingProposals,
+  getActiveDoctrine,
+} from '../lib/doctrine/doctrine-service'
+import { operatorAuthMiddleware, requireRole } from '../middleware/operator-auth'
 
 const router = Router()
 
-// ─── Schemas ──────────────────────────────────────────────────────────────────
+// All doctrine routes require operator authentication
+router.use(operatorAuthMiddleware)
 
-const ProposeSchema = z.object({
-  carbonThreshold: z.number().min(0).max(1000).nullish(),
-  waterThreshold: z.number().min(0).max(1000).nullish(),
-  latencyBudget: z.number().min(0).max(60000).nullish(),
-  costCeiling: z.number().min(0).nullish(),
+// ---------------------------------------------------------------------------
+// GET /api/v1/doctrine/active
+// Returns the currently active doctrine for the operator's org
+// ---------------------------------------------------------------------------
+router.get('/active', async (req, res) => {
+  try {
+    const doctrine = await getActiveDoctrine(req.operator!.orgId)
+    return res.json({
+      success: true,
+      data: doctrine ?? { status: 'no_active_doctrine', fallback: 'co2_router_doctrine_v1' },
+    })
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: { code: 'INTERNAL', message: err.message } })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/doctrine/history
+// Returns versioned doctrine history for the org
+// ---------------------------------------------------------------------------
+router.get('/history', async (req, res) => {
+  try {
+    const limit = Number(req.query.limit) || 20
+    const history = await getDoctrineHistory(req.operator!.orgId, Math.min(limit, 100))
+    return res.json({ success: true, data: history })
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: { code: 'INTERNAL', message: err.message } })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/doctrine/proposals/pending
+// Returns pending proposals for the org (admin/operator can view)
+// ---------------------------------------------------------------------------
+router.get('/proposals/pending', async (req, res) => {
+  try {
+    const proposals = await getPendingProposals(req.operator!.orgId)
+    return res.json({ success: true, data: proposals })
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: { code: 'INTERNAL', message: err.message } })
+  }
+})
+
+const proposeSchema = z.object({
+  carbonThreshold: z.number().min(0).max(2000).optional(),
+  waterThreshold: z.number().min(0).max(1000).optional(),
+  latencyBudget: z.number().min(0).max(60000).optional(),
+  costCeiling: z.number().min(0).optional(),
   mode: z.enum(['strict', 'balanced', 'permissive']).default('balanced'),
   justification: z.string().min(10).max(2000),
   effectiveAt: z.string().datetime().optional(),
 })
 
-const ApproveSchema = z.object({
-  note: z.string().max(1000).optional(),
-})
-
-const RejectSchema = z.object({
-  rejectionReason: z.string().min(5).max(1000),
-})
-
-const RollbackSchema = z.object({
-  reason: z.string().min(5).max(1000),
-})
-
-// ─── POST /propose ────────────────────────────────────────────────────────────
-
-router.post('/propose', operatorGuard('operator'), async (req, res) => {
-  const parse = ProposeSchema.safeParse(req.body)
-  if (!parse.success) {
-    return res.status(400).json({ error: 'Invalid proposal', issues: parse.error.issues })
-  }
-
-  const operator = req.operator!
-  const data = parse.data
-
-  const proposal = await prisma.doctrineProposal.create({
-    data: {
-      orgId: operator.orgId,
-      proposedById: operator.id,
-      carbonThreshold: data.carbonThreshold ?? null,
-      waterThreshold: data.waterThreshold ?? null,
-      latencyBudget: data.latencyBudget ?? null,
-      costCeiling: data.costCeiling ?? null,
-      mode: data.mode,
-      justification: data.justification,
-      effectiveAt: data.effectiveAt ? new Date(data.effectiveAt) : null,
-      status: 'PENDING_APPROVAL',
-    },
-  })
-
-  return res.status(201).json({
-    proposalId: proposal.id,
-    status: proposal.status,
-    message: 'Proposal created — awaiting approval by a different operator with admin role',
-  })
-})
-
-// ─── POST /approve/:proposalId ────────────────────────────────────────────────
-
-router.post('/approve/:proposalId', operatorGuard('admin'), async (req, res) => {
-  const { proposalId } = req.params
-  const parse = ApproveSchema.safeParse(req.body)
-  if (!parse.success) {
-    return res.status(400).json({ error: 'Invalid body', issues: parse.error.issues })
-  }
-
-  const operator = req.operator!
-
-  const proposal = await prisma.doctrineProposal.findUnique({ where: { id: proposalId } })
-  if (!proposal) return res.status(404).json({ error: 'Proposal not found', code: 'PROPOSAL_NOT_FOUND' })
-  if (proposal.orgId !== operator.orgId) return res.status(403).json({ error: 'Org mismatch', code: 'ORG_MISMATCH' })
-  if (proposal.status !== 'PENDING_APPROVAL') {
-    return res.status(409).json({ error: `Proposal is already ${proposal.status}`, code: 'PROPOSAL_NOT_PENDING' })
-  }
-
-  // Enforce 2-person rule — approver must differ from proposer
-  if (proposal.proposedById === operator.id) {
-    return res.status(403).json({
-      error: 'Approver cannot be the same operator who proposed',
-      code: 'SELF_APPROVAL_FORBIDDEN',
+// ---------------------------------------------------------------------------
+// POST /api/v1/doctrine/propose
+// Operator or admin proposes a doctrine change (does NOT activate immediately)
+// ---------------------------------------------------------------------------
+router.post('/propose', requireRole('operator'), async (req, res) => {
+  const parsed = proposeSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', details: parsed.error.flatten() },
     })
   }
 
-  const now = new Date()
-
-  // Supersede previous active version
-  await prisma.doctrineVersion.updateMany({
-    where: { orgId: operator.orgId, status: 'active' },
-    data: { status: 'superseded', supersededAt: now },
-  })
-
-  const version = await prisma.$transaction(async (tx) => {
-    await tx.doctrineProposal.update({
-      where: { id: proposalId },
-      data: { status: 'APPROVED', approvedById: operator.id, reviewedAt: now },
+  try {
+    const proposal = await proposeDoctrine({
+      operatorId: req.operator!.id,
+      orgId: req.operator!.orgId,
+      ...parsed.data,
+      effectiveAt: parsed.data.effectiveAt ? new Date(parsed.data.effectiveAt) : undefined,
     })
-
-    return tx.doctrineVersion.create({
-      data: {
-        orgId: operator.orgId,
-        proposalId,
-        proposedById: proposal.proposedById,
-        approvedById: operator.id,
-        status: 'active',
-        carbonThreshold: proposal.carbonThreshold,
-        waterThreshold: proposal.waterThreshold,
-        latencyBudget: proposal.latencyBudget,
-        costCeiling: proposal.costCeiling,
-        mode: proposal.mode,
-        justification: proposal.justification,
-        activatedAt: proposal.effectiveAt ?? now,
-      },
-    })
-  })
-
-  await invalidateDoctrine(operator.orgId)
-
-  return res.status(200).json({
-    doctrineVersionId: version.id,
-    status: 'active',
-    activatedAt: version.activatedAt,
-    message: 'Doctrine approved and activated — engine will pick up within 60s',
-  })
+    return res.status(201).json({ success: true, data: proposal })
+  } catch (err: any) {
+    const status = err.message.startsWith('INSUFFICIENT_ROLE') ? 403 : 400
+    return res.status(status).json({ success: false, error: { code: err.message } })
+  }
 })
 
-// ─── POST /reject/:proposalId ─────────────────────────────────────────────────
-
-router.post('/reject/:proposalId', operatorGuard('admin'), async (req, res) => {
-  const { proposalId } = req.params
-  const parse = RejectSchema.safeParse(req.body)
-  if (!parse.success) {
-    return res.status(400).json({ error: 'Invalid body', issues: parse.error.issues })
-  }
-
-  const operator = req.operator!
-  const proposal = await prisma.doctrineProposal.findUnique({ where: { id: proposalId } })
-  if (!proposal) return res.status(404).json({ error: 'Proposal not found', code: 'PROPOSAL_NOT_FOUND' })
-  if (proposal.orgId !== operator.orgId) return res.status(403).json({ error: 'Org mismatch', code: 'ORG_MISMATCH' })
-  if (proposal.status !== 'PENDING_APPROVAL') {
-    return res.status(409).json({ error: `Proposal is already ${proposal.status}`, code: 'PROPOSAL_NOT_PENDING' })
-  }
-
-  await prisma.doctrineProposal.update({
-    where: { id: proposalId },
-    data: {
-      status: 'REJECTED',
-      rejectedById: operator.id,
-      rejectionReason: parse.data.rejectionReason,
-      reviewedAt: new Date(),
-    },
-  })
-
-  return res.status(200).json({ proposalId, status: 'REJECTED' })
-})
-
-// ─── POST /rollback/:versionId ────────────────────────────────────────────────
-
-router.post('/rollback/:versionId', operatorGuard('admin'), async (req, res) => {
-  const { versionId } = req.params
-  const parse = RollbackSchema.safeParse(req.body)
-  if (!parse.success) {
-    return res.status(400).json({ error: 'Invalid body', issues: parse.error.issues })
-  }
-
-  const operator = req.operator!
-  const version = await prisma.doctrineVersion.findUnique({ where: { id: versionId } })
-  if (!version) return res.status(404).json({ error: 'DoctrineVersion not found', code: 'VERSION_NOT_FOUND' })
-  if (version.orgId !== operator.orgId) return res.status(403).json({ error: 'Org mismatch', code: 'ORG_MISMATCH' })
-  if (version.status !== 'active') {
-    return res.status(409).json({ error: 'Only active versions can be rolled back', code: 'VERSION_NOT_ACTIVE' })
-  }
-
-  const now = new Date()
-
-  // Find previous active-eligible version
-  const previous = await prisma.doctrineVersion.findFirst({
-    where: { orgId: operator.orgId, status: 'superseded', id: { not: versionId } },
-    orderBy: { activatedAt: 'desc' },
-  })
-
-  await prisma.$transaction(async (tx) => {
-    await tx.doctrineVersion.update({
-      where: { id: versionId },
-      data: {
-        status: 'rolled_back',
-        rolledBackAt: now,
-        rolledBackById: operator.id,
-      },
+// ---------------------------------------------------------------------------
+// POST /api/v1/doctrine/approve/:proposalId
+// Admin approves a pending proposal — activates it immediately (or at effectiveAt)
+// Cannot be the same person who proposed it.
+// ---------------------------------------------------------------------------
+router.post('/approve/:proposalId', requireRole('admin'), async (req, res) => {
+  try {
+    const version = await approveDoctrine({
+      proposalId: req.params.proposalId,
+      approverId: req.operator!.id,
     })
-    if (previous) {
-      await tx.doctrineVersion.update({
-        where: { id: previous.id },
-        data: { status: 'active', supersededAt: null },
-      })
+    return res.json({ success: true, data: version })
+  } catch (err: any) {
+    const errorMap: Record<string, number> = {
+      PROPOSAL_NOT_FOUND: 404,
+      PROPOSAL_NOT_PENDING: 409,
+      SELF_APPROVAL_FORBIDDEN: 403,
+      INSUFFICIENT_ROLE: 403,
+      ORG_MISMATCH: 403,
     }
-  })
-
-  await invalidateDoctrine(operator.orgId)
-
-  return res.status(200).json({
-    rolledBackVersionId: versionId,
-    restoredVersionId: previous?.id ?? null,
-    message: previous
-      ? `Rolled back — version ${previous.id} restored as active`
-      : 'Rolled back — no previous version, engine will use hardcoded defaults',
-  })
-})
-
-// ─── GET /active ──────────────────────────────────────────────────────────────
-
-router.get('/active', operatorGuard('viewer'), async (req, res) => {
-  const doctrine = await getActiveDoctrine(req.operator!.orgId)
-  if (!doctrine) {
-    return res.status(200).json({ active: null, message: 'No doctrine configured — engine using hardcoded defaults' })
+    const status = errorMap[err.message] ?? 400
+    return res.status(status).json({ success: false, error: { code: err.message } })
   }
-  return res.status(200).json({ active: doctrine })
 })
 
-// ─── GET /history ─────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// POST /api/v1/doctrine/reject/:proposalId
+// Admin rejects a pending proposal with a required reason.
+// ---------------------------------------------------------------------------
+router.post('/reject/:proposalId', requireRole('admin'), async (req, res) => {
+  const { reason } = req.body
+  if (!reason || typeof reason !== 'string' || reason.trim().length < 5) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'REASON_REQUIRED', message: 'rejection reason must be at least 5 characters' },
+    })
+  }
 
-router.get('/history', operatorGuard('viewer'), async (req, res) => {
-  const versions = await prisma.doctrineVersion.findMany({
-    where: { orgId: req.operator!.orgId },
-    orderBy: { activatedAt: 'desc' },
-    take: 50,
-    select: {
-      id: true,
-      status: true,
-      mode: true,
-      carbonThreshold: true,
-      waterThreshold: true,
-      latencyBudget: true,
-      costCeiling: true,
-      justification: true,
-      activatedAt: true,
-      supersededAt: true,
-      rolledBackAt: true,
-      proposedById: true,
-      approvedById: true,
-      rolledBackById: true,
-    },
-  })
-  return res.status(200).json({ versions })
+  try {
+    const proposal = await rejectDoctrine({
+      proposalId: req.params.proposalId,
+      rejecterId: req.operator!.id,
+      reason: reason.trim(),
+    })
+    return res.json({ success: true, data: proposal })
+  } catch (err: any) {
+    const errorMap: Record<string, number> = {
+      PROPOSAL_NOT_FOUND: 404,
+      PROPOSAL_NOT_PENDING: 409,
+      INSUFFICIENT_ROLE: 403,
+      ORG_MISMATCH: 403,
+    }
+    const status = errorMap[err.message] ?? 400
+    return res.status(status).json({ success: false, error: { code: err.message } })
+  }
 })
 
-export default router
+// ---------------------------------------------------------------------------
+// POST /api/v1/doctrine/rollback/:versionId
+// Admin rolls back the active version — restores previous superseded version.
+// ---------------------------------------------------------------------------
+router.post('/rollback/:versionId', requireRole('admin'), async (req, res) => {
+  try {
+    const result = await rollbackDoctrine({
+      versionId: req.params.versionId,
+      requesterId: req.operator!.id,
+    })
+    return res.json({ success: true, data: result })
+  } catch (err: any) {
+    const errorMap: Record<string, number> = {
+      VERSION_NOT_FOUND: 404,
+      VERSION_NOT_ACTIVE: 409,
+      INSUFFICIENT_ROLE: 403,
+      ORG_MISMATCH: 403,
+    }
+    const status = errorMap[err.message] ?? 400
+    return res.status(status).json({ success: false, error: { code: err.message } })
+  }
+})
+
+export { router as doctrineRouter }

@@ -1071,58 +1071,49 @@ model CarbonLedgerEntry {
   commandId             String?
   decisionFrameId       String?
 
-  // Job classification
-  jobClass              String   @default("realtime") // realtime | soft_deadline | batch
+  jobClass              String   @default("realtime")
   workloadType          String?
 
-  // Region routing
-  baselineRegion        String   // Region that WOULD have been used without ECOBE
-  chosenRegion          String   // Region actually routed to
+  baselineRegion        String
+  chosenRegion          String
   baselineStartTs       DateTime?
   chosenStartTs         DateTime?
 
-  // Carbon accounting — predicted at routing time
-  baselineCarbonGPerKwh Float    // Carbon intensity of baseline region
-  chosenCarbonGPerKwh   Float    // Carbon intensity of chosen region
-  energyEstimateKwh     Float    // Estimated energy consumption
-  baselineCarbonG       Float    // baselineCarbonGPerKwh * energyEstimateKwh
-  chosenCarbonG         Float    // chosenCarbonGPerKwh * energyEstimateKwh
-  carbonSavedG          Float    // baselineCarbonG - chosenCarbonG
+  baselineCarbonGPerKwh Float
+  chosenCarbonGPerKwh   Float
+  energyEstimateKwh     Float
+  baselineCarbonG       Float
+  chosenCarbonG         Float
+  carbonSavedG          Float
 
-  // Carbon accounting — actual (filled post-execution)
   actualCarbonGPerKwh   Float?
   actualCarbonG         Float?
   actualEnergykWh       Float?
   verifiedSavingsG      Float?
-  accountingMethod      String   @default("flow-traced") // flow-traced | marginal | average
+  accountingMethod      String   @default("flow-traced")
 
-  // Provider provenance
   sourceUsed            String?
   validationSource      String?
   fallbackUsed          Boolean  @default(false)
   estimatedFlag         Boolean  @default(false)
   syntheticFlag         Boolean  @default(false)
 
-  // Decision quality
   confidenceScore       Float?
-  qualityTier           String?  // high | medium | low
-  forecastStability     String?  // stable | medium | unstable
+  qualityTier           String?
+  forecastStability     String?
   disagreementFlag      Boolean  @default(false)
   disagreementPct       Float?
 
-  // Grid intelligence at decision time
   balancingAuthority    String?
   demandRampPct         Float?
   carbonSpikeProbability Float?
   curtailmentProbability Float?
   importCarbonLeakageScore Float?
 
-  // Scoring
   rankScore             Float?
   candidatesEvaluated   Int?
   feasibleCandidates    Int?
 
-  // Timestamps
   createdAt             DateTime @default(now())
   verifiedAt            DateTime?
 
@@ -1143,7 +1134,6 @@ model RoutingCandidate {
   region                String
   startTs               DateTime?
 
-  // Estimates at decision time
   carbonEstimateGPerKwh Float?
   latencyEstimateMs     Float?
   queueDelayEstimateSec Float?
@@ -1151,7 +1141,6 @@ model RoutingCandidate {
   confidenceScore       Float?
   retryRiskScore        Float?
 
-  // Scoring breakdown
   carbonScore           Float?
   latencyScore          Float?
   costScore             Float?
@@ -1159,7 +1148,6 @@ model RoutingCandidate {
   uncertaintyScore      Float?
   rankScore             Float?
 
-  // Selection
   wasSelected           Boolean  @default(false)
   wasFeasible           Boolean  @default(true)
   rejectionReason       String?
@@ -1176,9 +1164,9 @@ model RoutingCandidate {
 
 model ProviderSnapshot {
   id                    String   @id @default(cuid())
-  provider              String   // watttime | electricity_maps | ember | eia930
-  zone                  String   // Region/zone code
-  signalType            String   // moer_current | moer_forecast | intensity | mix | structural
+  provider              String
+  zone                  String
+  signalType            String
 
   signalValue           Float
   forecastForTs         DateTime?
@@ -1262,15 +1250,14 @@ model WaterPolicyEvidence {
 }
 
 // ============================================================================
-// CAPACITY BUCKETS — FLEET-AWARE RESOURCE MANAGEMENT
+// CAPACITY BUCKETS
 // ============================================================================
 
 model CapacityBucket {
   id                    String   @id @default(cuid())
   region                String
-  bucketStartTs         DateTime // Hourly bucket
+  bucketStartTs         DateTime
 
-  // Capacity tracking
   cpuAvailable          Float    @default(1000)
   gpuAvailable          Float    @default(100)
   reservedCpu           Float    @default(0)
@@ -1278,7 +1265,6 @@ model CapacityBucket {
   allocatedCommands     Int      @default(0)
   queueDepth            Int      @default(0)
 
-  // Cost multiplier (surge pricing indicator)
   costMultiplier        Float    @default(1.0)
 
   updatedAt             DateTime @updatedAt
@@ -1288,38 +1274,32 @@ model CapacityBucket {
 }
 
 // ============================================================================
-// CI/CD ROUTING DECISIONS — CARBON-AWARE RUNNER SELECTION
+// CI/CD ROUTING DECISIONS
 // ============================================================================
 
 model CIDecision {
   id                    String   @id @default(cuid())
 
-  // Decision details
-  decisionFrameId       String   // Links to routing decision frame
-  selectedRunner        String   // e.g., "ubuntu-latest"
-  selectedRegion        String   // e.g., "us-east-1"
-  
-  // Carbon metrics
-  carbonIntensity        Float    // gCO2/kWh
-  baseline              Float    // Baseline carbon intensity
-  savings               Float    // Percentage savings vs baseline
-  
-  // Request parameters
-  jobType               String   // standard | heavy | light
-  preferredRegions      Json     // Array of preferred regions
-  carbonWeight          Float    // Carbon importance weight (0-1)
-  
-  // Recommendation
-  recommendation        String   // Routing recommendation text
+  decisionFrameId       String
+  selectedRunner        String
+  selectedRegion        String
 
-  // Deterministic policy outcome
-  decisionAction        String?  // run_now | reroute | delay | throttle | deny
-  decisionMode          String?  // runtime_authorization | scenario_planning
+  carbonIntensity        Float
+  baseline              Float
+  savings               Float
+
+  jobType               String
+  preferredRegions      Json
+  carbonWeight          Float
+
+  recommendation        String
+
+  decisionAction        String?
+  decisionMode          String?
   reasonCode            String?
   signalConfidence      Float?
   fallbackUsed          Boolean  @default(false)
 
-  // Water-proof metrics
   waterImpactLiters     Float?
   waterBaselineLiters   Float?
   waterScarcityImpact   Float?
@@ -1332,14 +1312,105 @@ model CIDecision {
   waterEvidenceRefs     Json     @default("[]")
   policyTrace           Json     @default("{}")
   datasetVersions       Json     @default("{}")
-  
-  // Metadata
+
+  // Links to the doctrine version that governed this decision
+  doctrineVersionId     String?
+
   metadata              Json     @default("{}")
-  
+
   createdAt             DateTime @default(now())
 
   @@index([decisionFrameId])
   @@index([selectedRegion, createdAt])
   @@index([jobType, createdAt])
   @@index([createdAt])
+  @@index([doctrineVersionId])
+}
+
+// ============================================================================
+// DOCTRINE WRITE PATH — OPERATOR IDENTITY + PROPOSALS + VERSIONED DOCTRINE
+// ============================================================================
+
+enum OperatorRole {
+  viewer
+  operator
+  admin
+}
+
+enum DoctrineProposalStatus {
+  pending_approval
+  approved
+  rejected
+  superseded
+  rolled_back
+}
+
+model OperatorIdentity {
+  id          String       @id @default(cuid())
+  orgId       String
+  displayName String
+  keyHash     String       @unique
+  role        OperatorRole @default(operator)
+  active      Boolean      @default(true)
+  metadata    Json         @default("{}")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  proposals         DoctrineProposal[] @relation("ProposedBy")
+  approvedProposals DoctrineProposal[] @relation("ApprovedBy")
+  rejectedProposals DoctrineProposal[] @relation("RejectedBy")
+
+  @@index([orgId])
+}
+
+model DoctrineProposal {
+  id              String                 @id @default(cuid())
+  proposedById    String
+  proposedBy      OperatorIdentity       @relation("ProposedBy", fields: [proposedById], references: [id])
+  orgId           String
+  carbonThreshold Float?
+  waterThreshold  Float?
+  latencyBudget   Float?
+  costCeiling     Float?
+  mode            String                 @default("balanced")
+  justification   String
+  status          DoctrineProposalStatus @default(pending_approval)
+  approvedById    String?
+  approvedBy      OperatorIdentity?      @relation("ApprovedBy", fields: [approvedById], references: [id])
+  rejectedById    String?
+  rejectedBy      OperatorIdentity?      @relation("RejectedBy", fields: [rejectedById], references: [id])
+  rejectionReason String?
+  effectiveAt     DateTime?
+  metadata        Json                   @default("{}")
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  version DoctrineVersion?
+
+  @@index([orgId, status])
+  @@index([createdAt])
+}
+
+model DoctrineVersion {
+  id              String   @id @default(cuid())
+  proposalId      String   @unique
+  proposal        DoctrineProposal @relation(fields: [proposalId], references: [id])
+  orgId           String
+  proposedById    String
+  approvedById    String
+  carbonThreshold Float?
+  waterThreshold  Float?
+  latencyBudget   Float?
+  costCeiling     Float?
+  mode            String   @default("balanced")
+  justification   String
+  // status: active | superseded | rolled_back
+  status          String   @default("active")
+  activatedAt     DateTime @default(now())
+  supersededAt    DateTime?
+  metadata        Json     @default("{}")
+  createdAt       DateTime @default(now())
+
+  @@index([orgId, status])
+  @@index([activatedAt])
 }
