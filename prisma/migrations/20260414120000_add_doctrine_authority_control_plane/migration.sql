@@ -102,6 +102,7 @@ CREATE INDEX "DoctrineProposal_orgId_proposerOperatorId_createdAt_idx" ON "Doctr
 CREATE UNIQUE INDEX "DoctrineVersion_sourceProposalId_key" ON "DoctrineVersion"("sourceProposalId");
 
 CREATE UNIQUE INDEX "org_doctrine_version_number" ON "DoctrineVersion"("orgId", "versionNumber");
+CREATE UNIQUE INDEX "DoctrineVersion_one_active_per_org" ON "DoctrineVersion"("orgId") WHERE "status" = 'ACTIVE';
 
 CREATE INDEX "DoctrineVersion_orgId_status_createdAt_idx" ON "DoctrineVersion"("orgId", "status", "createdAt");
 

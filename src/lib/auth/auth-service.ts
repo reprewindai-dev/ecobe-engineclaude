@@ -51,6 +51,7 @@ export const PLAN_LIMITS = {
 }
 
 export interface AuthTokenPayload {
+  sub: string
   orgId: string
   planTier: OrgPlanTier
   permissions: string[]

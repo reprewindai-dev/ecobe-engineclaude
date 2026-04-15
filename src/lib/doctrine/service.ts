@@ -218,9 +218,15 @@ export async function recordDoctrineAuditEvent(
       requestId: input.requestId ?? null,
       ipAddress: input.ipAddress ?? null,
       userAgent: input.userAgent ?? null,
-      beforeJson: input.beforeJson as Prisma.InputJsonValue,
-      afterJson: input.afterJson as Prisma.InputJsonValue,
-      metadata: (input.metadata ?? {}) as Prisma.InputJsonValue,
+      beforeJson:
+        input.beforeJson !== undefined
+          ? toInputJson(input.beforeJson as Prisma.JsonValue)
+          : undefined,
+      afterJson:
+        input.afterJson !== undefined
+          ? toInputJson(input.afterJson as Prisma.JsonValue)
+          : undefined,
+      metadata: toInputJson((input.metadata ?? {}) as Prisma.JsonValue),
     },
   });
 }
@@ -287,6 +293,18 @@ async function nextDoctrineVersionNumber(
   return (latest?.versionNumber ?? 0) + 1;
 }
 
+async function acquireDoctrineOrgLock(
+  tx: Prisma.TransactionClient,
+  orgId: string,
+) {
+  if (typeof (tx as { $executeRaw?: unknown }).$executeRaw !== "function") {
+    return;
+  }
+  await tx.$executeRaw(
+    Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${orgId}))`,
+  );
+}
+
 export async function approveDoctrineProposal(input: {
   orgId: string;
   proposalId: string;
@@ -297,6 +315,8 @@ export async function approveDoctrineProposal(input: {
 }) {
   const startedAt = Date.now();
   const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    await acquireDoctrineOrgLock(tx, input.orgId);
+
     const proposal = await tx.doctrineProposal.findFirst({
       where: {
         id: input.proposalId,
@@ -497,6 +517,8 @@ export async function rollbackDoctrineVersion(input: {
   userAgent?: string | null;
 }) {
   const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    await acquireDoctrineOrgLock(tx, input.orgId);
+
     const target = await tx.doctrineVersion.findFirst({
       where: {
         id: input.versionId,
