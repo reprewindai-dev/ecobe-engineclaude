@@ -59,14 +59,16 @@ async function gracefulShutdown(signal: string) {
       });
     }
 
+    await Promise.allSettled([
+      Promise.resolve(stopRuntimeSupervisor()),
+      Promise.resolve(stopLearningLoopWorker()),
+      Promise.resolve(stopDecisionEventDispatcherWorker()),
+      Promise.resolve(stopPglAuditRetryWorker()),
+      Promise.resolve(stopRoutingSignalWarmLoop()),
+    ]);
+
     console.log("Disconnecting from database...");
     await prisma.$disconnect();
-
-    stopRuntimeSupervisor();
-    stopLearningLoopWorker();
-    stopDecisionEventDispatcherWorker();
-    stopPglAuditRetryWorker();
-    stopRoutingSignalWarmLoop();
 
     console.log("Closing Redis connection...");
     await redis.quit().catch(() => undefined);

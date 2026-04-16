@@ -21,7 +21,6 @@ function normalizeBaseUrl(value: string | undefined | null) {
 }
 
 const DEFAULT_ENGINE_URL = 'https://ecobe-engineclaude-co2router.onrender.com'
-const FALLBACK_ENGINE_URL = 'https://ecobe-engineclaude-co2router.onrender.com'
 const DEFAULT_DASHBOARD_URL = 'https://co2router.com'
 const requestedBaseUrl = normalizeBaseUrl(
   process.env.LOAD_TEST_BASE_URL ?? process.env.ECOBE_ENGINE_URL ?? DEFAULT_ENGINE_URL
@@ -266,7 +265,7 @@ function wait(ms: number) {
 
 async function resolveLiveBaseUrl() {
   const candidates = Array.from(
-    new Set([requestedBaseUrl, process.env.ECOBE_ENGINE_URL, process.env.DEFAULT_ECOBE_ENGINE_URL, FALLBACK_ENGINE_URL]
+    new Set([requestedBaseUrl, process.env.ECOBE_ENGINE_URL, process.env.DEFAULT_ECOBE_ENGINE_URL, DEFAULT_ENGINE_URL]
       .map((value) => normalizeBaseUrl(value))
       .filter(Boolean))
   )

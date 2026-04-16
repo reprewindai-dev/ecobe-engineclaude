@@ -737,6 +737,11 @@ async function appendPglEvents(
   if (drafts.length === 0) return [];
 
   const correlationId = drafts[0].correlationId;
+  for (const draft of drafts) {
+    if (draft.correlationId !== correlationId) {
+      throw new Error("Mismatched correlationId in drafts");
+    }
+  }
   await ensureCorrelationHead(client, correlationId);
   const head = await lockCorrelationHead(client, correlationId);
 

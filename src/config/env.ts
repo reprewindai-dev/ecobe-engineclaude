@@ -74,6 +74,10 @@ const envSchema = z.object({
   LEARNING_LOOP_ENABLED: z.string().optional(),
   LEARNING_LOOP_CRON: z.string().default("*/15 * * * *"),
   LEARNING_LOOKBACK_HOURS: z.string().default("168"),
+  DS_LEARNING_LOOP_ENABLED: z.string().optional(),
+  DS_LEARNING_LOOP_CRON: z.string().default("*/15 * * * *"),
+  DS_EVENT_LOOKBACK_HOURS: z.string().default("168"),
+  TRENDY_SHADOW_ENABLED: z.string().optional(),
   RUNTIME_SUPERVISOR_ENABLED: z.string().optional(),
   RUNTIME_SUPERVISOR_INTERVAL_SEC: z.string().default("60"),
   SUPERVISOR_FORECAST_STALE_MIN: z.string().default("90"),
@@ -194,6 +198,19 @@ export const env = {
       : parsed.data.NODE_ENV !== "test",
   LEARNING_LOOP_CRON: parsed.data.LEARNING_LOOP_CRON,
   LEARNING_LOOKBACK_HOURS: parseInt(parsed.data.LEARNING_LOOKBACK_HOURS),
+  DS_LEARNING_LOOP_ENABLED:
+    parsed.data.DS_LEARNING_LOOP_ENABLED !== undefined
+      ? parsed.data.DS_LEARNING_LOOP_ENABLED === "true"
+      : false,
+  DS_LEARNING_LOOP_CRON: parsed.data.DS_LEARNING_LOOP_CRON,
+  DS_EVENT_LOOKBACK_HOURS: Math.max(
+    24,
+    parseInt(parsed.data.DS_EVENT_LOOKBACK_HOURS),
+  ),
+  TRENDY_SHADOW_ENABLED:
+    parsed.data.TRENDY_SHADOW_ENABLED !== undefined
+      ? parsed.data.TRENDY_SHADOW_ENABLED === "true"
+      : false,
   RUNTIME_SUPERVISOR_ENABLED:
     parsed.data.RUNTIME_SUPERVISOR_ENABLED !== undefined
       ? parsed.data.RUNTIME_SUPERVISOR_ENABLED === "true"

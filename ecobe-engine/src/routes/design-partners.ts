@@ -39,6 +39,7 @@ const designPartnerOnboardingStageSchema = z.enum(designPartnerOnboardingStages)
 type DesignPartnerStatusValue = (typeof designPartnerStatuses)[number]
 type DesignPartnerOnboardingStageValue = (typeof designPartnerOnboardingStages)[number]
 type PrismaDesignPartnerType = 'DESIGN'
+// Keep these string unions aligned with prisma/schema.prisma when the model evolves.
 type PrismaDesignPartnerStatus =
   | 'APPLIED'
   | 'QUALIFIED'
@@ -59,6 +60,34 @@ type PrismaDesignPartnerOnboardingStage =
   | 'ACTIVE_PILOT'
   | 'GRADUATION_REVIEW'
   | 'CONVERTED_PAID'
+
+const partnerTypeFromPrisma: Record<PrismaDesignPartnerType, 'design'> = {
+  DESIGN: 'design',
+}
+
+const knownPartnerStatuses = new Set<PrismaDesignPartnerStatus>([
+  'APPLIED',
+  'QUALIFIED',
+  'ACCEPTED',
+  'ONBOARDING',
+  'ACTIVE',
+  'GRADUATING',
+  'CONVERTED',
+  'DECLINED',
+  'CHURNED',
+])
+
+const knownOnboardingStages = new Set<PrismaDesignPartnerOnboardingStage>([
+  'FIT_CONFIRMED',
+  'AGREEMENT_SENT',
+  'AGREEMENT_SIGNED',
+  'KICKOFF_SCHEDULED',
+  'TECHNICAL_SETUP',
+  'FIRST_VALUE',
+  'ACTIVE_PILOT',
+  'GRADUATION_REVIEW',
+  'CONVERTED_PAID',
+])
 
 const statusToPrisma: Record<DesignPartnerStatusValue, PrismaDesignPartnerStatus> = {
   applied: 'APPLIED',
@@ -269,6 +298,15 @@ function serializeDesignPartner(partner: {
   createdAt: Date
   updatedAt: Date
 }) {
+  if (process.env.NODE_ENV !== 'production') {
+    if (!knownPartnerStatuses.has(partner.status)) {
+      throw new Error(`Unexpected design partner status from Prisma: ${partner.status}`)
+    }
+    if (partner.onboardingStage && !knownOnboardingStages.has(partner.onboardingStage)) {
+      throw new Error(`Unexpected design partner onboarding stage from Prisma: ${partner.onboardingStage}`)
+    }
+  }
+
   return {
     id: partner.id,
     companyName: partner.companyName,
@@ -283,7 +321,7 @@ function serializeDesignPartner(partner: {
     scopedWorkflow: partner.scopedWorkflow,
     internalChampion: partner.internalChampion,
     commercialApprover: partner.commercialApprover,
-    partnerType: partner.partnerType === 'DESIGN' ? 'design' : 'design',
+    partnerType: partnerTypeFromPrisma[partner.partnerType],
     cohort: partner.cohort,
     status: statusFromPrisma[partner.status],
     onboardingStage: partner.onboardingStage

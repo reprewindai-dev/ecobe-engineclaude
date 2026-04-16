@@ -49,6 +49,11 @@ let workerStatus: WorkerRegistry = {
     lastRun: null as string | null,
     nextRun: null as string | null,
   },
+  decisionSystemLearning: {
+    running: false,
+    lastRun: null as string | null,
+    nextRun: null as string | null,
+  },
 };
 
 export function setWorkerStatus(

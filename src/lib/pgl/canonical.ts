@@ -79,5 +79,9 @@ export function buildUuidV7(now: string | Date = new Date()): string {
 }
 
 function valueToDate(value: string | Date): Date {
-  return value instanceof Date ? value : new Date(value);
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(`Invalid timestamp: ${String(value)}`);
+  }
+  return date;
 }

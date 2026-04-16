@@ -222,10 +222,6 @@ function attachUiRoute(app: express.Express) {
       document.getElementById('decisions').onclick = () => run(() => get('/api/v1/dashboard/decisions'))
       document.getElementById('mapping').onclick = () => run(() => get('/api/v1/dashboard/region-mapping'))
 
-      document.getElementById('dekesHealth').onclick = () => run(() => get('/api/v1/dekes/health'))
-      document.getElementById('dekesPing').onclick = () => run(() => get('/api/v1/dekes/health?ping=true'))
-      document.getElementById('dekesAnalytics').onclick = () => run(() => get('/api/v1/dekes/analytics'))
-
       document.getElementById('seedDecision').onclick = () => run(async () => {
         const now = new Date().toISOString()
         const body = {
