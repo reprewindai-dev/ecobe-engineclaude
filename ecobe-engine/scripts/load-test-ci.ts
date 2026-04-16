@@ -45,6 +45,8 @@ type ScenarioDefinition = {
   requests: number
   concurrency: number
   timeoutMs: number
+  prewarmRequests: number
+  settleDelayMs: number
 }
 
 type RequestTemplate = {
@@ -136,6 +138,8 @@ const SCENARIOS: ScenarioDefinition[] = [
     requests: 12,
     concurrency: 1,
     timeoutMs: 20_000,
+    prewarmRequests: 12,
+    settleDelayMs: 1_500,
   },
   {
     id: 'medium',
@@ -144,6 +148,8 @@ const SCENARIOS: ScenarioDefinition[] = [
     requests: 90,
     concurrency: 12,
     timeoutMs: 20_000,
+    prewarmRequests: 48,
+    settleDelayMs: 2_500,
   },
   {
     id: 'hard',
@@ -152,6 +158,8 @@ const SCENARIOS: ScenarioDefinition[] = [
     requests: 240,
     concurrency: 32,
     timeoutMs: 25_000,
+    prewarmRequests: 96,
+    settleDelayMs: 3_500,
   },
 ]
 
@@ -494,13 +502,14 @@ async function runScenario(baseUrl: string, scenario: ScenarioDefinition): Promi
   let nextIndex = 0
   let completed = 0
 
-  const prewarmRequests = Math.min(12, Math.max(4, scenario.concurrency))
+  const prewarmRequests = Math.max(scenario.concurrency, scenario.prewarmRequests)
   await Promise.all(
     Array.from({ length: prewarmRequests }, (_, index) =>
       postAuthorizeRequest(baseUrl, buildPayload(scenario.id, index), scenario.timeoutMs).catch(() => null)
     )
   )
-  await wait(750)
+  await waitForWarmCoverage(baseUrl, 95, 4, 1_500)
+  await wait(scenario.settleDelayMs)
 
   const startedAt = performance.now()
 
