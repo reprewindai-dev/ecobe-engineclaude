@@ -1,10 +1,5 @@
 import { createHash } from 'crypto'
 
-import {
-  DesignPartnerOnboardingStage,
-  DesignPartnerStatus,
-  DesignPartnerType,
-} from '@prisma/client'
 import { Router } from 'express'
 import { z } from 'zod'
 
@@ -41,58 +36,76 @@ const designPartnerOnboardingStages = [
 const designPartnerStatusSchema = z.enum(designPartnerStatuses)
 const designPartnerOnboardingStageSchema = z.enum(designPartnerOnboardingStages)
 
-const statusToPrisma: Record<(typeof designPartnerStatuses)[number], DesignPartnerStatus> = {
-  applied: DesignPartnerStatus.APPLIED,
-  qualified: DesignPartnerStatus.QUALIFIED,
-  accepted: DesignPartnerStatus.ACCEPTED,
-  onboarding: DesignPartnerStatus.ONBOARDING,
-  active: DesignPartnerStatus.ACTIVE,
-  graduating: DesignPartnerStatus.GRADUATING,
-  converted: DesignPartnerStatus.CONVERTED,
-  declined: DesignPartnerStatus.DECLINED,
-  churned: DesignPartnerStatus.CHURNED,
+type DesignPartnerStatusValue = (typeof designPartnerStatuses)[number]
+type DesignPartnerOnboardingStageValue = (typeof designPartnerOnboardingStages)[number]
+type PrismaDesignPartnerType = 'DESIGN'
+type PrismaDesignPartnerStatus =
+  | 'APPLIED'
+  | 'QUALIFIED'
+  | 'ACCEPTED'
+  | 'ONBOARDING'
+  | 'ACTIVE'
+  | 'GRADUATING'
+  | 'CONVERTED'
+  | 'DECLINED'
+  | 'CHURNED'
+type PrismaDesignPartnerOnboardingStage =
+  | 'FIT_CONFIRMED'
+  | 'AGREEMENT_SENT'
+  | 'AGREEMENT_SIGNED'
+  | 'KICKOFF_SCHEDULED'
+  | 'TECHNICAL_SETUP'
+  | 'FIRST_VALUE'
+  | 'ACTIVE_PILOT'
+  | 'GRADUATION_REVIEW'
+  | 'CONVERTED_PAID'
+
+const statusToPrisma: Record<DesignPartnerStatusValue, PrismaDesignPartnerStatus> = {
+  applied: 'APPLIED',
+  qualified: 'QUALIFIED',
+  accepted: 'ACCEPTED',
+  onboarding: 'ONBOARDING',
+  active: 'ACTIVE',
+  graduating: 'GRADUATING',
+  converted: 'CONVERTED',
+  declined: 'DECLINED',
+  churned: 'CHURNED',
 }
 
-const statusFromPrisma: Record<DesignPartnerStatus, (typeof designPartnerStatuses)[number]> = {
-  [DesignPartnerStatus.APPLIED]: 'applied',
-  [DesignPartnerStatus.QUALIFIED]: 'qualified',
-  [DesignPartnerStatus.ACCEPTED]: 'accepted',
-  [DesignPartnerStatus.ONBOARDING]: 'onboarding',
-  [DesignPartnerStatus.ACTIVE]: 'active',
-  [DesignPartnerStatus.GRADUATING]: 'graduating',
-  [DesignPartnerStatus.CONVERTED]: 'converted',
-  [DesignPartnerStatus.DECLINED]: 'declined',
-  [DesignPartnerStatus.CHURNED]: 'churned',
+const statusFromPrisma: Record<PrismaDesignPartnerStatus, DesignPartnerStatusValue> = {
+  APPLIED: 'applied',
+  QUALIFIED: 'qualified',
+  ACCEPTED: 'accepted',
+  ONBOARDING: 'onboarding',
+  ACTIVE: 'active',
+  GRADUATING: 'graduating',
+  CONVERTED: 'converted',
+  DECLINED: 'declined',
+  CHURNED: 'churned',
 }
 
-const stageToPrisma: Record<
-  (typeof designPartnerOnboardingStages)[number],
-  DesignPartnerOnboardingStage
-> = {
-  fit_confirmed: DesignPartnerOnboardingStage.FIT_CONFIRMED,
-  agreement_sent: DesignPartnerOnboardingStage.AGREEMENT_SENT,
-  agreement_signed: DesignPartnerOnboardingStage.AGREEMENT_SIGNED,
-  kickoff_scheduled: DesignPartnerOnboardingStage.KICKOFF_SCHEDULED,
-  technical_setup: DesignPartnerOnboardingStage.TECHNICAL_SETUP,
-  first_value: DesignPartnerOnboardingStage.FIRST_VALUE,
-  active_pilot: DesignPartnerOnboardingStage.ACTIVE_PILOT,
-  graduation_review: DesignPartnerOnboardingStage.GRADUATION_REVIEW,
-  converted_paid: DesignPartnerOnboardingStage.CONVERTED_PAID,
+const stageToPrisma: Record<DesignPartnerOnboardingStageValue, PrismaDesignPartnerOnboardingStage> = {
+  fit_confirmed: 'FIT_CONFIRMED',
+  agreement_sent: 'AGREEMENT_SENT',
+  agreement_signed: 'AGREEMENT_SIGNED',
+  kickoff_scheduled: 'KICKOFF_SCHEDULED',
+  technical_setup: 'TECHNICAL_SETUP',
+  first_value: 'FIRST_VALUE',
+  active_pilot: 'ACTIVE_PILOT',
+  graduation_review: 'GRADUATION_REVIEW',
+  converted_paid: 'CONVERTED_PAID',
 }
 
-const stageFromPrisma: Record<
-  DesignPartnerOnboardingStage,
-  (typeof designPartnerOnboardingStages)[number]
-> = {
-  [DesignPartnerOnboardingStage.FIT_CONFIRMED]: 'fit_confirmed',
-  [DesignPartnerOnboardingStage.AGREEMENT_SENT]: 'agreement_sent',
-  [DesignPartnerOnboardingStage.AGREEMENT_SIGNED]: 'agreement_signed',
-  [DesignPartnerOnboardingStage.KICKOFF_SCHEDULED]: 'kickoff_scheduled',
-  [DesignPartnerOnboardingStage.TECHNICAL_SETUP]: 'technical_setup',
-  [DesignPartnerOnboardingStage.FIRST_VALUE]: 'first_value',
-  [DesignPartnerOnboardingStage.ACTIVE_PILOT]: 'active_pilot',
-  [DesignPartnerOnboardingStage.GRADUATION_REVIEW]: 'graduation_review',
-  [DesignPartnerOnboardingStage.CONVERTED_PAID]: 'converted_paid',
+const stageFromPrisma: Record<PrismaDesignPartnerOnboardingStage, DesignPartnerOnboardingStageValue> = {
+  FIT_CONFIRMED: 'fit_confirmed',
+  AGREEMENT_SENT: 'agreement_sent',
+  AGREEMENT_SIGNED: 'agreement_signed',
+  KICKOFF_SCHEDULED: 'kickoff_scheduled',
+  TECHNICAL_SETUP: 'technical_setup',
+  FIRST_VALUE: 'first_value',
+  ACTIVE_PILOT: 'active_pilot',
+  GRADUATION_REVIEW: 'graduation_review',
+  CONVERTED_PAID: 'converted_paid',
 }
 
 const PUBLIC_INTAKE_LIMIT = 5
@@ -242,10 +255,10 @@ function serializeDesignPartner(partner: {
   scopedWorkflow: string
   internalChampion: string
   commercialApprover: string | null
-  partnerType: DesignPartnerType
+  partnerType: PrismaDesignPartnerType
   cohort: string
-  status: DesignPartnerStatus
-  onboardingStage: DesignPartnerOnboardingStage | null
+  status: PrismaDesignPartnerStatus
+  onboardingStage: PrismaDesignPartnerOnboardingStage | null
   firstValueAt: Date | null
   convertedToPaidAt: Date | null
   totalPartnerSourcedArr: number
@@ -270,7 +283,7 @@ function serializeDesignPartner(partner: {
     scopedWorkflow: partner.scopedWorkflow,
     internalChampion: partner.internalChampion,
     commercialApprover: partner.commercialApprover,
-    partnerType: partner.partnerType === DesignPartnerType.DESIGN ? 'design' : 'design',
+    partnerType: partner.partnerType === 'DESIGN' ? 'design' : 'design',
     cohort: partner.cohort,
     status: statusFromPrisma[partner.status],
     onboardingStage: partner.onboardingStage
@@ -342,8 +355,8 @@ router.post('/design-partners/applications', async (req, res) => {
     }
 
     const reopened =
-      existing?.status === DesignPartnerStatus.DECLINED ||
-      existing?.status === DesignPartnerStatus.CHURNED
+      existing?.status === 'DECLINED' ||
+      existing?.status === 'CHURNED'
 
     const partner = existing
       ? await prisma.designPartner.update({
@@ -352,7 +365,7 @@ router.post('/design-partners/applications', async (req, res) => {
             ...baseData,
             ...(reopened
               ? {
-                  status: DesignPartnerStatus.APPLIED,
+                  status: 'APPLIED',
                   onboardingStage: null,
                   firstValueAt: null,
                   convertedToPaidAt: null,
@@ -365,13 +378,13 @@ router.post('/design-partners/applications', async (req, res) => {
           data: {
             crmKey,
             ...baseData,
-            partnerType: DesignPartnerType.DESIGN,
+            partnerType: 'DESIGN',
             cohort: 'v1',
-            status: DesignPartnerStatus.APPLIED,
+            status: 'APPLIED',
           },
         })
 
-    const partnerStatus = partner.status as DesignPartnerStatus
+    const partnerStatus = partner.status as PrismaDesignPartnerStatus
 
     await prisma.integrationEvent
       .create({
@@ -496,8 +509,8 @@ router.patch('/design-partners/:id', requireAdminAccess, async (req, res) => {
       },
     })
 
-    const partnerStatus = partner.status as DesignPartnerStatus
-    const partnerOnboardingStage = partner.onboardingStage as DesignPartnerOnboardingStage | null
+    const partnerStatus = partner.status as PrismaDesignPartnerStatus
+    const partnerOnboardingStage = partner.onboardingStage as PrismaDesignPartnerOnboardingStage | null
 
     await prisma.integrationEvent
       .create({
