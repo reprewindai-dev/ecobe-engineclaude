@@ -103,7 +103,11 @@ export class ProviderRouter {
     }
 
     const lastKnownGood = await GridSignalCache.getLastKnownGoodRoutingSignal(region)
-    const ageSec = lastKnownGood?.stalenessSec ?? this.computeSignalStalenessSec(lastKnownGood?.signal, timestamp)
+    const ageSec =
+      this.computeSignalStalenessSec(lastKnownGood?.signal, timestamp) ??
+      (lastKnownGood?.fetchedAt
+        ? Math.max(0, Math.round((timestamp.getTime() - new Date(lastKnownGood.fetchedAt).getTime()) / 1000))
+        : lastKnownGood?.stalenessSec ?? null)
     if (
       lastKnownGood &&
       (ageSec ?? ProviderRouter.LAST_KNOWN_GOOD_MAX_AGE_SEC + 1) <=
@@ -792,7 +796,6 @@ export class ProviderRouter {
         ...record.signal.provenance,
         sourceUsed: `LKG_${record.signal.provenance.sourceUsed}`,
         fetchedAt: new Date().toISOString(),
-        referenceTime: timestamp.toISOString(),
         fallbackUsed: true,
         validationNotes: [
           record.signal.provenance.validationNotes,
@@ -909,23 +912,24 @@ export class ProviderRouter {
           carbonIntensity: cachedDisagreement.values[0] || 400,
           source: cachedDisagreement.providers[0] as any,
           isForecast: false,
-          confidence: 0.8,
-          signalMode: cachedDisagreement.providers[0]?.includes('watttime') ? 'marginal' : 'average',
-          accountingMethod: cachedDisagreement.providers[0]?.includes('watttime') ? 'marginal' : 'average',
+          confidence: 0.35,
+          signalMode: 'fallback',
+          accountingMethod: 'average',
           provenance: {
             sourceUsed: `CACHED_${cachedDisagreement.providers[0]}`,
             contributingSources: cachedDisagreement.providers,
             referenceTime: timestamp.toISOString(),
             fetchedAt: new Date().toISOString(),
-            fallbackUsed: false,
+            fallbackUsed: true,
             disagreementFlag: cachedDisagreement.level !== 'none',
             disagreementPct: cachedDisagreement.disagreementPct,
+            validationNotes: 'Reconstructed from cached provider disagreement only',
           },
         },
         fetchedAt: new Date().toISOString(),
         stalenessSec: 0,
         lastLatencyMs: null,
-        degraded: false,
+        degraded: true,
       }
       await GridSignalCache.cacheRoutingSignal(region, timestamp.toISOString(), reconstructed).catch(() => undefined)
       return reconstructed
@@ -948,10 +952,19 @@ export class ProviderRouter {
       signal.source === 'watttime' ? 'US' : signal.source, // Simplified region mapping
       {
         balancingAuthority: signal.source === 'watttime' ? 'WATTTIME' : null,
-        demandRampPct: null, // Would come from grid signals
-        carbonSpikeProbability: null,
-        curtailmentProbability: null,
-        importCarbonLeakageScore: null,
+        demandRampPct: typeof (signal as any).metadata?.demandRampPct === 'number' ? (signal as any).metadata.demandRampPct : null,
+        carbonSpikeProbability:
+          typeof (signal as any).metadata?.carbonSpikeProbability === 'number'
+            ? (signal as any).metadata.carbonSpikeProbability
+            : null,
+        curtailmentProbability:
+          typeof (signal as any).metadata?.curtailmentProbability === 'number'
+            ? (signal as any).metadata.curtailmentProbability
+            : null,
+        importCarbonLeakageScore:
+          typeof (signal as any).metadata?.importCarbonLeakageScore === 'number'
+            ? (signal as any).metadata.importCarbonLeakageScore
+            : null,
         signalQuality: signal.confidence > 0.7 ? 'high' : signal.confidence > 0.4 ? 'medium' : 'low',
         estimatedFlag: signal.provenance.sourceUsed.includes('ESTIMATED'),
         syntheticFlag: signal.provenance.sourceUsed.includes('SYNTHETIC')
