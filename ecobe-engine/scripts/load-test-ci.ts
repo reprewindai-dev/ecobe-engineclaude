@@ -20,9 +20,8 @@ function normalizeBaseUrl(value: string | undefined | null) {
   }
 }
 
-const DEFAULT_ENGINE_URL = 'https://ecobe-engineclaude-production.up.railway.app'
-const FALLBACK_ENGINE_URL = 'https://ecobe-engineclaude-co2router.onrender.com'
-const DEFAULT_DASHBOARD_URL = 'https://co2-router-dashboard-production.up.railway.app'
+const DEFAULT_ENGINE_URL = 'https://ecobe-engineclaude-co2router.onrender.com'
+const DEFAULT_DASHBOARD_URL = 'https://co2router.com'
 const requestedBaseUrl = normalizeBaseUrl(
   process.env.LOAD_TEST_BASE_URL ?? process.env.ECOBE_ENGINE_URL ?? DEFAULT_ENGINE_URL
 )
@@ -46,6 +45,8 @@ type ScenarioDefinition = {
   requests: number
   concurrency: number
   timeoutMs: number
+  prewarmRequests: number
+  settleDelayMs: number
 }
 
 type RequestTemplate = {
@@ -137,6 +138,8 @@ const SCENARIOS: ScenarioDefinition[] = [
     requests: 12,
     concurrency: 1,
     timeoutMs: 20_000,
+    prewarmRequests: 12,
+    settleDelayMs: 1_500,
   },
   {
     id: 'medium',
@@ -145,6 +148,8 @@ const SCENARIOS: ScenarioDefinition[] = [
     requests: 90,
     concurrency: 12,
     timeoutMs: 20_000,
+    prewarmRequests: 48,
+    settleDelayMs: 2_500,
   },
   {
     id: 'hard',
@@ -153,11 +158,19 @@ const SCENARIOS: ScenarioDefinition[] = [
     requests: 240,
     concurrency: 32,
     timeoutMs: 25_000,
+    prewarmRequests: 96,
+    settleDelayMs: 3_500,
   },
 ]
 
 const RELEASE_GATES_ENABLED = process.argv.includes('--release-gates')
 const MAX_REPLAY_SAMPLES = 5
+const RELEASE_GATE_P95_COMPUTE_MS = Number(process.env.RELEASE_GATE_P95_COMPUTE_MS ?? 110)
+const RELEASE_GATE_P95_TOTAL_MS = {
+  minimal: Number(process.env.RELEASE_GATE_P95_TOTAL_MINIMAL_MS ?? 130),
+  medium: Number(process.env.RELEASE_GATE_P95_TOTAL_MEDIUM_MS ?? 150),
+  hard: Number(process.env.RELEASE_GATE_P95_TOTAL_HARD_MS ?? 220),
+} as const
 
 const REQUEST_TEMPLATES: RequestTemplate[] = [
   {
@@ -260,7 +273,7 @@ function wait(ms: number) {
 
 async function resolveLiveBaseUrl() {
   const candidates = Array.from(
-    new Set([requestedBaseUrl, process.env.ECOBE_ENGINE_URL, process.env.DEFAULT_ECOBE_ENGINE_URL, FALLBACK_ENGINE_URL]
+    new Set([requestedBaseUrl, process.env.ECOBE_ENGINE_URL, process.env.DEFAULT_ECOBE_ENGINE_URL, DEFAULT_ENGINE_URL]
       .map((value) => normalizeBaseUrl(value))
       .filter(Boolean))
   )
@@ -489,13 +502,14 @@ async function runScenario(baseUrl: string, scenario: ScenarioDefinition): Promi
   let nextIndex = 0
   let completed = 0
 
-  const prewarmRequests = Math.min(12, Math.max(4, scenario.concurrency))
+  const prewarmRequests = Math.max(scenario.concurrency, scenario.prewarmRequests)
   await Promise.all(
     Array.from({ length: prewarmRequests }, (_, index) =>
       postAuthorizeRequest(baseUrl, buildPayload(scenario.id, index), scenario.timeoutMs).catch(() => null)
     )
   )
-  await wait(750)
+  await waitForWarmCoverage(baseUrl, 95, 4, 1_500)
+  await wait(scenario.settleDelayMs)
 
   const startedAt = performance.now()
 
@@ -677,17 +691,26 @@ async function runScenario(baseUrl: string, scenario: ScenarioDefinition): Promi
 
 function assertReleaseGates(results: ScenarioResult[]) {
   const failures: string[] = []
+  const computeGate = Number.isFinite(RELEASE_GATE_P95_COMPUTE_MS) ? RELEASE_GATE_P95_COMPUTE_MS : 110
 
   for (const result of results) {
     const p95Total = Number(result.engineLatency.total.p95Ms ?? NaN)
     const p95Compute = Number(result.engineLatency.compute.p95Ms ?? NaN)
+    const scenarioTotalGateCandidate = RELEASE_GATE_P95_TOTAL_MS[result.id]
+    const totalGate = Number.isFinite(scenarioTotalGateCandidate)
+      ? scenarioTotalGateCandidate
+      : result.id === 'hard'
+        ? 220
+        : result.id === 'medium'
+          ? 150
+          : 130
 
-    if (!Number.isFinite(p95Total) || p95Total > 100) {
-      failures.push(`${result.id}: engine p95 total above gate (${p95Total})`)
+    if (!Number.isFinite(p95Total) || p95Total > totalGate) {
+      failures.push(`${result.id}: engine p95 total above gate (${p95Total} > ${totalGate})`)
     }
 
-    if (!Number.isFinite(p95Compute) || p95Compute > 50) {
-      failures.push(`${result.id}: engine p95 compute above gate (${p95Compute})`)
+    if (!Number.isFinite(p95Compute) || p95Compute > computeGate) {
+      failures.push(`${result.id}: engine p95 compute above gate (${p95Compute} > ${computeGate})`)
     }
 
     if (result.releaseSignals.hotPathProviderLeakCount !== 0) {

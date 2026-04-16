@@ -355,6 +355,34 @@ enum OrgPlanTier {
   ENTERPRISE
 }
 
+enum OperatorRole {
+  VIEWER
+  OPERATOR
+  APPROVER
+  ADMIN
+}
+
+enum DoctrineProposalStatus {
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+enum DoctrineVersionStatus {
+  ACTIVE
+  SUPERSEDED
+  ROLLED_BACK
+}
+
+enum DoctrineAuditEventType {
+  PROPOSAL_CREATED
+  PROPOSAL_APPROVED
+  PROPOSAL_REJECTED
+  VERSION_ACTIVATED
+  VERSION_ROLLED_BACK
+  ROLE_UPDATED
+}
+
 model Organization {
   id        String   @id @default(cuid())
   name      String
@@ -374,6 +402,114 @@ model Organization {
   commands CarbonCommand[]
   outcomes CarbonCommandOutcome[]
   usageCounters OrgUsageCounter[]
+  operators Operator[]
+  doctrineProposals DoctrineProposal[]
+  doctrineVersions DoctrineVersion[]
+  doctrineAuditEvents DoctrineAuditEvent[]
+}
+
+model Operator {
+  id        String   @id @default(cuid())
+  externalId String
+  orgId     String
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  email     String
+  role      OperatorRole
+  keyHash   String?
+  active    Boolean  @default(true)
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  proposedDoctrineChanges DoctrineProposal[] @relation("DoctrineProposalProposer")
+  approvedDoctrineChanges DoctrineProposal[] @relation("DoctrineProposalApprover")
+  proposedDoctrineVersions DoctrineVersion[] @relation("DoctrineVersionProposer")
+  approvedDoctrineVersions DoctrineVersion[] @relation("DoctrineVersionApprover")
+  doctrineAuditEvents DoctrineAuditEvent[] @relation("DoctrineAuditActor")
+
+  @@unique([orgId, externalId], name: "org_operator_external")
+  @@index([orgId, role, active])
+}
+
+model DoctrineProposal {
+  id                  String                @id @default(cuid())
+  orgId               String
+  organization        Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  status              DoctrineProposalStatus @default(PENDING_APPROVAL)
+  changeSummary       String
+  justification       String
+  settings            Json
+  effectiveAt         DateTime?
+  proposerOperatorId  String
+  proposer            Operator              @relation("DoctrineProposalProposer", fields: [proposerOperatorId], references: [id], onDelete: Restrict)
+  approverOperatorId  String?
+  approver            Operator?             @relation("DoctrineProposalApprover", fields: [approverOperatorId], references: [id], onDelete: SetNull)
+  rejectionReason     String?
+  sourceIp            String?
+  sourceUserAgent     String?
+  metadata            Json                  @default("{}")
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+  activatedVersion    DoctrineVersion?      @relation("DoctrineVersionFromProposal")
+  auditEvents         DoctrineAuditEvent[]
+
+  @@index([orgId, status, createdAt])
+  @@index([orgId, proposerOperatorId, createdAt])
+}
+
+model DoctrineVersion {
+  id                      String                @id @default(cuid())
+  orgId                   String
+  organization            Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  versionNumber           Int
+  status                  DoctrineVersionStatus @default(ACTIVE)
+  changeSummary           String
+  justification           String
+  settings                Json
+  sourceProposalId        String?               @unique
+  sourceProposal          DoctrineProposal?     @relation("DoctrineVersionFromProposal", fields: [sourceProposalId], references: [id], onDelete: SetNull)
+  proposedByOperatorId    String?
+  proposedBy              Operator?             @relation("DoctrineVersionProposer", fields: [proposedByOperatorId], references: [id], onDelete: SetNull)
+  approvedByOperatorId    String?
+  approvedBy              Operator?             @relation("DoctrineVersionApprover", fields: [approvedByOperatorId], references: [id], onDelete: SetNull)
+  activatedAt             DateTime              @default(now())
+  supersededAt            DateTime?
+  rolledBackFromVersionId String?
+  rolledBackFromVersion   DoctrineVersion?      @relation("DoctrineVersionRollback", fields: [rolledBackFromVersionId], references: [id], onDelete: SetNull)
+  rollbackChildren        DoctrineVersion[]     @relation("DoctrineVersionRollback")
+  metadata                Json                  @default("{}")
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
+
+  auditEvents             DoctrineAuditEvent[]
+  ciDecisions             CIDecision[]
+
+  @@unique([orgId, versionNumber], name: "org_doctrine_version_number")
+  @@index([orgId, status, createdAt])
+}
+
+model DoctrineAuditEvent {
+  id              String                 @id @default(cuid())
+  orgId           String
+  organization    Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  actorOperatorId String?
+  actor           Operator?              @relation("DoctrineAuditActor", fields: [actorOperatorId], references: [id], onDelete: SetNull)
+  eventType       DoctrineAuditEventType
+  proposalId      String?
+  proposal        DoctrineProposal?      @relation(fields: [proposalId], references: [id], onDelete: SetNull)
+  versionId       String?
+  version         DoctrineVersion?       @relation(fields: [versionId], references: [id], onDelete: SetNull)
+  requestId       String?
+  ipAddress       String?
+  userAgent       String?
+  beforeJson      Json?
+  afterJson       Json?
+  metadata        Json                   @default("{}")
+  createdAt       DateTime               @default(now())
+
+  @@index([orgId, createdAt])
+  @@index([orgId, eventType, createdAt])
 }
 
 model OrgUsageCounter {
@@ -1315,6 +1451,8 @@ model CIDecision {
   // Deterministic policy outcome
   decisionAction        String?  // run_now | reroute | delay | throttle | deny
   decisionMode          String?  // runtime_authorization | scenario_planning
+  doctrineVersionId     String?
+  doctrineVersionNumber Int?
   reasonCode            String?
   signalConfidence      Float?
   fallbackUsed          Boolean  @default(false)
@@ -1338,8 +1476,11 @@ model CIDecision {
   
   createdAt             DateTime @default(now())
 
+  doctrineVersion       DoctrineVersion? @relation(fields: [doctrineVersionId], references: [id], onDelete: SetNull)
+
   @@index([decisionFrameId])
   @@index([selectedRegion, createdAt])
   @@index([jobType, createdAt])
   @@index([createdAt])
+  @@index([doctrineVersionId])
 }

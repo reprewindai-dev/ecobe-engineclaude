@@ -35,6 +35,7 @@ import waterRoutes from './routes/water'
 import eventsRoutes from './routes/events'
 import adaptersRoutes from './routes/adapters'
 import internalPolicyRoutes from './routes/internal-policy'
+import doctrineRoutes from './routes/doctrine'
 import { recordTelemetryMetric, telemetryMetricNames } from './lib/observability/telemetry'
 import { validateWaterArtifacts } from './lib/water/bundle'
 
@@ -221,10 +222,6 @@ function attachUiRoute(app: express.Express) {
       document.getElementById('decisions').onclick = () => run(() => get('/api/v1/dashboard/decisions'))
       document.getElementById('mapping').onclick = () => run(() => get('/api/v1/dashboard/region-mapping'))
 
-      document.getElementById('dekesHealth').onclick = () => run(() => get('/api/v1/dekes/health'))
-      document.getElementById('dekesPing').onclick = () => run(() => get('/api/v1/dekes/health?ping=true'))
-      document.getElementById('dekesAnalytics').onclick = () => run(() => get('/api/v1/dekes/analytics'))
-
       document.getElementById('seedDecision').onclick = () => run(async () => {
         const now = new Date().toISOString()
         const body = {
@@ -316,6 +313,7 @@ function attachApiRoutes(app: express.Express) {
   app.use('/api/v1/carbon-ledger', carbonLedgerRoutes)
   // CI/CD green routing
   app.use('/api/v1/ci', ciRoutes)
+  app.use('/api/v1/doctrine', doctrineRoutes)
   app.use('/api/v1/internal', internalPolicyRoutes)
   app.use('/api/v1/events', eventsRoutes)
   app.use('/api/v1/adapters', adaptersRoutes)

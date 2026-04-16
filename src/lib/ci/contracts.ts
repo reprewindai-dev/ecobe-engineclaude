@@ -12,6 +12,8 @@ export const CiResponseV2Schema = z.object({
   decision: DecisionAction,
   decisionMode: z.enum(['runtime_authorization', 'scenario_planning']),
   doctrineVersion: z.string().min(1),
+  doctrineVersionId: z.string().min(1),
+  doctrineVersionNumber: z.number().int().positive(),
   operatingMode: z.enum(['NORMAL', 'STRESS', 'CRISIS']),
   reasonCode: z.string().min(1),
   decisionFrameId: z.string().min(1),
