@@ -25,7 +25,7 @@ export async function runDecisionEventDispatchCycle() {
   } catch (error) {
     console.error('Decision event dispatcher cycle failed:', error)
     setWorkerStatus('decisionEventDispatcher', {
-      running: false,
+      running: Boolean(dispatchTask),
       lastRun: startedAt.toISOString(),
       nextRun: null,
     })
