@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { env } from '../config/env'
 import { prisma } from '../lib/db'
 import { redis } from '../lib/redis'
+import { eia930 } from '../lib/grid-signals/eia-client'
 
 const router = Router()
 
@@ -30,7 +31,7 @@ router.get('/', async (_req, res) => {
       providers: {
         watttime: Boolean(env.WATTTIME_API_KEY || (env.WATTTIME_USERNAME && env.WATTTIME_PASSWORD)),
         gridstatus: Boolean(env.GRIDSTATUS_API_KEY),
-        eia930: Boolean(env.EIA_API_KEY),
+        eia930: eia930.isAvailable,
         ember: Boolean(env.EMBER_API_KEY),
         gbCarbon: true,
         dkCarbon: true,
@@ -39,6 +40,9 @@ router.get('/', async (_req, res) => {
         qcCarbon: Boolean(env.QC_CARBON_FUEL_MIX_JSON || env.QC_CARBON_INTENSITY_G_PER_KWH != null),
         bcCarbon: Boolean(env.BC_CARBON_FUEL_MIX_JSON || env.BC_CARBON_INTENSITY_G_PER_KWH != null),
         static: true
+      },
+      providerModes: {
+        eia930: eia930.mode,
       },
       timestamp: new Date().toISOString(),
       dependencies: {

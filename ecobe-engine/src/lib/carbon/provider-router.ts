@@ -773,14 +773,45 @@ export class ProviderRouter {
             return signal
           }
         }
-      }
+        }
 
-      const now = new Date()
-      const start = new Date(now.getTime() - 6 * 60 * 60 * 1000)
-      const subregionData = await eia930.getSubregion(ba, start, now)
-      if (subregionData.length === 0) return null
+        const now = new Date()
+        const start = new Date(now.getTime() - 6 * 60 * 60 * 1000)
+        const eiaFuelMix = await eia930.getFuelMix(ba, start, now)
+        if (eiaFuelMix.length > 0) {
+          const mostRecent = eiaFuelMix[eiaFuelMix.length - 1]
+          const ci = FuelMixParser.estimateCarbonIntensity(mostRecent)
+          if (ci !== null && Number.isFinite(ci)) {
+            const signal: ProviderSignal = {
+              carbonIntensity: ci,
+              isForecast: false,
+              source: 'gridstatus_fuel_mix',
+              timestamp: mostRecent.interval_start_utc,
+              estimatedFlag: false,
+              syntheticFlag: false,
+              confidence: 0.64,
+              metadata: {
+                sourceUsed: 'EIA930_GRIDMONITOR_FUEL_MIX',
+                contributingSources: ['eia930'],
+                balancingAuthority: ba,
+                validationNotes: `EIA Grid Monitor fuel mix: ${ci.toFixed(0)} gCO2/kWh`,
+                respondent: mostRecent.respondent,
+                respondentName: mostRecent.respondent_name,
+              },
+            }
 
-      const subregionSnapshots = SubregionParser.parseSubregionData(subregionData, region, ba)
+            this.gridBackboneSignalCache.set(ba, {
+              signal,
+              expiry: Date.now() + 15 * 60 * 1000,
+            })
+            return signal
+          }
+        }
+
+        const subregionData = await eia930.getSubregion(ba, start, now)
+        if (subregionData.length === 0) return null
+
+        const subregionSnapshots = SubregionParser.parseSubregionData(subregionData, region, ba)
       const mostRecentSnapshot = subregionSnapshots[0]
       if (!mostRecentSnapshot) return null
 
