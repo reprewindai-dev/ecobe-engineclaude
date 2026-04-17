@@ -67,12 +67,16 @@ function attachHealthRoutes(app: express.Express) {
         router: true,
         fingrid: Boolean(env.FINGRID_API_KEY),
         providers: {
-          watttime: Boolean(env.WATTTIME_USERNAME && env.WATTTIME_PASSWORD),
-          gridstatus: Boolean(env.GRIDSTATUS_API_KEY || env.EIA_API_KEY),
+          watttime: Boolean(env.WATTTIME_API_KEY || (env.WATTTIME_USERNAME && env.WATTTIME_PASSWORD)),
+          gridstatus: Boolean(env.GRIDSTATUS_API_KEY),
+          eia930: Boolean(env.EIA_API_KEY),
           ember: Boolean(env.EMBER_API_KEY),
           gbCarbon: true,
           dkCarbon: true,
           fiCarbon: Boolean(env.FINGRID_API_KEY),
+          onCarbon: Boolean(env.ON_CARBON_FUEL_MIX_JSON || env.ON_CARBON_INTENSITY_G_PER_KWH != null),
+          qcCarbon: Boolean(env.QC_CARBON_FUEL_MIX_JSON || env.QC_CARBON_INTENSITY_G_PER_KWH != null),
+          bcCarbon: Boolean(env.BC_CARBON_FUEL_MIX_JSON || env.BC_CARBON_INTENSITY_G_PER_KWH != null),
           static: true
         },
         timestamp: new Date().toISOString(),
