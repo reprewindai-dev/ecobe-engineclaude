@@ -20,7 +20,14 @@ jest.mock('../lib/ember', () => ({
 
 jest.mock('../lib/grid-signals/gridstatus-client', () => ({
   gridStatus: {
-    getFuelMix: jest.fn().mockResolvedValue(null),
+    isAvailable: false,
+    getFuelMix: jest.fn().mockResolvedValue([]),
+  }
+}))
+
+jest.mock('../lib/grid-signals/eia-client', () => ({
+  eia930: {
+    getSubregion: jest.fn().mockResolvedValue([]),
   }
 }))
 
@@ -73,7 +80,11 @@ describe('ProviderRouter', () => {
     router = new ProviderRouter()
     // Prevent ember structural profile from providing a fallback signal between tests
     const { ember } = require('../lib/ember')
+    const { gridStatus } = require('../lib/grid-signals/gridstatus-client')
+    const { eia930 } = require('../lib/grid-signals/eia-client')
     ember.deriveStructuralProfile.mockResolvedValue(null)
+    gridStatus.isAvailable = false
+    eia930.getSubregion.mockResolvedValue([])
   })
 
   describe('getRoutingSignal — tier order (WattTime Tier 1)', () => {
@@ -156,6 +167,61 @@ describe('ProviderRouter', () => {
       const signal = await router.getRoutingSignal('us-east-1', new Date())
 
       expect(signal.source).toBe('fallback')
+    })
+
+    it('should use direct EIA-930 telemetry when WattTime and GridStatus are unavailable', async () => {
+      const { wattTime } = require('../lib/watttime')
+      const { eia930 } = require('../lib/grid-signals/eia-client')
+
+      const pointTime = new Date().toISOString()
+
+      wattTime.getCurrentMOER.mockResolvedValue(null)
+      wattTime.getMOERForecast.mockResolvedValue([])
+      eia930.getSubregion.mockResolvedValue([
+        {
+          period: pointTime,
+          respondent: 'PJM',
+          'respondent-name': 'PJM Interconnection',
+          parent: 'PJM',
+          'parent-name': 'PJM Interconnection',
+          subregion: 'fossil_hub',
+          'subregion-name': 'Fossil Hub',
+          type: 'NG',
+          value: 70,
+          'value-units': 'megawatthours',
+        },
+        {
+          period: pointTime,
+          respondent: 'PJM',
+          'respondent-name': 'PJM Interconnection',
+          parent: 'PJM',
+          'parent-name': 'PJM Interconnection',
+          subregion: 'wind_hub',
+          'subregion-name': 'Wind Hub',
+          type: 'NG',
+          value: 30,
+          'value-units': 'megawatthours',
+        },
+        {
+          period: pointTime,
+          respondent: 'PJM',
+          'respondent-name': 'PJM Interconnection',
+          parent: 'PJM',
+          'parent-name': 'PJM Interconnection',
+          subregion: 'demand_total',
+          'subregion-name': 'Demand Total',
+          type: 'D',
+          value: 100,
+          'value-units': 'megawatthours',
+        },
+      ])
+
+      const signal = await router.getRoutingSignal('us-east-1', new Date(pointTime))
+
+      expect(signal.source).toBe('gridstatus_fuel_mix')
+      expect(signal.provenance.sourceUsed).toBe('EIA930_DIRECT_SUBREGION_HEURISTIC')
+      expect(signal.provenance.fallbackUsed).toBe(false)
+      expect(signal.carbonIntensity).toBeGreaterThan(0)
     })
   })
 

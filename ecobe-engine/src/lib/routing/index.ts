@@ -40,4 +40,5 @@ export {
   getLatestSnapshots,
   getProviderFreshness,
   cleanupOldSnapshots,
+  canonicalizeProviderIdentity,
 } from './provider-snapshots'

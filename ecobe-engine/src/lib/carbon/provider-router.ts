@@ -13,6 +13,9 @@ import { GridSignalAudit } from '../grid-signals/grid-signal-audit'
 import { getRegionMapping } from '../grid-signals/region-mapping'
 import { FuelMixParser } from '../grid-signals/fuel-mix-parser'
 import { gridStatus } from '../grid-signals/gridstatus-client'
+import { eia930 } from '../grid-signals/eia-client'
+import { SubregionParser } from '../grid-signals/subregion-parser'
+import { GridSignalSnapshot } from '../grid-signals/types'
 import { EmberStructuralProfile, type EmberData, type RegionStructuralProfile } from '../ember/structural-profile'
 
 
@@ -351,43 +354,45 @@ export class ProviderRouter {
       }
     }
 
-    // ── TIER 2: EIA-930 fuel mix — US backbone / predictive telemetry ──
-    // Used when WattTime is unavailable. Provides average intensity from
-    // real fuel mix data using IPCC emission factors.
-    const fuelMixCI = await this.getGridStatusFuelMixCI(region)
-    if (fuelMixCI !== null) {
-      const primarySignal: ProviderSignal = {
-        carbonIntensity: fuelMixCI,
-        isForecast: false,
-        source: 'gridstatus_fuel_mix',
-        timestamp: new Date().toISOString(),
-        estimatedFlag: false,
-        syntheticFlag: false,
-        confidence: 0.7,
-      }
-
-      const validation = await this.validateWithEmber(primarySignal, region, timestamp, [primarySignal])
+    // TIER 2: EIA-930 / GridStatus backbone - US predictive telemetry
+    // When WattTime is unavailable, prefer curated GridStatus fuel mix and fall back to direct
+    // EIA subregion telemetry so the engine still calls the source stack directly.
+    const gridBackboneSignal = await this.getGridBackboneSignal(region)
+    if (gridBackboneSignal) {
+      const validation = await this.validateWithEmber(gridBackboneSignal, region, timestamp, [gridBackboneSignal])
+      const sourceUsed =
+        typeof gridBackboneSignal.metadata?.sourceUsed === 'string'
+          ? gridBackboneSignal.metadata.sourceUsed
+          : 'EIA930_DIRECT_SUBREGION_HEURISTIC'
+      const contributingSources = Array.isArray(gridBackboneSignal.metadata?.contributingSources)
+        ? (gridBackboneSignal.metadata.contributingSources as string[])
+        : ['eia930']
+      const baseValidationNote =
+        typeof gridBackboneSignal.metadata?.validationNotes === 'string'
+          ? gridBackboneSignal.metadata.validationNotes
+          : `Grid backbone signal: ${gridBackboneSignal.carbonIntensity.toFixed(0)} gCO2/kWh (WattTime unavailable)`
 
       return {
-        carbonIntensity: fuelMixCI,
+        carbonIntensity: gridBackboneSignal.carbonIntensity,
         source: 'gridstatus_fuel_mix',
         isForecast: false,
         confidence: validation.adjustedConfidence,
         signalMode: 'average',
         accountingMethod: 'average',
         provenance: {
-          sourceUsed: 'EIA930_FUEL_MIX_IPCC',
-          contributingSources: ['eia930_fuel_mix'],
+          sourceUsed,
+          contributingSources,
           referenceTime,
           fetchedAt,
           fallbackUsed: false,
           disagreementFlag: validation.disagreement.level !== 'none',
           disagreementPct: validation.disagreement.disagreementPct,
-          validationNotes: `EIA-930 fuel mix: ${fuelMixCI.toFixed(0)} gCO2/kWh (WattTime unavailable)` + (validation.validationNotes ? `; ${validation.validationNotes}` : '')
+          validationNotes:
+            baseValidationNote +
+            (validation.validationNotes ? `; ${validation.validationNotes}` : ''),
         }
       }
     }
-
     // ── TIER 3: Ember baseline (global, free — structural context only) ──
     const emberProfile = await this.getStructuralProfile(region)
     if (emberProfile?.structuralCarbonBaseline) {
@@ -441,6 +446,7 @@ export class ProviderRouter {
     'us-east-2': 'PJM_ROANOKE',    // Ohio → PJM sub-region
     'us-west-1': 'CAISO_NORTH',    // N. California → CAISO
     'us-west-2': 'BPA',            // Oregon → Bonneville Power
+    'us-central-1': 'MISO_MI', // Canonical AWS spelling
     'us-central1': 'MISO_MI',      // Iowa → MISO sub-region
     'us-east4': 'PJM_DC',          // GCP N. Virginia
     'us-west1': 'BPA',             // GCP Oregon
@@ -709,6 +715,7 @@ export class ProviderRouter {
   private static GRIDSTATUS_BA_MAP: Record<string, string> = {
     'us-east-1': 'PJM', 'us-east-2': 'PJM',
     'us-west-1': 'CISO', 'us-west-2': 'BPAT',
+    'us-central-1': 'MISO',
     'us-central1': 'MISO',
     'us-east4': 'PJM', 'us-west1': 'BPAT',
     'eastus': 'PJM', 'eastus2': 'PJM',
@@ -716,44 +723,131 @@ export class ProviderRouter {
     'southcentralus': 'ERCO',
   }
 
-  // Cache fuel-mix CI for 15 minutes (matches ingestion cadence)
-  private fuelMixCICache = new Map<string, { ci: number; expiry: number }>()
+  // Cache grid backbone signals for 15 minutes (matches ingestion cadence)
+  private gridBackboneSignalCache = new Map<string, { signal: ProviderSignal; expiry: number }>()
 
   /**
    * Get carbon intensity derived from real GridStatus EIA-930 fuel mix data
    * Returns gCO2/kWh computed from actual hourly generation by fuel type
    */
-  private async getGridStatusFuelMixCI(region: string): Promise<number | null> {
+  private async getGridBackboneSignal(region: string): Promise<ProviderSignal | null> {
     const ba = ProviderRouter.GRIDSTATUS_BA_MAP[region]
     if (!ba) return null
 
     // Check cache
-    const cached = this.fuelMixCICache.get(ba)
-    if (cached && cached.expiry > Date.now()) return cached.ci
+    const cached = this.gridBackboneSignalCache.get(ba)
+    if (cached && cached.expiry > Date.now()) return cached.signal
 
     try {
-      if (!gridStatus.isAvailable) return null
+      if (gridStatus.isAvailable) {
+        const now = new Date()
+        const start = new Date(now.getTime() - 6 * 60 * 60 * 1000)
+        const fuelMix = await gridStatus.getFuelMix(ba, start, now)
+
+        if (fuelMix.length > 0) {
+          const mostRecent = fuelMix[fuelMix.length - 1]
+          const ci = FuelMixParser.estimateCarbonIntensity(mostRecent)
+          if (ci !== null && Number.isFinite(ci)) {
+            const signal: ProviderSignal = {
+              carbonIntensity: ci,
+              isForecast: false,
+              source: 'gridstatus_fuel_mix',
+              timestamp: mostRecent.interval_start_utc,
+              estimatedFlag: false,
+              syntheticFlag: false,
+              confidence: 0.72,
+              metadata: {
+                sourceUsed: 'GRIDSTATUS_FUEL_MIX_IPCC',
+                contributingSources: ['gridstatus'],
+                balancingAuthority: ba,
+                validationNotes: `GridStatus fuel mix: ${ci.toFixed(0)} gCO2/kWh`,
+                respondent: mostRecent.respondent,
+                respondentName: mostRecent.respondent_name,
+              },
+            }
+
+            this.gridBackboneSignalCache.set(ba, {
+              signal,
+              expiry: Date.now() + 15 * 60 * 1000,
+            })
+            return signal
+          }
+        }
+      }
 
       const now = new Date()
-      const start = new Date(now.getTime() - 6 * 60 * 60 * 1000) // Last 6 hours
-      const fuelMix = await gridStatus.getFuelMix(ba, start, now)
+      const start = new Date(now.getTime() - 6 * 60 * 60 * 1000)
+      const subregionData = await eia930.getSubregion(ba, start, now)
+      if (subregionData.length === 0) return null
 
-      if (fuelMix.length === 0) return null
+      const subregionSnapshots = SubregionParser.parseSubregionData(subregionData, region, ba)
+      const mostRecentSnapshot = subregionSnapshots[0]
+      if (!mostRecentSnapshot) return null
 
-      // Use most recent data point — FuelMixParser computes weighted avg from IPCC factors
-      const mostRecent = fuelMix[fuelMix.length - 1]
-      const ci = FuelMixParser.estimateCarbonIntensity(mostRecent)
+      const ci = this.estimateDirectEiaSnapshotCarbonIntensity(mostRecentSnapshot)
       if (ci === null || !Number.isFinite(ci)) return null
 
-      // Cache for 15 minutes
-      this.fuelMixCICache.set(ba, { ci, expiry: Date.now() + 15 * 60 * 1000 })
-      return ci
+      const signal: ProviderSignal = {
+        carbonIntensity: ci,
+        isForecast: false,
+        source: 'gridstatus_fuel_mix',
+        timestamp: mostRecentSnapshot.timestamp,
+        estimatedFlag: true,
+        syntheticFlag: false,
+        confidence: 0.58,
+        metadata: {
+          sourceUsed: 'EIA930_DIRECT_SUBREGION_HEURISTIC',
+          contributingSources: ['eia930'],
+          balancingAuthority: ba,
+          validationNotes: `Direct EIA-930 subregion heuristic: ${ci.toFixed(0)} gCO2/kWh`,
+          ...mostRecentSnapshot.metadata,
+        },
+      }
+
+      this.gridBackboneSignalCache.set(ba, {
+        signal,
+        expiry: Date.now() + 15 * 60 * 1000,
+      })
+      return signal
     } catch (error) {
-      console.warn(`GridStatus fuel-mix CI failed for ${region}/${ba}:`, error)
+      console.warn(`Grid backbone signal failed for ${region}/${ba}:`, error)
       return null
     }
   }
 
+  private estimateDirectEiaSnapshotCarbonIntensity(snapshot: GridSignalSnapshot): number | null {
+    const breakdown =
+      snapshot.metadata &&
+      typeof snapshot.metadata === 'object' &&
+      !Array.isArray(snapshot.metadata) &&
+      snapshot.metadata.fuelMixBreakdown &&
+      typeof snapshot.metadata.fuelMixBreakdown === 'object' &&
+      !Array.isArray(snapshot.metadata.fuelMixBreakdown)
+        ? (snapshot.metadata.fuelMixBreakdown as Record<string, unknown>)
+        : null
+
+    if (!breakdown) {
+      return null
+    }
+
+    const renewable = typeof breakdown.renewable === 'number' ? breakdown.renewable : 0
+    const fossil = typeof breakdown.fossil === 'number' ? breakdown.fossil : 0
+    const nuclear = typeof breakdown.nuclear === 'number' ? breakdown.nuclear : 0
+    const other = typeof breakdown.other === 'number' ? breakdown.other : 0
+
+    const total = renewable + fossil + nuclear + other
+    if (total <= 0) {
+      return null
+    }
+
+    const weightedEmissions =
+      renewable * 20 +
+      fossil * 650 +
+      nuclear * 12 +
+      other * 300
+
+    return weightedEmissions / total
+  }
   /**
    * Validate blended signal against Ember baseline to adjust confidence.
    * When rawSignals are provided, uses those for disagreement calculation

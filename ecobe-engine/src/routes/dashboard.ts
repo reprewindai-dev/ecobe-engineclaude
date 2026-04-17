@@ -14,7 +14,7 @@ import { prisma } from '../lib/db'
 import { getIntegrationMetricsSummary, computeIntegrationSuccessRate } from '../lib/integration-metrics'
 import { getForecastRefreshSummary, getLastForecastRefreshState } from '../lib/forecast-refresh'
 import { getTelemetrySnapshot } from '../lib/observability/telemetry'
-import { getProviderFreshness, getCapacityOverview } from '../lib/routing'
+import { canonicalizeProviderIdentity, getProviderFreshness, getCapacityOverview } from '../lib/routing'
 import { summarizeWaterProviders } from '../lib/water/bundle'
 
 const router = Router()
@@ -1155,6 +1155,7 @@ router.get('/methodology/providers', async (_req, res) => {
 
     const providers = [
       { name: 'WattTime', source: 'WATTTIME', authorityMode: 'marginal_live', computed: false },
+      { name: 'EIA-930 Direct', source: 'EIA_930', authorityMode: 'predictive_telemetry_direct', computed: false },
       { name: 'GridStatus EIA-930', source: 'GRIDSTATUS', authorityMode: 'predictive_telemetry', computed: false },
       { name: 'Ember', source: 'EMBER', authorityMode: 'structural_baseline', computed: false },
       { name: 'Ontario Carbon', source: 'ON_CARBON', authorityMode: 'computed_provincial', computed: true },
@@ -1577,7 +1578,8 @@ router.get('/provider-trust', async (_req, res) => {
     // Group snapshots by provider
     const providerMap = new Map<string, any[]>()
     for (const snap of recentSnapshots) {
-      const existing = providerMap.get(snap.provider) || []
+      const provider = canonicalizeProviderIdentity(snap.provider)
+      const existing = providerMap.get(provider) || []
       existing.push({
         zone: snap.zone,
         signalType: snap.signalType,
@@ -1587,7 +1589,7 @@ router.get('/provider-trust', async (_req, res) => {
           observedAt: snap.observedAt?.toISOString() ?? null,
           metadata: snap.metadata ?? null,
         })
-      providerMap.set(snap.provider, existing)
+      providerMap.set(provider, existing)
     }
 
     return res.json({
