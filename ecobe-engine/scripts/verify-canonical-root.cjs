@@ -3,10 +3,13 @@ const path = require('path')
 
 const cwd = path.resolve(process.cwd())
 const normalized = cwd.replace(/\\/g, '/').toLowerCase()
+const isProduction = process.env.NODE_ENV === 'production'
 
 const nestedDuplicatePath = '/ecobe-engine/ecobe-engine'
 if (normalized.includes(nestedDuplicatePath)) {
-  const strict = process.env.ECOBE_CANONICAL_STRICT === 'true'
+  const strict =
+    process.env.ECOBE_CANONICAL_STRICT === 'true' ||
+    (process.env.ECOBE_CANONICAL_STRICT == null && isProduction)
   const message = `Canonical runtime warning: nested duplicate path detected (${cwd}).`
   if (strict) {
     console.error(message)

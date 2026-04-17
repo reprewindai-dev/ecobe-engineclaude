@@ -3,6 +3,7 @@ import { env } from '../config/env'
 import { prisma } from '../lib/db'
 import { redis } from '../lib/redis'
 import { eia930 } from '../lib/grid-signals/eia-client'
+import { runtimeBuildInfo } from '../lib/runtime/build-info'
 
 const router = Router()
 
@@ -44,6 +45,7 @@ router.get('/', async (_req, res) => {
       providerModes: {
         eia930: eia930.mode,
       },
+      build: runtimeBuildInfo,
       timestamp: new Date().toISOString(),
       dependencies: {
         database: true,
