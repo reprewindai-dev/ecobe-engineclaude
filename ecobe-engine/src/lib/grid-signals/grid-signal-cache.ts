@@ -20,6 +20,9 @@ export interface CachedRoutingSignalRecord {
       | 'gb_carbon_intensity'
       | 'dk_carbon'
       | 'fi_carbon'
+      | 'on_carbon'
+      | 'qc_carbon'
+      | 'bc_carbon'
       | 'gridstatus_fuel_mix'
       | 'fallback'
     isForecast: boolean

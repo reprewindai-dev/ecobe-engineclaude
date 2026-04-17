@@ -4,6 +4,7 @@ import { providerRouter } from './carbon/provider-router'
 import { GridSignalCache } from './grid-signals/grid-signal-cache'
 import { recordTelemetryMetric, telemetryMetricNames } from './observability/telemetry'
 import { redis } from './redis'
+import { storeProviderSnapshot } from './routing/provider-snapshots'
 
 const DEFAULT_SUPPORTED_REGIONS = [
   'us-east-1',
@@ -26,6 +27,66 @@ const SUPPORTED_REGIONS =
 
 const recentRegions = new Map<string, number>()
 let warmLoopTimer: NodeJS.Timeout | null = null
+let warmCycleRunning = false
+type WarmCycleResult = 'ran' | 'skipped'
+
+function resolveCanonicalProvider(record: Awaited<ReturnType<typeof providerRouter.getRoutingSignalRecord>>): string | null {
+  const sourceUsed = record.signal.provenance.sourceUsed.toUpperCase()
+
+  if (sourceUsed.includes('WATTTIME')) return 'WATTTIME_MOER'
+  if (sourceUsed.includes('EIA930')) return 'EIA_930'
+  if (sourceUsed.includes('GRIDSTATUS')) return 'GRIDSTATUS'
+  if (sourceUsed.includes('EMBER')) return 'EMBER_STRUCTURAL_BASELINE'
+  if (record.signal.source === 'gb_carbon_intensity') return 'GB_CARBON'
+  if (record.signal.source === 'dk_carbon') return 'DK_CARBON'
+  if (record.signal.source === 'fi_carbon') return 'FI_CARBON'
+  if (record.signal.source === 'on_carbon') return 'ON_CARBON'
+  if (record.signal.source === 'qc_carbon') return 'QC_CARBON'
+  if (record.signal.source === 'bc_carbon') return 'BC_CARBON'
+
+  return null
+}
+
+async function persistWarmLoopProviderSnapshot(
+  region: string,
+  record: Awaited<ReturnType<typeof providerRouter.getRoutingSignalRecord>>
+) {
+  if (record.cacheSource !== 'live' || record.signal.provenance.fallbackUsed) {
+    return
+  }
+
+  const provider = resolveCanonicalProvider(record)
+  if (!provider) {
+    return
+  }
+
+  const observedAt = new Date(record.signal.provenance.referenceTime || record.signal.provenance.fetchedAt)
+  if (Number.isNaN(observedAt.getTime())) {
+    return
+  }
+
+  const freshnessSec =
+    record.stalenessSec ?? Math.max(0, Math.floor((Date.now() - observedAt.getTime()) / 1000))
+
+  await storeProviderSnapshot({
+    provider,
+    zone: region,
+    signalType: record.signal.signalMode === 'marginal' ? 'moer' : 'intensity',
+    signalValue: record.signal.carbonIntensity,
+    forecastForTs: record.signal.isForecast ? observedAt : undefined,
+    observedAt,
+    freshnessSec,
+    confidence: record.signal.confidence,
+    metadata: {
+      sourceUsed: record.signal.provenance.sourceUsed,
+      contributingSources: record.signal.provenance.contributingSources,
+      cacheSource: record.cacheSource,
+      signalMode: record.signal.signalMode,
+      accountingMethod: record.signal.accountingMethod,
+      validationNotes: record.signal.provenance.validationNotes ?? null,
+    },
+  })
+}
 
 function getWarmRegions() {
   const now = Date.now()
@@ -51,7 +112,13 @@ export function trackRecentRoutingRegions(regions: string[]) {
   }
 }
 
-export async function warmCacheOnStartup(): Promise<void> {
+export async function warmCacheOnStartup(): Promise<WarmCycleResult> {
+  if (warmCycleRunning) {
+    console.info('Skipping routing cache warming because another warm cycle is already in flight')
+    return 'skipped'
+  }
+
+  warmCycleRunning = true
   const startedAt = Date.now()
   const nextRunAt = new Date(startedAt + Math.max(5_000, env.ROUTING_SIGNAL_WARM_LOOP_INTERVAL_MS))
 
@@ -75,6 +142,7 @@ export async function warmCacheOnStartup(): Promise<void> {
         await Promise.all([
           providerRouter.cacheRoutingSignal(region, record, currentBucket),
           providerRouter.cacheRoutingSignal(region, record, nextBucket),
+          persistWarmLoopProviderSnapshot(region, record),
         ])
 
         return {
@@ -109,6 +177,11 @@ export async function warmCacheOnStartup(): Promise<void> {
     )
 
     console.log(`Routing cache warming complete: ${succeeded}/${regions.length} regions warmed`)
+    setWorkerStatus('routingSignalWarmLoop', {
+      running: true,
+      lastRun: new Date().toISOString(),
+      nextRun: nextRunAt.toISOString(),
+    })
 
     for (const result of results) {
       if (result.status === 'fulfilled') {
@@ -122,12 +195,15 @@ export async function warmCacheOnStartup(): Promise<void> {
         console.warn(`  warm failure: ${String(result.reason)}`)
       }
     }
+    return 'ran'
   } catch (error) {
     console.error('Fatal error during routing cache warming:', error)
     recordTelemetryMetric(telemetryMetricNames.routingWarmLoopFailureCount, 'counter', 1, {
       scope: 'warm_loop',
     })
+    return 'ran'
   } finally {
+    warmCycleRunning = false
     setWorkerStatus('routingSignalWarmLoop', {
       running: Boolean(warmLoopTimer),
       nextRun: nextRunAt.toISOString(),
@@ -197,16 +273,11 @@ export async function getCacheHealthStatus(): Promise<{
     const cacheStats = await GridSignalCache.getCacheStats()
     const currentBucket = new Date()
     currentBucket.setSeconds(0, 0)
-    const nextBucket = new Date(currentBucket.getTime() + 60_000)
-
     const [warmCoverage, lkgCoverage] = await Promise.all([
       Promise.all(
         SUPPORTED_REGIONS.map(async (region) => {
-          const [current, next] = await Promise.all([
-            GridSignalCache.getCachedRoutingSignal(region, currentBucket.toISOString()),
-            GridSignalCache.getCachedRoutingSignal(region, nextBucket.toISOString()),
-          ])
-          return Boolean(current && next)
+          const current = await GridSignalCache.getCachedRoutingSignal(region, currentBucket.toISOString())
+          return Boolean(current)
         })
       ),
       Promise.all(

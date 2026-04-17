@@ -7,19 +7,26 @@ interface WattTimeAuthResponse {
   token: string
 }
 
-interface MOERData {
-  ba: string
-  moer: number
-  percent: number
-  point_time: string
-  freq: string
-}
-
-interface MOERForecastData {
-  ba: string
+interface WattTimeV3Point {
   point_time: string
   value: number
-  version: string
+}
+
+interface WattTimeV3Metadata {
+  region?: string
+  signal_type?: string
+  units?: string
+  data_point_period_seconds?: number
+  generated_at?: string
+  generated_at_period_seconds?: number
+  model?: {
+    date?: string
+  } | null
+}
+
+interface WattTimeV3Response {
+  data?: WattTimeV3Point[]
+  meta?: WattTimeV3Metadata
 }
 
 export interface WattTimeMOER {
@@ -56,6 +63,68 @@ export class WattTimeClient {
     this.baseUrl = env.WATTTIME_BASE_URL || 'https://api.watttime.org'
     this.username = env.WATTTIME_USERNAME
     this.password = env.WATTTIME_PASSWORD
+  }
+
+  private parseNumericValue(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value
+    }
+
+    if (typeof value === 'string' && value.trim().length > 0) {
+      const parsed = Number.parseFloat(value)
+      return Number.isFinite(parsed) ? parsed : null
+    }
+
+    return null
+  }
+
+  private buildFrequency(seconds?: number | null): string {
+    if (typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0) {
+      return `${Math.round(seconds)}s`
+    }
+    return '300s'
+  }
+
+  private filterForecastWindow(
+    forecasts: WattTimeForecast[],
+    startTime?: Date,
+    endTime?: Date
+  ): WattTimeForecast[] {
+    if (!startTime && !endTime) {
+      return forecasts
+    }
+
+    const startMs = startTime?.getTime()
+    const endMs = endTime?.getTime() ?? startMs
+
+    const filtered = forecasts.filter((forecast) => {
+      const pointTimeMs = new Date(forecast.timestamp).getTime()
+      if (!Number.isFinite(pointTimeMs)) return false
+      if (typeof startMs === 'number' && pointTimeMs < startMs) return false
+      if (typeof endMs === 'number' && pointTimeMs > endMs) return false
+      return true
+    })
+
+    if (filtered.length > 0) {
+      return filtered
+    }
+
+    const singlePointQuery =
+      startTime && (!endTime || startTime.getTime() === endTime.getTime())
+
+    if (singlePointQuery && forecasts.length > 0) {
+      const targetMs = startTime.getTime()
+      const closest = [...forecasts]
+        .map((forecast) => ({
+          forecast,
+          distance: Math.abs(new Date(forecast.timestamp).getTime() - targetMs),
+        }))
+        .sort((a, b) => a.distance - b.distance)[0]
+
+      return closest ? [closest.forecast] : []
+    }
+
+    return []
   }
 
   private async authenticate(): Promise<string | null> {
@@ -121,8 +190,32 @@ export class WattTimeClient {
 
     const startedAt = Date.now()
     try {
-      const response = await wattTimeResilience.execute('getCurrentMOER', () =>
-        axios.get<{ data: Array<{ point_time: string; value: number }>; meta: { region: string; signal_type: string; units: string; data_point_period_seconds: number } }>(
+      const forecastResponse = await wattTimeResilience.execute('getCurrentMOERForecast', () =>
+        axios.get<WattTimeV3Response>(
+          `${this.baseUrl}/v3/forecast`,
+          {
+            params: {
+              region: balancingAuthority,
+              signal_type: 'co2_moer',
+              horizon_hours: 0,
+            },
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            timeout: 8000,
+          }
+        )
+      )
+
+      const forecastPoint = forecastResponse.data.data?.[0]
+      const moer = this.parseNumericValue(forecastPoint?.value)
+      if (!forecastPoint?.point_time || moer === null) {
+        await this.logFailure('No current WattTime forecast datapoint returned', Date.now() - startedAt)
+        return null
+      }
+
+      const signalIndexResponse = await wattTimeResilience.execute('getCurrentMOERSignalIndex', () =>
+        axios.get<WattTimeV3Response>(
           `${this.baseUrl}/v3/signal-index`,
           {
             params: {
@@ -137,19 +230,15 @@ export class WattTimeClient {
         )
       )
 
-      const dataPoint = response.data.data?.[0]
-      if (!dataPoint) {
-        return null
-      }
+      const signalIndexPoint = signalIndexResponse.data.data?.[0]
+      const signalIndex = this.parseNumericValue(signalIndexPoint?.value)
 
-      // v3 signal-index returns percentile (0-100), not raw lbs/MWh
-      // We normalize: percentile maps to approximate MOER for routing comparisons
       const result: WattTimeMOER = {
-        balancingAuthority: response.data.meta.region,
-        moer: dataPoint.value, // percentile 0-100 (lower = cleaner)
-        moerPercent: dataPoint.value,
-        timestamp: dataPoint.point_time,
-        frequency: `${response.data.meta.data_point_period_seconds}s`,
+        balancingAuthority: forecastResponse.data.meta?.region ?? balancingAuthority,
+        moer,
+        moerPercent: signalIndex ?? moer,
+        timestamp: forecastPoint.point_time,
+        frequency: this.buildFrequency(forecastResponse.data.meta?.data_point_period_seconds),
       }
 
       await this.logSuccess(Date.now() - startedAt)
@@ -173,20 +262,22 @@ export class WattTimeClient {
 
     const startedAt = Date.now()
     try {
-      const params: any = {
+      const now = Date.now()
+      const targetStart = startTime ?? new Date(now)
+      const targetEnd = endTime ?? startTime ?? new Date(now + 24 * 60 * 60 * 1000)
+      const horizonHours = Math.min(
+        72,
+        Math.max(0, Math.ceil((targetEnd.getTime() - now) / (60 * 60 * 1000)) + 1)
+      )
+
+      const params: Record<string, unknown> = {
         region: balancingAuthority,
         signal_type: 'co2_moer',
-      }
-
-      if (startTime) {
-        params.start = startTime.toISOString()
-      }
-      if (endTime) {
-        params.end = endTime.toISOString()
+        horizon_hours: horizonHours,
       }
 
       const response = await wattTimeResilience.execute('getMOERForecast', () =>
-        axios.get<{ data: Array<{ point_time: string; value: number }>; meta: { region: string; signal_type: string; model: { date: string } } }>(
+        axios.get<WattTimeV3Response>(
           `${this.baseUrl}/v3/forecast`,
           {
             params,
@@ -199,15 +290,26 @@ export class WattTimeClient {
       )
 
       const modelVersion = response.data.meta?.model?.date ?? 'unknown'
-      const forecasts = (response.data.data || []).map((item) => ({
-        balancingAuthority: response.data.meta?.region ?? balancingAuthority,
-        timestamp: item.point_time,
-        moer: item.value,
-        version: modelVersion,
-      }))
+      const forecasts = (response.data.data || [])
+        .map((item) => {
+          const moer = this.parseNumericValue(item.value)
+          if (!item.point_time || moer === null) {
+            return null
+          }
+
+          return {
+            balancingAuthority: response.data.meta?.region ?? balancingAuthority,
+            timestamp: item.point_time,
+            moer,
+            version: modelVersion,
+          } satisfies WattTimeForecast
+        })
+        .filter((forecast): forecast is WattTimeForecast => forecast !== null)
+
+      const filteredForecasts = this.filterForecastWindow(forecasts, startTime, endTime)
 
       await this.logSuccess(Date.now() - startedAt)
-      return forecasts
+      return filteredForecasts
     } catch (error: any) {
       console.error(`Failed to fetch MOER forecast for ${balancingAuthority}:`, error.message)
       await this.logFailure(error.message ?? 'Failed to fetch MOER forecast', Date.now() - startedAt)

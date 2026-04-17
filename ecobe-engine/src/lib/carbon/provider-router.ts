@@ -3,6 +3,9 @@ import { ember } from '../ember'
 import { gbCarbonIntensity } from '../gb-carbon-intensity'
 import { denmarkCarbon } from '../denmark-carbon'
 import { finlandCarbon } from '../finland-carbon'
+import { ontarioCarbon } from '../ontario-carbon'
+import { quebecCarbon } from '../quebec-carbon'
+import { bcCarbon } from '../bc-carbon'
 import { env } from '../../config/env'
 import { toRoutingCacheBucket } from '../cache/routing-cache-bucket'
 import { CachedRoutingSignalRecord, GridSignalCache } from '../grid-signals/grid-signal-cache'
@@ -10,6 +13,9 @@ import { GridSignalAudit } from '../grid-signals/grid-signal-audit'
 import { getRegionMapping } from '../grid-signals/region-mapping'
 import { FuelMixParser } from '../grid-signals/fuel-mix-parser'
 import { gridStatus } from '../grid-signals/gridstatus-client'
+import { eia930 } from '../grid-signals/eia-client'
+import { SubregionParser } from '../grid-signals/subregion-parser'
+import { GridSignalSnapshot } from '../grid-signals/types'
 import { EmberStructuralProfile, type EmberData, type RegionStructuralProfile } from '../ember/structural-profile'
 
 
@@ -33,7 +39,18 @@ export interface ProviderDisagreement {
 
 export interface RoutingSignal {
   carbonIntensity: number
-  source: 'watttime' | 'electricity_maps' | 'ember' | 'gb_carbon_intensity' | 'dk_carbon' | 'fi_carbon' | 'gridstatus_fuel_mix' | 'fallback'
+  source:
+    | 'watttime'
+    | 'electricity_maps'
+    | 'ember'
+    | 'gb_carbon_intensity'
+    | 'dk_carbon'
+    | 'fi_carbon'
+    | 'on_carbon'
+    | 'qc_carbon'
+    | 'bc_carbon'
+    | 'gridstatus_fuel_mix'
+    | 'fallback'
   isForecast: boolean
   confidence: number
   signalMode: 'marginal' | 'average' | 'fallback'
@@ -82,6 +99,29 @@ export class ProviderRouter {
   private static readonly LAST_KNOWN_GOOD_MAX_AGE_SEC = Math.max(env.GRID_SIGNAL_CACHE_TTL * 4, 3600)
   private static readonly LAST_KNOWN_GOOD_SAFETY_MARGIN_FACTOR = 0.1
   private static readonly LAST_KNOWN_GOOD_SAFETY_MARGIN_MIN = 25
+  private static readonly REGION_SAFE_FALLBACK_BY_COUNTRY: Record<string, number> = {
+    US: 450,
+    CA: 300,
+    GB: 200,
+    FR: 80,
+    DE: 300,
+    DK: 150,
+    FI: 100,
+    IT: 250,
+    ES: 180,
+    NL: 350,
+    BE: 200,
+    AT: 200,
+    CH: 50,
+    SE: 40,
+    NO: 30,
+    PL: 600,
+    CZ: 400,
+  }
+  private static readonly HEURISTIC_EMISSIONS_RENEWABLE_G_PER_KWH = 20
+  private static readonly HEURISTIC_EMISSIONS_FOSSIL_G_PER_KWH = 650
+  private static readonly HEURISTIC_EMISSIONS_NUCLEAR_G_PER_KWH = 12
+  private static readonly HEURISTIC_EMISSIONS_OTHER_G_PER_KWH = 300
 
   async getRoutingSignal(region: string, timestamp: Date): Promise<RoutingSignal> {
     const record = await this.getRoutingSignalRecord(region, timestamp)
@@ -191,6 +231,78 @@ export class ProviderRouter {
     }
 
     // ── TIER 1b: GB regions → GB Carbon Intensity API (free, no auth, 96h forecast) ──
+    const onSignal = await this.getOntarioSignal(region)
+    if (onSignal) {
+      const validation = await this.validateWithEmber(onSignal, region, timestamp, [onSignal])
+
+      return {
+        carbonIntensity: onSignal.carbonIntensity,
+        source: 'on_carbon',
+        isForecast: onSignal.isForecast,
+        confidence: validation.adjustedConfidence,
+        signalMode: 'average',
+        accountingMethod: 'average',
+        provenance: {
+          sourceUsed: 'ON_CARBON',
+          contributingSources: ['on_carbon'],
+          referenceTime: onSignal.timestamp,
+          fetchedAt,
+          fallbackUsed: false,
+          disagreementFlag: validation.disagreement.level !== 'none',
+          disagreementPct: validation.disagreement.disagreementPct,
+          validationNotes: validation.validationNotes,
+        },
+      }
+    }
+
+    const qcSignal = await this.getQuebecSignal(region)
+    if (qcSignal) {
+      const validation = await this.validateWithEmber(qcSignal, region, timestamp, [qcSignal])
+
+      return {
+        carbonIntensity: qcSignal.carbonIntensity,
+        source: 'qc_carbon',
+        isForecast: qcSignal.isForecast,
+        confidence: validation.adjustedConfidence,
+        signalMode: 'average',
+        accountingMethod: 'average',
+        provenance: {
+          sourceUsed: 'QC_CARBON',
+          contributingSources: ['qc_carbon'],
+          referenceTime: qcSignal.timestamp,
+          fetchedAt,
+          fallbackUsed: false,
+          disagreementFlag: validation.disagreement.level !== 'none',
+          disagreementPct: validation.disagreement.disagreementPct,
+          validationNotes: validation.validationNotes,
+        },
+      }
+    }
+
+    const bcSignal = await this.getBritishColumbiaSignal(region)
+    if (bcSignal) {
+      const validation = await this.validateWithEmber(bcSignal, region, timestamp, [bcSignal])
+
+      return {
+        carbonIntensity: bcSignal.carbonIntensity,
+        source: 'bc_carbon',
+        isForecast: bcSignal.isForecast,
+        confidence: validation.adjustedConfidence,
+        signalMode: 'average',
+        accountingMethod: 'average',
+        provenance: {
+          sourceUsed: 'BC_CARBON',
+          contributingSources: ['bc_carbon'],
+          referenceTime: bcSignal.timestamp,
+          fetchedAt,
+          fallbackUsed: false,
+          disagreementFlag: validation.disagreement.level !== 'none',
+          disagreementPct: validation.disagreement.disagreementPct,
+          validationNotes: validation.validationNotes,
+        },
+      }
+    }
+
     const gbSignal = await this.getGBCarbonIntensitySignal(region)
     if (gbSignal) {
       const validation = await this.validateWithEmber(gbSignal, region, timestamp, [gbSignal])
@@ -265,43 +377,45 @@ export class ProviderRouter {
       }
     }
 
-    // ── TIER 2: EIA-930 fuel mix — US backbone / predictive telemetry ──
-    // Used when WattTime is unavailable. Provides average intensity from
-    // real fuel mix data using IPCC emission factors.
-    const fuelMixCI = await this.getGridStatusFuelMixCI(region)
-    if (fuelMixCI !== null) {
-      const primarySignal: ProviderSignal = {
-        carbonIntensity: fuelMixCI,
-        isForecast: false,
-        source: 'gridstatus_fuel_mix',
-        timestamp: new Date().toISOString(),
-        estimatedFlag: false,
-        syntheticFlag: false,
-        confidence: 0.7,
-      }
-
-      const validation = await this.validateWithEmber(primarySignal, region, timestamp, [primarySignal])
+    // TIER 2: EIA-930 / GridStatus backbone - US predictive telemetry
+    // When WattTime is unavailable, prefer curated GridStatus fuel mix and fall back to direct
+    // EIA subregion telemetry so the engine still calls the source stack directly.
+    const gridBackboneSignal = await this.getGridBackboneSignal(region)
+    if (gridBackboneSignal) {
+      const validation = await this.validateWithEmber(gridBackboneSignal, region, timestamp, [gridBackboneSignal])
+      const sourceUsed =
+        typeof gridBackboneSignal.metadata?.sourceUsed === 'string'
+          ? gridBackboneSignal.metadata.sourceUsed
+          : 'EIA930_DIRECT_SUBREGION_HEURISTIC'
+      const contributingSources = Array.isArray(gridBackboneSignal.metadata?.contributingSources)
+        ? (gridBackboneSignal.metadata.contributingSources as string[])
+        : ['eia930']
+      const baseValidationNote =
+        typeof gridBackboneSignal.metadata?.validationNotes === 'string'
+          ? gridBackboneSignal.metadata.validationNotes
+          : `Grid backbone signal: ${gridBackboneSignal.carbonIntensity.toFixed(0)} gCO2/kWh (WattTime unavailable)`
 
       return {
-        carbonIntensity: fuelMixCI,
+        carbonIntensity: gridBackboneSignal.carbonIntensity,
         source: 'gridstatus_fuel_mix',
         isForecast: false,
         confidence: validation.adjustedConfidence,
         signalMode: 'average',
         accountingMethod: 'average',
         provenance: {
-          sourceUsed: 'EIA930_FUEL_MIX_IPCC',
-          contributingSources: ['eia930_fuel_mix'],
+          sourceUsed,
+          contributingSources,
           referenceTime,
           fetchedAt,
           fallbackUsed: false,
           disagreementFlag: validation.disagreement.level !== 'none',
           disagreementPct: validation.disagreement.disagreementPct,
-          validationNotes: `EIA-930 fuel mix: ${fuelMixCI.toFixed(0)} gCO2/kWh (WattTime unavailable)` + (validation.validationNotes ? `; ${validation.validationNotes}` : '')
+          validationNotes:
+            baseValidationNote +
+            (validation.validationNotes ? `; ${validation.validationNotes}` : ''),
         }
       }
     }
-
     // ── TIER 3: Ember baseline (global, free — structural context only) ──
     const emberProfile = await this.getStructuralProfile(region)
     if (emberProfile?.structuralCarbonBaseline) {
@@ -326,22 +440,23 @@ export class ProviderRouter {
     }
 
     // ── TIER 4: Static fallback (last resort — degraded state) ────────
+    const fallbackCarbonIntensity = this.getRegionSafeFallbackIntensity(region)
     return {
-      carbonIntensity: 450,
+      carbonIntensity: fallbackCarbonIntensity,
       source: 'fallback',
       isForecast: false,
       confidence: 0.05,
       signalMode: 'fallback',
       accountingMethod: 'average',
       provenance: {
-        sourceUsed: 'STATIC_FALLBACK',
+        sourceUsed: 'REGION_SAFE_STATIC_FALLBACK',
         contributingSources: [],
         referenceTime,
         fetchedAt,
         fallbackUsed: true,
         disagreementFlag: false,
         disagreementPct: 0,
-        validationNotes: 'All providers unavailable for this region'
+        validationNotes: `All providers unavailable for this region; using deterministic degraded-safe baseline ${fallbackCarbonIntensity} gCO2/kWh`
       }
     }
   }
@@ -355,6 +470,7 @@ export class ProviderRouter {
     'us-east-2': 'PJM_ROANOKE',    // Ohio → PJM sub-region
     'us-west-1': 'CAISO_NORTH',    // N. California → CAISO
     'us-west-2': 'BPA',            // Oregon → Bonneville Power
+    'us-central-1': 'MISO_MI', // Canonical AWS spelling
     'us-central1': 'MISO_MI',      // Iowa → MISO sub-region
     'us-east4': 'PJM_DC',          // GCP N. Virginia
     'us-west1': 'BPA',             // GCP Oregon
@@ -410,7 +526,85 @@ export class ProviderRouter {
     return null
   }
 
-  // Cloud regions that map to Great Britain grid
+  // Cloud regions that map to the Ontario (IESO) grid
+  private static ON_REGIONS = new Set([
+    'northamerica-northeast2',
+    'canadacentral',
+  ])
+
+  private mapComputedProvincialSignal(
+    data: Awaited<ReturnType<typeof ontarioCarbon.getCurrentIntensity>>
+  ): ProviderSignal | null {
+    if (!data) return null
+
+    return {
+      carbonIntensity: data.carbonIntensity,
+      isForecast: data.isForecast,
+      source: data.provider.toLowerCase(),
+      timestamp: data.timestamp,
+      estimatedFlag:
+        typeof data.metadata?.estimatedFlag === 'boolean'
+          ? (data.metadata.estimatedFlag as boolean)
+          : Boolean(data.metadata?.computed ?? true),
+      syntheticFlag:
+        typeof data.metadata?.syntheticFlag === 'boolean'
+          ? (data.metadata.syntheticFlag as boolean)
+          : false,
+      confidence: data.confidence,
+      metadata: {
+        ...data.metadata,
+        authorityStatus: data.authorityStatus,
+        authorityMode: data.authorityMode,
+        zone: data.zone,
+      },
+    }
+  }
+
+  private async getOntarioSignal(region: string): Promise<ProviderSignal | null> {
+    if (!ProviderRouter.ON_REGIONS.has(region)) return null
+
+    try {
+      return this.mapComputedProvincialSignal(await ontarioCarbon.getCurrentIntensity())
+    } catch (error) {
+      console.warn(`Ontario carbon signal failed for ${region}:`, error)
+    }
+
+    return null
+  }
+
+  private static QC_REGIONS = new Set([
+    'ca-central-1',
+    'northamerica-northeast1',
+    'canadaeast',
+  ])
+
+  private async getQuebecSignal(region: string): Promise<ProviderSignal | null> {
+    if (!ProviderRouter.QC_REGIONS.has(region)) return null
+
+    try {
+      return this.mapComputedProvincialSignal(await quebecCarbon.getCurrentIntensity())
+    } catch (error) {
+      console.warn(`Quebec carbon signal failed for ${region}:`, error)
+    }
+
+    return null
+  }
+
+  private static BC_REGIONS = new Set<string>([
+  ])
+
+  private async getBritishColumbiaSignal(region: string): Promise<ProviderSignal | null> {
+    if (!ProviderRouter.BC_REGIONS.has(region)) return null
+
+    try {
+      return this.mapComputedProvincialSignal(await bcCarbon.getCurrentIntensity())
+    } catch (error) {
+      console.warn(`BC carbon signal failed for ${region}:`, error)
+    }
+
+    return null
+  }
+
   private static GB_REGIONS = new Set([
     'eu-west-2',       // AWS London
     'europe-west2',    // GCP London
@@ -521,6 +715,7 @@ export class ProviderRouter {
   private static GRIDSTATUS_BA_MAP: Record<string, string> = {
     'us-east-1': 'PJM', 'us-east-2': 'PJM',
     'us-west-1': 'CISO', 'us-west-2': 'BPAT',
+    'us-central-1': 'MISO',
     'us-central1': 'MISO',
     'us-east4': 'PJM', 'us-west1': 'BPAT',
     'eastus': 'PJM', 'eastus2': 'PJM',
@@ -528,44 +723,132 @@ export class ProviderRouter {
     'southcentralus': 'ERCO',
   }
 
-  // Cache fuel-mix CI for 15 minutes (matches ingestion cadence)
-  private fuelMixCICache = new Map<string, { ci: number; expiry: number }>()
+  // Cache grid backbone signals for 15 minutes (matches ingestion cadence)
+  private gridBackboneSignalCache = new Map<string, { signal: ProviderSignal; expiry: number }>()
 
   /**
    * Get carbon intensity derived from real GridStatus EIA-930 fuel mix data
    * Returns gCO2/kWh computed from actual hourly generation by fuel type
    */
-  private async getGridStatusFuelMixCI(region: string): Promise<number | null> {
+  private async getGridBackboneSignal(region: string): Promise<ProviderSignal | null> {
     const ba = ProviderRouter.GRIDSTATUS_BA_MAP[region]
     if (!ba) return null
 
     // Check cache
-    const cached = this.fuelMixCICache.get(ba)
-    if (cached && cached.expiry > Date.now()) return cached.ci
+    const cached = this.gridBackboneSignalCache.get(ba)
+    if (cached && cached.expiry > Date.now()) return cached.signal
 
     try {
-      if (!gridStatus.isAvailable) return null
+      if (gridStatus.isAvailable) {
+        const now = new Date()
+        const start = new Date(now.getTime() - 6 * 60 * 60 * 1000)
+        const fuelMix = await gridStatus.getFuelMix(ba, start, now)
+
+        if (fuelMix.length > 0) {
+          const mostRecent = fuelMix[fuelMix.length - 1]
+          const ci = FuelMixParser.estimateCarbonIntensity(mostRecent)
+          if (ci !== null && Number.isFinite(ci)) {
+            const signal: ProviderSignal = {
+              carbonIntensity: ci,
+              isForecast: false,
+              source: 'gridstatus_fuel_mix',
+              timestamp: mostRecent.interval_start_utc,
+              estimatedFlag: false,
+              syntheticFlag: false,
+              confidence: 0.72,
+              metadata: {
+                sourceUsed: 'GRIDSTATUS_FUEL_MIX_IPCC',
+                contributingSources: ['gridstatus'],
+                balancingAuthority: ba,
+                validationNotes: `GridStatus fuel mix: ${ci.toFixed(0)} gCO2/kWh`,
+                respondent: mostRecent.respondent,
+                respondentName: mostRecent.respondent_name,
+              },
+            }
+
+            this.gridBackboneSignalCache.set(ba, {
+              signal,
+              expiry: Date.now() + 15 * 60 * 1000,
+            })
+            return signal
+          }
+        }
+      }
 
       const now = new Date()
-      const start = new Date(now.getTime() - 6 * 60 * 60 * 1000) // Last 6 hours
-      const fuelMix = await gridStatus.getFuelMix(ba, start, now)
+      const start = new Date(now.getTime() - 6 * 60 * 60 * 1000)
+      const subregionData = await eia930.getSubregion(ba, start, now)
+      if (subregionData.length === 0) return null
 
-      if (fuelMix.length === 0) return null
+      const subregionSnapshots = SubregionParser.parseSubregionData(subregionData, region, ba)
+      const mostRecentSnapshot = subregionSnapshots[0]
+      if (!mostRecentSnapshot) return null
 
-      // Use most recent data point — FuelMixParser computes weighted avg from IPCC factors
-      const mostRecent = fuelMix[fuelMix.length - 1]
-      const ci = FuelMixParser.estimateCarbonIntensity(mostRecent)
+      const ci = this.estimateDirectEiaSnapshotCarbonIntensity(mostRecentSnapshot)
       if (ci === null || !Number.isFinite(ci)) return null
 
-      // Cache for 15 minutes
-      this.fuelMixCICache.set(ba, { ci, expiry: Date.now() + 15 * 60 * 1000 })
-      return ci
+      const signal: ProviderSignal = {
+        carbonIntensity: ci,
+        isForecast: false,
+        source: 'gridstatus_fuel_mix',
+        timestamp: mostRecentSnapshot.timestamp,
+        estimatedFlag: true,
+        syntheticFlag: false,
+        confidence: 0.58,
+        metadata: {
+          sourceUsed: 'EIA930_DIRECT_SUBREGION_HEURISTIC',
+          contributingSources: ['eia930'],
+          balancingAuthority: ba,
+          validationNotes: `Direct EIA-930 subregion heuristic: ${ci.toFixed(0)} gCO2/kWh`,
+          ...mostRecentSnapshot.metadata,
+        },
+      }
+
+      this.gridBackboneSignalCache.set(ba, {
+        signal,
+        expiry: Date.now() + 15 * 60 * 1000,
+      })
+      return signal
     } catch (error) {
-      console.warn(`GridStatus fuel-mix CI failed for ${region}/${ba}:`, error)
+      console.warn(`Grid backbone signal failed for ${region}/${ba}:`, error)
       return null
     }
   }
 
+  private estimateDirectEiaSnapshotCarbonIntensity(snapshot: GridSignalSnapshot): number | null {
+    const breakdown =
+      snapshot.metadata &&
+      typeof snapshot.metadata === 'object' &&
+      !Array.isArray(snapshot.metadata) &&
+      snapshot.metadata.fuelMixBreakdown &&
+      typeof snapshot.metadata.fuelMixBreakdown === 'object' &&
+      !Array.isArray(snapshot.metadata.fuelMixBreakdown)
+        ? (snapshot.metadata.fuelMixBreakdown as Record<string, unknown>)
+        : null
+
+    if (!breakdown) {
+      return null
+    }
+
+    const renewable = typeof breakdown.renewable === 'number' ? breakdown.renewable : 0
+    const fossil = typeof breakdown.fossil === 'number' ? breakdown.fossil : 0
+    const nuclear = typeof breakdown.nuclear === 'number' ? breakdown.nuclear : 0
+    const other = typeof breakdown.other === 'number' ? breakdown.other : 0
+
+    const total = renewable + fossil + nuclear + other
+    if (total <= 0) {
+      return null
+    }
+
+    // TODO: Replace these last-resort fallback factors with an explicitly cited source reference.
+    const weightedEmissions =
+      renewable * ProviderRouter.HEURISTIC_EMISSIONS_RENEWABLE_G_PER_KWH +
+      fossil * ProviderRouter.HEURISTIC_EMISSIONS_FOSSIL_G_PER_KWH +
+      nuclear * ProviderRouter.HEURISTIC_EMISSIONS_NUCLEAR_G_PER_KWH +
+      other * ProviderRouter.HEURISTIC_EMISSIONS_OTHER_G_PER_KWH
+
+    return weightedEmissions / total
+  }
   /**
    * Validate blended signal against Ember baseline to adjust confidence.
    * When rawSignals are provided, uses those for disagreement calculation
@@ -710,7 +993,10 @@ export class ProviderRouter {
     'us-central1': 'USA', 'us-east4': 'USA', 'us-west1': 'USA',
     'eastus': 'USA', 'eastus2': 'USA', 'westus2': 'USA', 'centralus': 'USA', 'southcentralus': 'USA',
     'eu-west-1': 'IRL', 'eu-west-2': 'GBR', 'eu-central-1': 'DEU',
+    'ca-central-1': 'CAN', 'northamerica-northeast1': 'CAN', 'northamerica-northeast2': 'CAN',
+    'canadacentral': 'CAN', 'canadaeast': 'CAN', 'canadawest': 'CAN',
     'europe-west1': 'BEL',
+    'norwayeast': 'NOR', 'norwaywest': 'NOR', 'swedencentral': 'SWE', 'dk1-west': 'DNK', 'dk2-east': 'DNK',
     'ap-southeast-1': 'SGP', 'ap-northeast-1': 'JPN', 'ap-south-1': 'IND',
   }
 
@@ -789,6 +1075,16 @@ export class ProviderRouter {
     const referenceTime = new Date(signal.provenance.referenceTime).getTime()
     if (!Number.isFinite(referenceTime)) return null
     return Math.max(0, Math.round((timestamp.getTime() - referenceTime) / 1000))
+  }
+
+  private getRegionSafeFallbackIntensity(region: string): number {
+    const mapping = getRegionMapping(region)
+    const country =
+      mapping?.country?.toUpperCase?.() ??
+      region.split('-')[0]?.toUpperCase?.() ??
+      region.toUpperCase()
+
+    return ProviderRouter.REGION_SAFE_FALLBACK_BY_COUNTRY[country] ?? 400
   }
 
   private withCacheSource(
@@ -887,7 +1183,7 @@ export class ProviderRouter {
                 (1 + ProviderRouter.LAST_KNOWN_GOOD_SAFETY_MARGIN_FACTOR)
             )
           )
-        : 450
+        : this.getRegionSafeFallbackIntensity(region)
 
     return {
       signal: {
@@ -900,7 +1196,7 @@ export class ProviderRouter {
         provenance: {
           sourceUsed: priorRecord
             ? `DEGRADED_SAFE_${priorRecord.signal.provenance.sourceUsed}`
-            : 'DEGRADED_SAFE_STATIC_FALLBACK',
+            : 'DEGRADED_SAFE_REGION_BASELINE',
           contributingSources: priorRecord?.signal.provenance.contributingSources ?? [],
           referenceTime: timestamp.toISOString(),
           fetchedAt: new Date().toISOString(),
@@ -909,7 +1205,7 @@ export class ProviderRouter {
           disagreementPct: priorRecord?.signal.provenance.disagreementPct ?? 0,
           validationNotes: priorRecord
             ? `Hot path used deterministic degraded-safe fallback derived from ${priorRecord.signal.provenance.sourceUsed}`
-            : 'Hot path used deterministic degraded-safe static fallback',
+            : `Hot path used deterministic degraded-safe regional baseline ${baseline} gCO2/kWh`,
         },
       },
       fetchedAt: new Date().toISOString(),

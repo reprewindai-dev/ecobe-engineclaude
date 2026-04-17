@@ -25,17 +25,19 @@ export interface ProviderSignalSnapshot {
  */
 export async function storeProviderSnapshot(snapshot: ProviderSignalSnapshot): Promise<void> {
   try {
+    const provider = canonicalizeProviderIdentity(snapshot.provider)
+
     await prisma.providerSnapshot.upsert({
       where: {
         provider_zone_signalType_observedAt: {
-          provider: snapshot.provider,
+          provider,
           zone: snapshot.zone,
           signalType: snapshot.signalType,
           observedAt: snapshot.observedAt,
         },
       },
       create: {
-        provider: snapshot.provider,
+        provider,
         zone: snapshot.zone,
         signalType: snapshot.signalType,
         signalValue: snapshot.signalValue,
@@ -91,6 +93,9 @@ const PROVIDER_FRESHNESS_THRESHOLDS_SEC: Record<string, number> = {
   GB_CARBON: 1800,
   DK_CARBON: 1800,
   FI_CARBON: 1800,
+  ON_CARBON: 21600,
+  QC_CARBON: 21600,
+  BC_CARBON: 21600,
 }
 
 const INTEGRATION_SOURCE_TO_PROVIDER: Record<string, string> = {
@@ -101,6 +106,9 @@ const INTEGRATION_SOURCE_TO_PROVIDER: Record<string, string> = {
   GB_CARBON: 'GB_CARBON',
   DK_CARBON: 'DK_CARBON',
   FI_CARBON: 'FI_CARBON',
+  ON_CARBON: 'ON_CARBON',
+  QC_CARBON: 'QC_CARBON',
+  BC_CARBON: 'BC_CARBON',
 }
 
 function normalizeProviderToken(provider: string): string {
@@ -109,10 +117,12 @@ function normalizeProviderToken(provider: string): string {
 
 export function canonicalizeProviderIdentity(provider: string): string {
   const normalized = normalizeProviderToken(provider)
+  const stripped = normalized.replace(/^(lkg|cached)_+/, '')
 
-  switch (normalized) {
+  switch (stripped) {
     case 'watttime':
     case 'watttime_moer':
+    case 'watttime_moer_forecast':
       return 'WATTTIME_MOER'
     case 'electricity_maps':
       return 'ELECTRICITY_MAPS'
@@ -122,15 +132,26 @@ export function canonicalizeProviderIdentity(provider: string): string {
       return 'EMBER_STRUCTURAL_BASELINE'
     case 'eia930':
     case 'eia_930':
+    case 'eia930_direct_subregion_heuristic':
       return 'EIA_930'
     case 'gridstatus':
+    case 'gridstatus_fuel_mix_ipcc':
       return 'GRIDSTATUS'
+    case 'gb_carbon_intensity_api':
     case 'gb_carbon':
       return 'GB_CARBON'
+    case 'dk_energi_data_service':
     case 'dk_carbon':
       return 'DK_CARBON'
+    case 'fi_fingrid':
     case 'fi_carbon':
       return 'FI_CARBON'
+    case 'on_carbon':
+      return 'ON_CARBON'
+    case 'qc_carbon':
+      return 'QC_CARBON'
+    case 'bc_carbon':
+      return 'BC_CARBON'
     default:
       return provider.trim().toUpperCase().replace(/[\s-]+/g, '_')
   }

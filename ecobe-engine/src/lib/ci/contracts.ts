@@ -329,6 +329,18 @@ export const CiResponseV2Schema = z.object({
       supplierSet: z.array(z.string()).optional(),
       evidenceRefs: z.array(z.string()).optional(),
       authorityMode: z.enum(['basin', 'facility_overlay', 'fallback']).optional(),
+      clusterId: z.string().nullable().optional(),
+      clusterRole: z
+        .enum(['ALWAYS_ON_PREFERRED', 'TEMPORAL_ONLY', 'AVOID_IF_POSSIBLE', 'DUMP_ELIGIBLE'])
+        .nullable()
+        .optional(),
+      clusterBiasApplied: z.number().optional(),
+      clusterReason: z.string().nullable().optional(),
+      ensoPhase: z
+        .enum(['NEUTRAL', 'EL_NINO_WATCH', 'EL_NINO_MODERATE', 'EL_NINO_STRONG', 'EL_NINO_SUPER'])
+        .optional(),
+      structuralModifier: z.number().optional(),
+      temporalWindowQualified: z.boolean().optional(),
       guardrailCandidateBlocked: z.boolean(),
       guardrailReasons: z.array(z.string()),
       defensiblePenalty: z.number().optional(),
@@ -360,6 +372,18 @@ export const CiResponseV2Schema = z.object({
     adapter_version: z.string().optional(),
     enforcement_result: z.enum(['applied', 'skipped', 'failed']).optional(),
     observed_runtime_target: z.string().nullable().optional(),
+    selected_cluster_id: z.string().nullable().optional(),
+    selected_cluster_role: z
+      .enum(['ALWAYS_ON_PREFERRED', 'TEMPORAL_ONLY', 'AVOID_IF_POSSIBLE', 'DUMP_ELIGIBLE'])
+      .nullable()
+      .optional(),
+    cluster_bias_applied: z.number().optional(),
+    cluster_reason: z.string().nullable().optional(),
+    enso_phase: z
+      .enum(['NEUTRAL', 'EL_NINO_WATCH', 'EL_NINO_MODERATE', 'EL_NINO_STRONG', 'EL_NINO_SUPER'])
+      .optional(),
+    structural_modifier: z.number().optional(),
+    temporal_window_qualified: z.boolean().optional(),
   }),
   telemetryBridge: z.object({
     spanName: z.string().min(1),
