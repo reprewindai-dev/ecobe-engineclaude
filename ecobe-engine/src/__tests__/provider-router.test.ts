@@ -512,5 +512,26 @@ describe('ProviderRouter', () => {
       expect(wattTime.getCurrentMOER).not.toHaveBeenCalled()
       expect(wattTime.getMOERForecast).not.toHaveBeenCalled()
     })
+
+    it('uses region-aware degraded-safe baselines instead of a flat static fallback', async () => {
+      const { GridSignalCache } = require('../lib/grid-signals/grid-signal-cache')
+      const { getRegionMapping } = require('../lib/grid-signals/region-mapping')
+
+      GridSignalCache.getCachedRoutingSignalWithSource.mockResolvedValue(null)
+      GridSignalCache.getLastKnownGoodRoutingSignalWithSource.mockResolvedValue(null)
+      getRegionMapping.mockImplementation((region: string) => {
+        if (region === 'eu-central-1') {
+          return { country: 'DE' }
+        }
+        return null
+      })
+
+      const euRecord = await router.getHotPathRoutingSignalRecord('eu-central-1', new Date())
+      const apRecord = await router.getHotPathRoutingSignalRecord('ap-northeast-1', new Date())
+
+      expect(euRecord.signal.carbonIntensity).toBe(300)
+      expect(euRecord.signal.provenance.sourceUsed).toBe('DEGRADED_SAFE_REGION_BASELINE')
+      expect(apRecord.signal.carbonIntensity).toBe(400)
+    })
   })
 })

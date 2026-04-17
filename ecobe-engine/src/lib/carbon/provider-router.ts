@@ -99,6 +99,24 @@ export class ProviderRouter {
   private static readonly LAST_KNOWN_GOOD_MAX_AGE_SEC = Math.max(env.GRID_SIGNAL_CACHE_TTL * 4, 3600)
   private static readonly LAST_KNOWN_GOOD_SAFETY_MARGIN_FACTOR = 0.1
   private static readonly LAST_KNOWN_GOOD_SAFETY_MARGIN_MIN = 25
+  private static readonly REGION_SAFE_FALLBACK_BY_COUNTRY: Record<string, number> = {
+    US: 450,
+    GB: 200,
+    FR: 80,
+    DE: 300,
+    DK: 150,
+    FI: 100,
+    IT: 250,
+    ES: 180,
+    NL: 350,
+    BE: 200,
+    AT: 200,
+    CH: 50,
+    SE: 40,
+    NO: 30,
+    PL: 600,
+    CZ: 400,
+  }
 
   async getRoutingSignal(region: string, timestamp: Date): Promise<RoutingSignal> {
     const record = await this.getRoutingSignalRecord(region, timestamp)
@@ -417,22 +435,23 @@ export class ProviderRouter {
     }
 
     // ── TIER 4: Static fallback (last resort — degraded state) ────────
+    const fallbackCarbonIntensity = this.getRegionSafeFallbackIntensity(region)
     return {
-      carbonIntensity: 450,
+      carbonIntensity: fallbackCarbonIntensity,
       source: 'fallback',
       isForecast: false,
       confidence: 0.05,
       signalMode: 'fallback',
       accountingMethod: 'average',
       provenance: {
-        sourceUsed: 'STATIC_FALLBACK',
+        sourceUsed: 'REGION_SAFE_STATIC_FALLBACK',
         contributingSources: [],
         referenceTime,
         fetchedAt,
         fallbackUsed: true,
         disagreementFlag: false,
         disagreementPct: 0,
-        validationNotes: 'All providers unavailable for this region'
+        validationNotes: `All providers unavailable for this region; using deterministic degraded-safe baseline ${fallbackCarbonIntensity} gCO2/kWh`
       }
     }
   }
@@ -1076,6 +1095,16 @@ export class ProviderRouter {
     return Math.max(0, Math.round((timestamp.getTime() - referenceTime) / 1000))
   }
 
+  private getRegionSafeFallbackIntensity(region: string): number {
+    const mapping = getRegionMapping(region)
+    const country =
+      mapping?.country?.toUpperCase?.() ??
+      region.split('-')[0]?.toUpperCase?.() ??
+      region.toUpperCase()
+
+    return ProviderRouter.REGION_SAFE_FALLBACK_BY_COUNTRY[country] ?? 400
+  }
+
   private withCacheSource(
     record: CachedRoutingSignalRecord,
     source: Exclude<RoutingCacheSource, 'live' | 'degraded-safe'>
@@ -1172,7 +1201,7 @@ export class ProviderRouter {
                 (1 + ProviderRouter.LAST_KNOWN_GOOD_SAFETY_MARGIN_FACTOR)
             )
           )
-        : 450
+        : this.getRegionSafeFallbackIntensity(region)
 
     return {
       signal: {
@@ -1185,7 +1214,7 @@ export class ProviderRouter {
         provenance: {
           sourceUsed: priorRecord
             ? `DEGRADED_SAFE_${priorRecord.signal.provenance.sourceUsed}`
-            : 'DEGRADED_SAFE_STATIC_FALLBACK',
+            : 'DEGRADED_SAFE_REGION_BASELINE',
           contributingSources: priorRecord?.signal.provenance.contributingSources ?? [],
           referenceTime: timestamp.toISOString(),
           fetchedAt: new Date().toISOString(),
@@ -1194,7 +1223,7 @@ export class ProviderRouter {
           disagreementPct: priorRecord?.signal.provenance.disagreementPct ?? 0,
           validationNotes: priorRecord
             ? `Hot path used deterministic degraded-safe fallback derived from ${priorRecord.signal.provenance.sourceUsed}`
-            : 'Hot path used deterministic degraded-safe static fallback',
+            : `Hot path used deterministic degraded-safe regional baseline ${baseline} gCO2/kWh`,
         },
       },
       fetchedAt: new Date().toISOString(),

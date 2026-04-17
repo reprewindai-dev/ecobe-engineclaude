@@ -265,16 +265,11 @@ export async function getCacheHealthStatus(): Promise<{
     const cacheStats = await GridSignalCache.getCacheStats()
     const currentBucket = new Date()
     currentBucket.setSeconds(0, 0)
-    const nextBucket = new Date(currentBucket.getTime() + 60_000)
-
     const [warmCoverage, lkgCoverage] = await Promise.all([
       Promise.all(
         SUPPORTED_REGIONS.map(async (region) => {
-          const [current, next] = await Promise.all([
-            GridSignalCache.getCachedRoutingSignal(region, currentBucket.toISOString()),
-            GridSignalCache.getCachedRoutingSignal(region, nextBucket.toISOString()),
-          ])
-          return Boolean(current && next)
+          const current = await GridSignalCache.getCachedRoutingSignal(region, currentBucket.toISOString())
+          return Boolean(current)
         })
       ),
       Promise.all(
