@@ -28,6 +28,7 @@ const SUPPORTED_REGIONS =
 const recentRegions = new Map<string, number>()
 let warmLoopTimer: NodeJS.Timeout | null = null
 let warmCycleRunning = false
+type WarmCycleResult = 'ran' | 'skipped'
 
 function resolveCanonicalProvider(record: Awaited<ReturnType<typeof providerRouter.getRoutingSignalRecord>>): string | null {
   const sourceUsed = record.signal.provenance.sourceUsed.toUpperCase()
@@ -111,9 +112,10 @@ export function trackRecentRoutingRegions(regions: string[]) {
   }
 }
 
-export async function warmCacheOnStartup(): Promise<void> {
+export async function warmCacheOnStartup(): Promise<WarmCycleResult> {
   if (warmCycleRunning) {
-    return
+    console.info('Skipping routing cache warming because another warm cycle is already in flight')
+    return 'skipped'
   }
 
   warmCycleRunning = true
@@ -175,6 +177,11 @@ export async function warmCacheOnStartup(): Promise<void> {
     )
 
     console.log(`Routing cache warming complete: ${succeeded}/${regions.length} regions warmed`)
+    setWorkerStatus('routingSignalWarmLoop', {
+      running: true,
+      lastRun: new Date().toISOString(),
+      nextRun: nextRunAt.toISOString(),
+    })
 
     for (const result of results) {
       if (result.status === 'fulfilled') {
@@ -188,16 +195,17 @@ export async function warmCacheOnStartup(): Promise<void> {
         console.warn(`  warm failure: ${String(result.reason)}`)
       }
     }
+    return 'ran'
   } catch (error) {
     console.error('Fatal error during routing cache warming:', error)
     recordTelemetryMetric(telemetryMetricNames.routingWarmLoopFailureCount, 'counter', 1, {
       scope: 'warm_loop',
     })
+    return 'ran'
   } finally {
     warmCycleRunning = false
     setWorkerStatus('routingSignalWarmLoop', {
       running: Boolean(warmLoopTimer),
-      lastRun: new Date().toISOString(),
       nextRun: nextRunAt.toISOString(),
     })
   }

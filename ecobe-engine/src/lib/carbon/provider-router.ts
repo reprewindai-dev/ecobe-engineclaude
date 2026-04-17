@@ -101,6 +101,7 @@ export class ProviderRouter {
   private static readonly LAST_KNOWN_GOOD_SAFETY_MARGIN_MIN = 25
   private static readonly REGION_SAFE_FALLBACK_BY_COUNTRY: Record<string, number> = {
     US: 450,
+    CA: 300,
     GB: 200,
     FR: 80,
     DE: 300,
@@ -117,6 +118,10 @@ export class ProviderRouter {
     PL: 600,
     CZ: 400,
   }
+  private static readonly HEURISTIC_EMISSIONS_RENEWABLE_G_PER_KWH = 20
+  private static readonly HEURISTIC_EMISSIONS_FOSSIL_G_PER_KWH = 650
+  private static readonly HEURISTIC_EMISSIONS_NUCLEAR_G_PER_KWH = 12
+  private static readonly HEURISTIC_EMISSIONS_OTHER_G_PER_KWH = 300
 
   async getRoutingSignal(region: string, timestamp: Date): Promise<RoutingSignal> {
     const record = await this.getRoutingSignalRecord(region, timestamp)
@@ -240,7 +245,7 @@ export class ProviderRouter {
         provenance: {
           sourceUsed: 'ON_CARBON',
           contributingSources: ['on_carbon'],
-          referenceTime,
+          referenceTime: onSignal.timestamp,
           fetchedAt,
           fallbackUsed: false,
           disagreementFlag: validation.disagreement.level !== 'none',
@@ -264,7 +269,7 @@ export class ProviderRouter {
         provenance: {
           sourceUsed: 'QC_CARBON',
           contributingSources: ['qc_carbon'],
-          referenceTime,
+          referenceTime: qcSignal.timestamp,
           fetchedAt,
           fallbackUsed: false,
           disagreementFlag: validation.disagreement.level !== 'none',
@@ -288,7 +293,7 @@ export class ProviderRouter {
         provenance: {
           sourceUsed: 'BC_CARBON',
           contributingSources: ['bc_carbon'],
-          referenceTime,
+          referenceTime: bcSignal.timestamp,
           fetchedAt,
           fallbackUsed: false,
           disagreementFlag: validation.disagreement.level !== 'none',
@@ -521,34 +526,45 @@ export class ProviderRouter {
     return null
   }
 
-  // Cloud regions that map to Great Britain grid
+  // Cloud regions that map to the Ontario (IESO) grid
   private static ON_REGIONS = new Set([
     'northamerica-northeast2',
     'canadacentral',
   ])
 
+  private mapComputedProvincialSignal(
+    data: Awaited<ReturnType<typeof ontarioCarbon.getCurrentIntensity>>
+  ): ProviderSignal | null {
+    if (!data) return null
+
+    return {
+      carbonIntensity: data.carbonIntensity,
+      isForecast: data.isForecast,
+      source: data.provider.toLowerCase(),
+      timestamp: data.timestamp,
+      estimatedFlag:
+        typeof data.metadata?.estimatedFlag === 'boolean'
+          ? (data.metadata.estimatedFlag as boolean)
+          : Boolean(data.metadata?.computed ?? true),
+      syntheticFlag:
+        typeof data.metadata?.syntheticFlag === 'boolean'
+          ? (data.metadata.syntheticFlag as boolean)
+          : false,
+      confidence: data.confidence,
+      metadata: {
+        ...data.metadata,
+        authorityStatus: data.authorityStatus,
+        authorityMode: data.authorityMode,
+        zone: data.zone,
+      },
+    }
+  }
+
   private async getOntarioSignal(region: string): Promise<ProviderSignal | null> {
     if (!ProviderRouter.ON_REGIONS.has(region)) return null
 
     try {
-      const data = await ontarioCarbon.getCurrentIntensity()
-      if (!data) return null
-
-      return {
-        carbonIntensity: data.carbonIntensity,
-        isForecast: data.isForecast,
-        source: 'on_carbon',
-        timestamp: data.timestamp,
-        estimatedFlag: false,
-        syntheticFlag: false,
-        confidence: data.confidence,
-        metadata: {
-          ...data.metadata,
-          authorityStatus: data.authorityStatus,
-          authorityMode: data.authorityMode,
-          zone: data.zone,
-        },
-      }
+      return this.mapComputedProvincialSignal(await ontarioCarbon.getCurrentIntensity())
     } catch (error) {
       console.warn(`Ontario carbon signal failed for ${region}:`, error)
     }
@@ -566,24 +582,7 @@ export class ProviderRouter {
     if (!ProviderRouter.QC_REGIONS.has(region)) return null
 
     try {
-      const data = await quebecCarbon.getCurrentIntensity()
-      if (!data) return null
-
-      return {
-        carbonIntensity: data.carbonIntensity,
-        isForecast: data.isForecast,
-        source: 'qc_carbon',
-        timestamp: data.timestamp,
-        estimatedFlag: false,
-        syntheticFlag: false,
-        confidence: data.confidence,
-        metadata: {
-          ...data.metadata,
-          authorityStatus: data.authorityStatus,
-          authorityMode: data.authorityMode,
-          zone: data.zone,
-        },
-      }
+      return this.mapComputedProvincialSignal(await quebecCarbon.getCurrentIntensity())
     } catch (error) {
       console.warn(`Quebec carbon signal failed for ${region}:`, error)
     }
@@ -591,32 +590,14 @@ export class ProviderRouter {
     return null
   }
 
-  private static BC_REGIONS = new Set([
-    'canadawest',
+  private static BC_REGIONS = new Set<string>([
   ])
 
   private async getBritishColumbiaSignal(region: string): Promise<ProviderSignal | null> {
     if (!ProviderRouter.BC_REGIONS.has(region)) return null
 
     try {
-      const data = await bcCarbon.getCurrentIntensity()
-      if (!data) return null
-
-      return {
-        carbonIntensity: data.carbonIntensity,
-        isForecast: data.isForecast,
-        source: 'bc_carbon',
-        timestamp: data.timestamp,
-        estimatedFlag: false,
-        syntheticFlag: false,
-        confidence: data.confidence,
-        metadata: {
-          ...data.metadata,
-          authorityStatus: data.authorityStatus,
-          authorityMode: data.authorityMode,
-          zone: data.zone,
-        },
-      }
+      return this.mapComputedProvincialSignal(await bcCarbon.getCurrentIntensity())
     } catch (error) {
       console.warn(`BC carbon signal failed for ${region}:`, error)
     }
@@ -859,11 +840,12 @@ export class ProviderRouter {
       return null
     }
 
+    // TODO: Replace these last-resort fallback factors with an explicitly cited source reference.
     const weightedEmissions =
-      renewable * 20 +
-      fossil * 650 +
-      nuclear * 12 +
-      other * 300
+      renewable * ProviderRouter.HEURISTIC_EMISSIONS_RENEWABLE_G_PER_KWH +
+      fossil * ProviderRouter.HEURISTIC_EMISSIONS_FOSSIL_G_PER_KWH +
+      nuclear * ProviderRouter.HEURISTIC_EMISSIONS_NUCLEAR_G_PER_KWH +
+      other * ProviderRouter.HEURISTIC_EMISSIONS_OTHER_G_PER_KWH
 
     return weightedEmissions / total
   }

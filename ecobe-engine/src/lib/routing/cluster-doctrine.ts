@@ -140,7 +140,7 @@ const CLUSTERS: ClusterDefinition[] = [
     residencyTier: 'EU',
     latencyTier: 'EU_NORTH',
     authorityMode: 'live_verified',
-    notes: 'Wind-heavy Denmark cluster used opportunistically.',
+    notes: 'Wind-heavy Denmark cluster used opportunistically. Region identifiers are reserved for planned Denmark cloud coverage.',
     regions: ['dk1-west', 'dk2-east'],
     cleanWindowMaxIntensity: 120,
     structuralBias: -4,

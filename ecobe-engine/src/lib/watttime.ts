@@ -109,7 +109,10 @@ export class WattTimeClient {
       return filtered
     }
 
-    if (startTime && !endTime && forecasts.length > 0) {
+    const singlePointQuery =
+      startTime && (!endTime || startTime.getTime() === endTime.getTime())
+
+    if (singlePointQuery && forecasts.length > 0) {
       const targetMs = startTime.getTime()
       const closest = [...forecasts]
         .map((forecast) => ({
@@ -187,45 +190,31 @@ export class WattTimeClient {
 
     const startedAt = Date.now()
     try {
-      // v3/forecast with horizon_hours=0 is WattTime's current real-time MOER source.
-      // If the account/region lacks forecast access, fall back to the free signal index.
-      try {
-        const response = await wattTimeResilience.execute('getCurrentMOERForecast', () =>
-          axios.get<WattTimeV3Response>(
-            `${this.baseUrl}/v3/forecast`,
-            {
-              params: {
-                region: balancingAuthority,
-                signal_type: 'co2_moer',
-                horizon_hours: 0,
-              },
-              headers: {
-                Authorization: `Bearer ${token}`,
-              },
-              timeout: 8000,
-            }
-          )
-        )
-
-        const dataPoint = response.data.data?.[0]
-        const moer = this.parseNumericValue(dataPoint?.value)
-        if (dataPoint?.point_time && moer !== null) {
-          const result: WattTimeMOER = {
-            balancingAuthority: response.data.meta?.region ?? balancingAuthority,
-            moer,
-            moerPercent: moer,
-            timestamp: dataPoint.point_time,
-            frequency: this.buildFrequency(response.data.meta?.data_point_period_seconds),
+      const forecastResponse = await wattTimeResilience.execute('getCurrentMOERForecast', () =>
+        axios.get<WattTimeV3Response>(
+          `${this.baseUrl}/v3/forecast`,
+          {
+            params: {
+              region: balancingAuthority,
+              signal_type: 'co2_moer',
+              horizon_hours: 0,
+            },
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            timeout: 8000,
           }
+        )
+      )
 
-          await this.logSuccess(Date.now() - startedAt)
-          return result
-        }
-      } catch (error) {
-        // Forecast access is plan-gated for many regions. Fall back to signal-index below.
+      const forecastPoint = forecastResponse.data.data?.[0]
+      const moer = this.parseNumericValue(forecastPoint?.value)
+      if (!forecastPoint?.point_time || moer === null) {
+        await this.logFailure('No current WattTime forecast datapoint returned', Date.now() - startedAt)
+        return null
       }
 
-      const response = await wattTimeResilience.execute('getCurrentMOERSignalIndex', () =>
+      const signalIndexResponse = await wattTimeResilience.execute('getCurrentMOERSignalIndex', () =>
         axios.get<WattTimeV3Response>(
           `${this.baseUrl}/v3/signal-index`,
           {
@@ -241,19 +230,15 @@ export class WattTimeClient {
         )
       )
 
-      const dataPoint = response.data.data?.[0]
-      const signalIndex = this.parseNumericValue(dataPoint?.value)
-      if (!dataPoint?.point_time || signalIndex === null) {
-        await this.logFailure('No current WattTime datapoint returned', Date.now() - startedAt)
-        return null
-      }
+      const signalIndexPoint = signalIndexResponse.data.data?.[0]
+      const signalIndex = this.parseNumericValue(signalIndexPoint?.value)
 
       const result: WattTimeMOER = {
-        balancingAuthority: response.data.meta?.region ?? balancingAuthority,
-        moer: signalIndex,
-        moerPercent: signalIndex,
-        timestamp: dataPoint.point_time,
-        frequency: this.buildFrequency(response.data.meta?.data_point_period_seconds),
+        balancingAuthority: forecastResponse.data.meta?.region ?? balancingAuthority,
+        moer,
+        moerPercent: signalIndex ?? moer,
+        timestamp: forecastPoint.point_time,
+        frequency: this.buildFrequency(forecastResponse.data.meta?.data_point_period_seconds),
       }
 
       await this.logSuccess(Date.now() - startedAt)

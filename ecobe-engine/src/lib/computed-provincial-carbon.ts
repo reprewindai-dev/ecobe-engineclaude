@@ -126,7 +126,9 @@ export class ComputedProvincialCarbonClient {
         this.config.defaultFuelMix,
       )
       const carbonIntensity =
-        this.config.intensityOverride && Number.isFinite(this.config.intensityOverride)
+        this.config.intensityOverride !== undefined &&
+        this.config.intensityOverride !== null &&
+        Number.isFinite(this.config.intensityOverride)
           ? round(this.config.intensityOverride, 2)
           : computeWeightedIntensity(normalizedFuelMix)
       const confidence = this.config.confidenceOverride ?? this.config.defaultConfidence

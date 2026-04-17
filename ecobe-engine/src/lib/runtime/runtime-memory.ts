@@ -65,7 +65,7 @@ export function normalizeWorkerStatusEntry(
     running: entry?.running ?? fallback?.running ?? false,
     lastRun: entry?.lastRun ?? fallback?.lastRun ?? null,
     nextRun: entry?.nextRun ?? fallback?.nextRun ?? null,
-    updatedAt: entry?.updatedAt ?? fallback?.updatedAt ?? nowIso(),
+    updatedAt: entry?.updatedAt ?? fallback?.updatedAt ?? null,
   }
 }
 
@@ -88,7 +88,12 @@ export function mergeWorkerRegistries(
 }
 
 export async function persistWorkerStatus(worker: WorkerName, entry: WorkerStatusEntry) {
-  const payload = JSON.stringify(normalizeWorkerStatusEntry(entry))
+  const payload = JSON.stringify(
+    normalizeWorkerStatusEntry({
+      ...entry,
+      updatedAt: nowIso(),
+    })
+  )
   await redis.hset(WORKER_STATUS_KEY, worker, payload)
 }
 
@@ -153,48 +158,56 @@ export async function resolveRuntimeIncident(
   incidentKey: string,
   details?: Record<string, unknown>
 ) {
-  const incident = await prisma.runtimeIncident.findUnique({
-    where: {
-      incidentKey,
-    },
-  })
-
-  if (!incident) {
-    return null
-  }
-
-  return prisma.runtimeIncident.update({
+  const result = await prisma.runtimeIncident.updateMany({
     where: {
       incidentKey,
     },
     data: {
       status: 'RESOLVED',
-      details: details ?? incident.details ?? {},
+      ...(details !== undefined ? { details } : {}),
       lastRecoveredAt: new Date(),
       recoveryCount: {
         increment: 1,
       },
     },
   })
+
+  if (result.count === 0) {
+    return null
+  }
+
+  return prisma.runtimeIncident.findUnique({
+    where: {
+      incidentKey,
+    },
+  })
 }
 
 export async function getRuntimeIncidentSummary(limit: number = 25) {
-  const incidents = await prisma.runtimeIncident.findMany({
-    orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
-    take: limit,
-  })
+  const [incidents, openCount, totalCount, lowCount, mediumCount, highCount, criticalCount] = await Promise.all([
+    prisma.runtimeIncident.findMany({
+      orderBy: [{ status: 'asc' }, { updatedAt: 'desc' }],
+      take: limit,
+    }),
+    prisma.runtimeIncident.count({ where: { status: 'OPEN' } }),
+    prisma.runtimeIncident.count(),
+    prisma.runtimeIncident.count({ where: { status: 'OPEN', severity: 'low' } }),
+    prisma.runtimeIncident.count({ where: { status: 'OPEN', severity: 'medium' } }),
+    prisma.runtimeIncident.count({ where: { status: 'OPEN', severity: 'high' } }),
+    prisma.runtimeIncident.count({ where: { status: 'OPEN', severity: 'critical' } }),
+  ])
 
   type RuntimeIncidentRow = (typeof incidents)[number]
-  const open = incidents.filter((incident: RuntimeIncidentRow) => incident.status === 'OPEN')
 
   return {
-    openCount: open.length,
-    resolvedCount: incidents.length - open.length,
+    openCount,
+    resolvedCount: Math.max(0, totalCount - openCount),
+    criticalCount,
     openBySeverity: {
-      low: open.filter((incident: RuntimeIncidentRow) => incident.severity === 'low').length,
-      medium: open.filter((incident: RuntimeIncidentRow) => incident.severity === 'medium').length,
-      high: open.filter((incident: RuntimeIncidentRow) => incident.severity === 'high').length,
-      critical: open.filter((incident: RuntimeIncidentRow) => incident.severity === 'critical').length,
+      low: lowCount,
+      medium: mediumCount,
+      high: highCount,
+      critical: criticalCount,
     },
     incidents: incidents.map((incident: RuntimeIncidentRow) => ({
       incidentKey: incident.incidentKey,

@@ -34,7 +34,7 @@ describe('runtime memory worker registry', () => {
     expect(normalized.running).toBe(true)
     expect(normalized.lastRun).toBe('2026-04-17T15:00:00.000Z')
     expect(normalized.nextRun).toBeNull()
-    expect(typeof normalized.updatedAt).toBe('string')
+    expect(normalized.updatedAt).toBeNull()
   })
 
   it('prefers the more recent durable worker heartbeat when merging registries', () => {

@@ -70,12 +70,12 @@ const envSchema = z.object({
   ON_CARBON_FUEL_MIX_JSON: z.string().optional(),
   QC_CARBON_FUEL_MIX_JSON: z.string().optional(),
   BC_CARBON_FUEL_MIX_JSON: z.string().optional(),
-  ON_CARBON_INTENSITY_G_PER_KWH: z.string().optional(),
-  QC_CARBON_INTENSITY_G_PER_KWH: z.string().optional(),
-  BC_CARBON_INTENSITY_G_PER_KWH: z.string().optional(),
-  ON_CARBON_CONFIDENCE: z.string().optional(),
-  QC_CARBON_CONFIDENCE: z.string().optional(),
-  BC_CARBON_CONFIDENCE: z.string().optional(),
+  ON_CARBON_INTENSITY_G_PER_KWH: z.coerce.number().nonnegative().optional(),
+  QC_CARBON_INTENSITY_G_PER_KWH: z.coerce.number().nonnegative().optional(),
+  BC_CARBON_INTENSITY_G_PER_KWH: z.coerce.number().nonnegative().optional(),
+  ON_CARBON_CONFIDENCE: z.coerce.number().min(0).max(1).optional(),
+  QC_CARBON_CONFIDENCE: z.coerce.number().min(0).max(1).optional(),
+  BC_CARBON_CONFIDENCE: z.coerce.number().min(0).max(1).optional(),
 
   // Cluster doctrine
   CARBON_CLUSTER_ENSO_PHASE: z
@@ -292,24 +292,12 @@ export const env = {
   ON_CARBON_FUEL_MIX_JSON: parsed.data.ON_CARBON_FUEL_MIX_JSON,
   QC_CARBON_FUEL_MIX_JSON: parsed.data.QC_CARBON_FUEL_MIX_JSON,
   BC_CARBON_FUEL_MIX_JSON: parsed.data.BC_CARBON_FUEL_MIX_JSON,
-  ON_CARBON_INTENSITY_G_PER_KWH: parsed.data.ON_CARBON_INTENSITY_G_PER_KWH
-    ? parseFloat(parsed.data.ON_CARBON_INTENSITY_G_PER_KWH)
-    : undefined,
-  QC_CARBON_INTENSITY_G_PER_KWH: parsed.data.QC_CARBON_INTENSITY_G_PER_KWH
-    ? parseFloat(parsed.data.QC_CARBON_INTENSITY_G_PER_KWH)
-    : undefined,
-  BC_CARBON_INTENSITY_G_PER_KWH: parsed.data.BC_CARBON_INTENSITY_G_PER_KWH
-    ? parseFloat(parsed.data.BC_CARBON_INTENSITY_G_PER_KWH)
-    : undefined,
-  ON_CARBON_CONFIDENCE: parsed.data.ON_CARBON_CONFIDENCE
-    ? parseFloat(parsed.data.ON_CARBON_CONFIDENCE)
-    : undefined,
-  QC_CARBON_CONFIDENCE: parsed.data.QC_CARBON_CONFIDENCE
-    ? parseFloat(parsed.data.QC_CARBON_CONFIDENCE)
-    : undefined,
-  BC_CARBON_CONFIDENCE: parsed.data.BC_CARBON_CONFIDENCE
-    ? parseFloat(parsed.data.BC_CARBON_CONFIDENCE)
-    : undefined,
+  ON_CARBON_INTENSITY_G_PER_KWH: parsed.data.ON_CARBON_INTENSITY_G_PER_KWH,
+  QC_CARBON_INTENSITY_G_PER_KWH: parsed.data.QC_CARBON_INTENSITY_G_PER_KWH,
+  BC_CARBON_INTENSITY_G_PER_KWH: parsed.data.BC_CARBON_INTENSITY_G_PER_KWH,
+  ON_CARBON_CONFIDENCE: parsed.data.ON_CARBON_CONFIDENCE,
+  QC_CARBON_CONFIDENCE: parsed.data.QC_CARBON_CONFIDENCE,
+  BC_CARBON_CONFIDENCE: parsed.data.BC_CARBON_CONFIDENCE,
   CARBON_CLUSTER_ENSO_PHASE: parsed.data.CARBON_CLUSTER_ENSO_PHASE,
   INTELLIGENCE_ACCURACY_CRON: parsed.data.INTELLIGENCE_ACCURACY_CRON,
   INTELLIGENCE_VECTOR_CLEANUP_CRON: parsed.data.INTELLIGENCE_VECTOR_CLEANUP_CRON,

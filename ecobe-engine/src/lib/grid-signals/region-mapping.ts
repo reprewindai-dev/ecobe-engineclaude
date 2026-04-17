@@ -46,7 +46,7 @@ const REGION_MAP: RegionMapping[] = [
   { cloudRegion: 'southcentralus', balancingAuthority: 'ERCO', eiaRespondent: 'ERCO', country: 'US', hasEia930Coverage: true, notes: 'Texas, ERCOT territory' },
   { cloudRegion: 'canadacentral', balancingAuthority: null, eiaRespondent: null, country: 'CA', hasEia930Coverage: false, notes: 'Azure Canada Central / Ontario doctrine region' },
   { cloudRegion: 'canadaeast', balancingAuthority: null, eiaRespondent: null, country: 'CA', hasEia930Coverage: false, notes: 'Azure Canada East / Quebec doctrine region' },
-  { cloudRegion: 'canadawest', balancingAuthority: null, eiaRespondent: null, country: 'CA', hasEia930Coverage: false, notes: 'Azure Canada West / BC doctrine region' },
+  { cloudRegion: 'canadawest', balancingAuthority: null, eiaRespondent: null, country: 'CA', hasEia930Coverage: false, notes: 'Azure Canada West / Calgary, Alberta region (not BC doctrine)' },
   { cloudRegion: 'norwayeast', balancingAuthority: null, eiaRespondent: null, country: 'NO', hasEia930Coverage: false, notes: 'Azure Norway East / Nordic doctrine region' },
   { cloudRegion: 'norwaywest', balancingAuthority: null, eiaRespondent: null, country: 'NO', hasEia930Coverage: false, notes: 'Azure Norway West / Nordic doctrine region' },
   { cloudRegion: 'swedencentral', balancingAuthority: null, eiaRespondent: null, country: 'SE', hasEia930Coverage: false, notes: 'Azure Sweden Central / Nordic doctrine region' },

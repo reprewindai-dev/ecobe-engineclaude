@@ -133,11 +133,12 @@ router.get('/status', async (req: Request, res: Response) => {
     ])
 
     // Overall health
+    const criticalIncidentCount = runtimeIncidents?.criticalCount ?? runtimeIncidents?.openBySeverity?.critical ?? 0
     const isHealthy =
       dbHealthy &&
       redisHealthy &&
       (cacheHealth?.isHealthy ?? false) &&
-      ((runtimeIncidents?.openCount ?? 0) === 0)
+      criticalIncidentCount === 0
 
     const totalTime = Date.now() - startTime
 

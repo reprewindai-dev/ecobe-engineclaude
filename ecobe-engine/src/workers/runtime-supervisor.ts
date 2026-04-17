@@ -39,18 +39,22 @@ async function reconcileDependencyIncident(
   summary: string,
   details: Record<string, unknown>
 ) {
-  if (healthy) {
-    await resolveRuntimeIncident(incidentKey, details)
-    return
-  }
+  try {
+    if (healthy) {
+      await resolveRuntimeIncident(incidentKey, details)
+      return
+    }
 
-  await recordRuntimeIncident({
-    incidentKey,
-    component,
-    severity: 'critical',
-    summary,
-    details,
-  })
+    await recordRuntimeIncident({
+      incidentKey,
+      component,
+      severity: 'critical',
+      summary,
+      details,
+    })
+  } catch (error) {
+    console.error(`Failed to reconcile dependency incident ${incidentKey}:`, error)
+  }
 }
 
 async function reconcileWorkerIncident(

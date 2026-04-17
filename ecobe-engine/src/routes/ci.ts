@@ -844,34 +844,34 @@ async function evaluateCandidates(
         ).toFixed(6),
       );
 
-      void storeProviderSnapshot({
-        provider: signal.provenance.sourceUsed,
-        zone: region,
-        signalType: signalSemantics.signalMode,
-        signalValue: signal.carbonIntensity,
-        observedAt: new Date(signal.provenance.referenceTime),
-        freshnessSec: freshnessSec,
-        confidence: signal.confidence,
-        metadata: {
-          contributingSources: signal.provenance.contributingSources,
-          fallbackUsed: signal.provenance.fallbackUsed,
-          disagreementPct: signal.provenance.disagreementPct,
-          validationNotes: signal.provenance.validationNotes ?? null,
-          cacheStatus,
-          clusterId: clusterDoctrine.clusterId,
-          clusterRole: clusterDoctrine.clusterRole,
-          clusterBiasApplied: clusterDoctrine.clusterBiasApplied,
-          clusterReason: clusterDoctrine.clusterReason,
-          ensoPhase: clusterDoctrine.ensoPhase,
-          structuralModifier: clusterDoctrine.structuralModifier,
-          temporalWindowQualified: clusterDoctrine.temporalWindowQualified,
-          computed: ['ON_CARBON', 'QC_CARBON', 'BC_CARBON'].includes(signal.provenance.sourceUsed),
-          authorityMode: ['ON_CARBON', 'QC_CARBON', 'BC_CARBON'].includes(signal.provenance.sourceUsed)
-            ? 'computed_provincial'
-            : 'live_provider',
-        },
-      }).catch((error) => {
-        console.warn('Failed to persist provider snapshot', { region, error })
+      scheduleCiAncillaryPersistence(`provider-snapshot:${providerSnapshotRef}`, async () => {
+        await storeProviderSnapshot({
+          provider: signal.provenance.sourceUsed,
+          zone: region,
+          signalType: signalSemantics.signalMode,
+          signalValue: signal.carbonIntensity,
+          observedAt: new Date(signal.provenance.referenceTime),
+          freshnessSec: freshnessSec,
+          confidence: signal.confidence,
+          metadata: {
+            contributingSources: signal.provenance.contributingSources,
+            fallbackUsed: signal.provenance.fallbackUsed,
+            disagreementPct: signal.provenance.disagreementPct,
+            validationNotes: signal.provenance.validationNotes ?? null,
+            cacheStatus,
+            clusterId: clusterDoctrine.clusterId,
+            clusterRole: clusterDoctrine.clusterRole,
+            clusterBiasApplied: clusterDoctrine.clusterBiasApplied,
+            clusterReason: clusterDoctrine.clusterReason,
+            ensoPhase: clusterDoctrine.ensoPhase,
+            structuralModifier: clusterDoctrine.structuralModifier,
+            temporalWindowQualified: clusterDoctrine.temporalWindowQualified,
+            computed: ['ON_CARBON', 'QC_CARBON', 'BC_CARBON'].includes(signal.provenance.sourceUsed),
+            authorityMode: ['ON_CARBON', 'QC_CARBON', 'BC_CARBON'].includes(signal.provenance.sourceUsed)
+              ? 'computed_provincial'
+              : 'live_provider',
+          },
+        })
       })
 
       return {
