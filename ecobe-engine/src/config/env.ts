@@ -231,7 +231,7 @@ export const env = {
   ENGINE_BACKGROUND_WORKERS_ENABLED:
     parsed.data.ENGINE_BACKGROUND_WORKERS_ENABLED !== undefined
       ? parsed.data.ENGINE_BACKGROUND_WORKERS_ENABLED === 'true'
-      : false,
+      : parsed.data.NODE_ENV !== 'test',
   FORECAST_REFRESH_ENABLED:
     parsed.data.FORECAST_REFRESH_ENABLED !== undefined
       ? parsed.data.FORECAST_REFRESH_ENABLED === 'true'

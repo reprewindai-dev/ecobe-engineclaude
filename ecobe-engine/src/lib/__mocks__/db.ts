@@ -70,6 +70,7 @@ export const prisma = {
     createMany: jest.fn().mockResolvedValue({ count: 0 }),
     create: jest.fn().mockResolvedValue({}),
     update: jest.fn().mockResolvedValue({}),
+    updateMany: jest.fn().mockResolvedValue({ count: 0 }),
   },
   forecastRefresh: {
     create: jest.fn().mockResolvedValue({}),

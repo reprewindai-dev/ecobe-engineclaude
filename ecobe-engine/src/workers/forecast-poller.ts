@@ -1,4 +1,4 @@
-import cron from 'node-cron'
+import cron, { type ScheduledTask } from 'node-cron'
 import { prisma } from '../lib/db'
 import { providerRouter } from '../lib/carbon/provider-router'
 import { forecastCarbonIntensity } from '../lib/carbon-forecasting'
@@ -10,6 +10,8 @@ import {
   DEFAULT_FORECAST_LOOKBACK_HOURS,
   FORECAST_REFRESH_STATE_KEY,
 } from '../constants/forecasting'
+
+let forecastTask: ScheduledTask | null = null
 
 async function upsertCarbonSample(region: string, timestamp: Date, intensity: number) {
   await prisma.carbonIntensity.upsert({
@@ -120,8 +122,8 @@ export async function runForecastRefresh() {
   } catch (error) {
     console.error('Fatal error in forecast refresh:', error)
     setWorkerStatus('forecastPoller', {
-      running: false,
-      lastRun: new Date().toISOString(),
+      running: true,
+      lastRun: runStart.toISOString(),
       nextRun: null
     })
   }
@@ -139,7 +141,9 @@ export function startForecastWorker() {
     nextRun: null
   })
 
-  cron.schedule(env.FORECAST_REFRESH_CRON, () => {
+  if (forecastTask) return
+
+  forecastTask = cron.schedule(env.FORECAST_REFRESH_CRON, () => {
     runForecastRefresh().catch((error) => {
       console.error('Forecast refresh cron error:', error)
     })
@@ -150,4 +154,16 @@ export function startForecastWorker() {
   })
 
   console.log(`🌀 Forecast worker scheduled (${env.FORECAST_REFRESH_CRON})`)
+}
+
+export function stopForecastWorker() {
+  if (forecastTask) {
+    forecastTask.stop()
+    forecastTask = null
+  }
+
+  setWorkerStatus('forecastPoller', {
+    running: false,
+    nextRun: null,
+  })
 }

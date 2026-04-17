@@ -8,8 +8,8 @@ import { redis } from './lib/redis'
 import { startRoutingSignalWarmLoop, stopRoutingSignalWarmLoop, warmCacheOnStartup } from './lib/cache-warmer'
 import { startEIAIngestionWorker } from './workers/eia-ingestion'
 import { startForecastVerificationWorker } from './workers/forecast-verification'
-import { startForecastWorker } from './workers/forecast-poller'
-import { scheduleIntelligenceJobs } from './workers/intelligence-scheduler'
+import { startForecastWorker, stopForecastWorker } from './workers/forecast-poller'
+import { scheduleIntelligenceJobs, stopIntelligenceJobs } from './workers/intelligence-scheduler'
 import { startLearningLoopWorker } from './workers/learning-loop'
 import { stopLearningLoopWorker } from './workers/learning-loop'
 import { startRuntimeSupervisor, stopRuntimeSupervisor } from './workers/runtime-supervisor'
@@ -44,6 +44,8 @@ async function gracefulShutdown(signal: string) {
 
     stopRuntimeSupervisor()
     stopLearningLoopWorker()
+    stopForecastWorker()
+    stopIntelligenceJobs()
     stopDecisionEventDispatcherWorker()
     stopRoutingSignalWarmLoop()
 

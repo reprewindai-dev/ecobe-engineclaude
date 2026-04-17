@@ -54,6 +54,7 @@ export interface CleanWindow {
 
 export class WattTimeClient {
   private baseUrl: string
+  private apiKey?: string
   private username?: string
   private password?: string
   private token?: string
@@ -61,6 +62,7 @@ export class WattTimeClient {
 
   constructor() {
     this.baseUrl = env.WATTTIME_BASE_URL || 'https://api.watttime.org'
+    this.apiKey = env.WATTTIME_API_KEY
     this.username = env.WATTTIME_USERNAME
     this.password = env.WATTTIME_PASSWORD
   }
@@ -128,6 +130,10 @@ export class WattTimeClient {
   }
 
   private async authenticate(): Promise<string | null> {
+    if (this.apiKey?.trim()) {
+      return this.apiKey
+    }
+
     if (!this.username || !this.password) {
       await this.logFailure('Missing WattTime credentials')
       return null
@@ -197,7 +203,7 @@ export class WattTimeClient {
             params: {
               region: balancingAuthority,
               signal_type: 'co2_moer',
-              horizon_hours: 0,
+              horizon_hours: 1,
             },
             headers: {
               Authorization: `Bearer ${token}`,
@@ -214,24 +220,29 @@ export class WattTimeClient {
         return null
       }
 
-      const signalIndexResponse = await wattTimeResilience.execute('getCurrentMOERSignalIndex', () =>
-        axios.get<WattTimeV3Response>(
-          `${this.baseUrl}/v3/signal-index`,
-          {
-            params: {
-              region: balancingAuthority,
-              signal_type: 'co2_moer',
-            },
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-            timeout: 8000,
-          }
+      let signalIndex: number | null = null
+      try {
+        const signalIndexResponse = await wattTimeResilience.execute('getCurrentMOERSignalIndex', () =>
+          axios.get<WattTimeV3Response>(
+            `${this.baseUrl}/v3/signal-index`,
+            {
+              params: {
+                region: balancingAuthority,
+                signal_type: 'co2_moer',
+              },
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+              timeout: 8000,
+            }
+          )
         )
-      )
 
-      const signalIndexPoint = signalIndexResponse.data.data?.[0]
-      const signalIndex = this.parseNumericValue(signalIndexPoint?.value)
+        const signalIndexPoint = signalIndexResponse.data.data?.[0]
+        signalIndex = this.parseNumericValue(signalIndexPoint?.value)
+      } catch (error: any) {
+        console.warn(`WattTime signal index unavailable for ${balancingAuthority}:`, error?.message ?? error)
+      }
 
       const result: WattTimeMOER = {
         balancingAuthority: forecastResponse.data.meta?.region ?? balancingAuthority,

@@ -1,8 +1,8 @@
 import { env } from '../../config/env'
 import { prisma } from '../db'
 
-const SELF_VERIFIER_SINK_NAME = 'CO2 Router Decision Event Self Verifier'
-const SELF_VERIFIER_TARGET_PATH = '/api/v1/events/verify'
+export const SELF_VERIFIER_SINK_NAME = 'CO2 Router Decision Event Self Verifier'
+export const SELF_VERIFIER_TARGET_PATH = '/api/v1/events/verify'
 
 type SelfVerifierConfigInput = {
   port: number
