@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express'
 import { getCacheHealthStatus } from '../lib/cache-warmer'
+import { getDecisionEventOutboxOperationalStatus } from '../lib/ci/decision-events'
 import { redis } from '../lib/redis'
 import { prisma } from '../lib/db'
 import { GridSignalCache } from '../lib/grid-signals/grid-signal-cache'
@@ -108,20 +109,15 @@ router.get('/status', async (req: Request, res: Response) => {
       processing: number
       failed: number
       deadLetter: number
+      deadLetterActive: number
+      deadLetterTotal: number
       sent: number
+      activeDeadLetterWindowHours: number
     } = null
 
     if (dbHealthy) {
       try {
-        const [pending, processing, failed, deadLetter, sent] = await Promise.all([
-          prisma.decisionEventOutbox.count({ where: { status: 'PENDING' } }),
-          prisma.decisionEventOutbox.count({ where: { status: 'PROCESSING' } }),
-          prisma.decisionEventOutbox.count({ where: { status: 'FAILED' } }),
-          prisma.decisionEventOutbox.count({ where: { status: 'DEAD_LETTER' } }),
-          prisma.decisionEventOutbox.count({ where: { status: 'SENT' } }),
-        ])
-
-        decisionEventOutbox = { pending, processing, failed, deadLetter, sent }
+        decisionEventOutbox = await getDecisionEventOutboxOperationalStatus()
       } catch (error) {
         console.warn('Failed to gather decision outbox health:', error)
       }

@@ -1,7 +1,12 @@
 import { Router } from 'express'
 import crypto from 'crypto'
 import { z } from 'zod'
-import { processDecisionEventOutboxBatch, createTestEventForSink } from '../lib/ci/decision-events'
+import {
+  processDecisionEventOutboxBatch,
+  createTestEventForSink,
+  getDecisionEventOutboxOperationalStatus,
+  requeueRecoverableSystemDeadLetters,
+} from '../lib/ci/decision-events'
 import { env } from '../config/env'
 import { prisma } from '../lib/db'
 import { recordTelemetryMetric, telemetryMetricNames } from '../lib/observability/telemetry'
@@ -506,55 +511,44 @@ router.get('/events/outbox', internalServiceGuard, async (req, res) => {
 })
 
 router.get('/events/outbox/metrics', internalServiceGuard, async (_req, res) => {
-  const [pendingCount, processingCount, failedCount, deadLetterCount, sentCount, oldestUnprocessed] =
-    await Promise.all([
-      prisma.decisionEventOutbox.count({
-        where: { status: 'PENDING' },
-      }),
-      prisma.decisionEventOutbox.count({
-        where: { status: 'PROCESSING' },
-      }),
-      prisma.decisionEventOutbox.count({
-        where: { status: 'FAILED' },
-      }),
-      prisma.decisionEventOutbox.count({
-        where: { status: 'DEAD_LETTER' },
-      }),
-      prisma.decisionEventOutbox.count({
-        where: { status: 'SENT' },
-      }),
-      prisma.decisionEventOutbox.findFirst({
-        where: { status: { in: ['PENDING', 'FAILED'] } },
-        orderBy: { createdAt: 'asc' },
-        select: { createdAt: true },
-      }),
-    ])
+  const {
+    pending,
+    processing,
+    failed,
+    deadLetter,
+    deadLetterTotal,
+    sent,
+    oldestPendingCreatedAt,
+    activeDeadLetterWindowHours,
+  } = await getDecisionEventOutboxOperationalStatus()
 
-  const lagMinutes = oldestUnprocessed
-    ? (Date.now() - oldestUnprocessed.createdAt.getTime()) / 60000
+  const lagMinutes = oldestPendingCreatedAt
+    ? (Date.now() - oldestPendingCreatedAt.getTime()) / 60000
     : 0
-  const processedTotal = sentCount + failedCount + deadLetterCount
-  const failureRatePct = processedTotal > 0 ? ((failedCount + deadLetterCount) / processedTotal) * 100 : 0
+  const processedTotal = sent + failed + deadLetter
+  const failureRatePct = processedTotal > 0 ? ((failed + deadLetter) / processedTotal) * 100 : 0
 
   const alerts = {
     lagBreached: lagMinutes > env.DECISION_EVENT_ALERT_LAG_MINUTES,
     failureRateBreached: failureRatePct > env.DECISION_EVENT_ALERT_FAILURE_RATE_PCT,
-    deadLetterBreached: deadLetterCount > env.DECISION_EVENT_ALERT_DEADLETTER_COUNT,
+    deadLetterBreached: deadLetter > env.DECISION_EVENT_ALERT_DEADLETTER_COUNT,
   }
   recordTelemetryMetric(telemetryMetricNames.outboxLagSeconds, 'gauge', lagMinutes * 60, {
-    pending: pendingCount,
-    failed: failedCount,
-    dead_letter: deadLetterCount,
+    pending,
+    failed,
+    dead_letter: deadLetter,
   })
 
   res.json({
     generatedAt: new Date().toISOString(),
     counts: {
-      pending: pendingCount,
-      processing: processingCount,
-      failed: failedCount,
-      deadLetter: deadLetterCount,
-      sent: sentCount,
+      pending,
+      processing,
+      failed,
+      deadLetter,
+      deadLetterActive: deadLetter,
+      deadLetterTotal,
+      sent,
     },
     lagMinutes: Number(lagMinutes.toFixed(3)),
     failureRatePct: Number(failureRatePct.toFixed(3)),
@@ -563,6 +557,7 @@ router.get('/events/outbox/metrics', internalServiceGuard, async (_req, res) => 
       failureRatePct: env.DECISION_EVENT_ALERT_FAILURE_RATE_PCT,
       deadLetterCount: env.DECISION_EVENT_ALERT_DEADLETTER_COUNT,
     },
+    activeDeadLetterWindowHours,
     alerts,
     alertActive: alerts.lagBreached || alerts.failureRateBreached || alerts.deadLetterBreached,
   })
@@ -597,9 +592,11 @@ router.post('/events/outbox/:id/requeue', internalServiceGuard, async (req, res)
 
 router.post('/events/dispatch', internalServiceGuard, async (req, res) => {
   const limit = Math.max(1, Math.min(200, Number(req.body?.limit ?? 50)))
+  const recovery = await requeueRecoverableSystemDeadLetters(limit)
   const result = await processDecisionEventOutboxBatch(limit)
   return res.json({
     status: 'ok',
+    ...recovery,
     ...result,
   })
 })

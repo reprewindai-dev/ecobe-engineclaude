@@ -6,7 +6,10 @@ import { z } from 'zod'
 import { env } from '../../config/env'
 import { prisma } from '../db'
 import { sha256Canonical } from '../proof/export-chain'
-import { resolveDecisionEventSigningSecret } from './event-verifier-sink'
+import {
+  resolveDecisionEventSigningSecret,
+  SELF_VERIFIER_SINK_NAME,
+} from './event-verifier-sink'
 import {
   CanonicalDecisionEnvelopeSchema,
   CanonicalProofEnvelopeSchema,
@@ -48,6 +51,8 @@ export const DecisionEvaluatedV1Schema = z.object({
 export type DecisionEvaluatedV1 = z.infer<typeof DecisionEvaluatedV1Schema>
 
 const ACTIVE_SINK_CACHE_TTL_MS = 30_000
+const ACTIVE_DEAD_LETTER_WINDOW_HOURS = 24
+const RECOVERABLE_SYSTEM_DEAD_LETTER_LIMIT = 100
 
 let activeSinkIdsCache:
   | {
@@ -77,6 +82,10 @@ function computeNextAttempt(attemptCount: number) {
   const base = Math.max(250, env.DECISION_EVENT_RETRY_BASE_MS)
   const delayMs = Math.min(15 * 60 * 1000, base * Math.pow(2, Math.max(0, attemptCount)))
   return new Date(Date.now() + delayMs)
+}
+
+function getActiveDeadLetterCutoff() {
+  return new Date(Date.now() - ACTIVE_DEAD_LETTER_WINDOW_HOURS * 60 * 60 * 1000)
 }
 
 async function getActiveDecisionEventSinkIds(db: any) {
@@ -333,6 +342,88 @@ export async function processDecisionEventOutboxBatch(limit = env.DECISION_EVENT
   }
 
   return { processed: candidates.length, sent, failed, deadLetter }
+}
+
+export async function requeueRecoverableSystemDeadLetters(
+  limit = RECOVERABLE_SYSTEM_DEAD_LETTER_LIMIT
+) {
+  const recoverable = await prisma.decisionEventOutbox.findMany({
+    where: {
+      status: 'DEAD_LETTER',
+      sink: {
+        name: SELF_VERIFIER_SINK_NAME,
+        status: 'ACTIVE',
+      },
+      processedAt: {
+        gte: getActiveDeadLetterCutoff(),
+      },
+    },
+    orderBy: {
+      processedAt: 'asc',
+    },
+    take: Math.max(1, limit),
+    select: {
+      id: true,
+    },
+  })
+
+  if (recoverable.length === 0) {
+    return { requeued: 0 }
+  }
+
+  const ids = recoverable.map((item: { id: string }) => item.id)
+  const result = await prisma.decisionEventOutbox.updateMany({
+    where: {
+      id: { in: ids },
+    },
+    data: {
+      status: 'PENDING',
+      attemptCount: 0,
+      nextAttemptAt: new Date(),
+      lastResponseCode: null,
+      lastError: null,
+      processedAt: null,
+    },
+  })
+
+  return { requeued: result.count }
+}
+
+export async function getDecisionEventOutboxOperationalStatus() {
+  const activeDeadLetterCutoff = getActiveDeadLetterCutoff()
+  const [pending, processing, failed, deadLetterTotal, deadLetterActive, sent, oldestUnprocessed] =
+    await Promise.all([
+      prisma.decisionEventOutbox.count({ where: { status: 'PENDING' } }),
+      prisma.decisionEventOutbox.count({ where: { status: 'PROCESSING' } }),
+      prisma.decisionEventOutbox.count({ where: { status: 'FAILED' } }),
+      prisma.decisionEventOutbox.count({ where: { status: 'DEAD_LETTER' } }),
+      prisma.decisionEventOutbox.count({
+        where: {
+          status: 'DEAD_LETTER',
+          processedAt: {
+            gte: activeDeadLetterCutoff,
+          },
+        },
+      }),
+      prisma.decisionEventOutbox.count({ where: { status: 'SENT' } }),
+      prisma.decisionEventOutbox.findFirst({
+        where: { status: { in: ['PENDING', 'FAILED'] } },
+        orderBy: { createdAt: 'asc' },
+        select: { createdAt: true },
+      }),
+    ])
+
+  return {
+    pending,
+    processing,
+    failed,
+    deadLetter: deadLetterActive,
+    deadLetterActive,
+    deadLetterTotal,
+    sent,
+    oldestPendingCreatedAt: oldestUnprocessed?.createdAt ?? null,
+    activeDeadLetterWindowHours: ACTIVE_DEAD_LETTER_WINDOW_HOURS,
+  }
 }
 
 export async function createTestEventForSink(sinkId: string) {

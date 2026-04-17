@@ -1,4 +1,8 @@
 import { env } from '../config/env'
+import {
+  getDecisionEventOutboxOperationalStatus,
+  requeueRecoverableSystemDeadLetters,
+} from '../lib/ci/decision-events'
 import { getCacheHealthStatus, warmCacheOnStartup } from '../lib/cache-warmer'
 import { prisma } from '../lib/db'
 import { recordTelemetryMetric, telemetryMetricNames } from '../lib/observability/telemetry'
@@ -324,27 +328,26 @@ async function runSupervisorCycle() {
     }
 
     if (dbHealthy) {
-      const [pendingCount, deadLetterCount, oldestPending] = await Promise.all([
-        prisma.decisionEventOutbox.count({ where: { status: 'PENDING' } }),
-        prisma.decisionEventOutbox.count({ where: { status: 'DEAD_LETTER' } }),
-        prisma.decisionEventOutbox.findFirst({
-          where: { status: 'PENDING' },
-          orderBy: { createdAt: 'asc' },
-          select: { createdAt: true },
-        }),
-      ])
+      const {
+        pending,
+        deadLetter,
+        deadLetterTotal,
+        oldestPendingCreatedAt,
+      } = await getDecisionEventOutboxOperationalStatus()
 
-      const oldestPendingLagMinutes = oldestPending
-        ? Math.max(0, Math.round((Date.now() - oldestPending.createdAt.getTime()) / 60_000))
+      const oldestPendingLagMinutes = oldestPendingCreatedAt
+        ? Math.max(0, Math.round((Date.now() - oldestPendingCreatedAt.getTime()) / 60_000))
         : 0
       const outboxDegraded =
-        deadLetterCount >= env.DECISION_EVENT_ALERT_DEADLETTER_COUNT ||
+        deadLetter >= env.DECISION_EVENT_ALERT_DEADLETTER_COUNT ||
         oldestPendingLagMinutes >= env.DECISION_EVENT_ALERT_LAG_MINUTES
 
       recordTelemetryMetric(
         telemetryMetricNames.outboxLagSeconds,
         'gauge',
-        oldestPending ? Math.max(0, Math.round((Date.now() - oldestPending.createdAt.getTime()) / 1000)) : 0,
+        oldestPendingCreatedAt
+          ? Math.max(0, Math.round((Date.now() - oldestPendingCreatedAt.getTime()) / 1000))
+          : 0,
         { scope: 'runtime_supervisor' }
       )
 
@@ -352,22 +355,25 @@ async function runSupervisorCycle() {
         await recordRuntimeIncident({
           incidentKey: 'decision-outbox:degraded',
           component: 'decision-event-outbox',
-          severity: deadLetterCount > 0 ? 'critical' : 'high',
+          severity: deadLetter > 0 ? 'critical' : 'high',
           summary: 'Decision event outbox is degraded',
           details: {
-            pendingCount,
-            deadLetterCount,
+            pendingCount: pending,
+            deadLetterCount: deadLetter,
+            deadLetterTotal,
             oldestPendingLagMinutes,
           },
         })
 
         if (env.DECISION_EVENT_DISPATCH_ENABLED) {
+          await requeueRecoverableSystemDeadLetters()
           await runDecisionEventDispatchCycle()
         }
       } else {
         await resolveRuntimeIncident('decision-outbox:degraded', {
-          pendingCount,
-          deadLetterCount,
+          pendingCount: pending,
+          deadLetterCount: deadLetter,
+          deadLetterTotal,
           oldestPendingLagMinutes,
         })
       }
