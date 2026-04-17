@@ -133,6 +133,7 @@ export function canonicalizeProviderIdentity(provider: string): string {
     case 'eia930':
     case 'eia_930':
     case 'eia930_direct_subregion_heuristic':
+    case 'eia930_gridmonitor_fuel_mix':
       return 'EIA_930'
     case 'gridstatus':
     case 'gridstatus_fuel_mix_ipcc':
