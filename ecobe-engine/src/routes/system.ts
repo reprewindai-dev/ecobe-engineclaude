@@ -3,29 +3,45 @@ import { getCacheHealthStatus } from '../lib/cache-warmer'
 import { redis } from '../lib/redis'
 import { prisma } from '../lib/db'
 import { GridSignalCache } from '../lib/grid-signals/grid-signal-cache'
+import {
+  createInitialWorkerRegistry,
+  getRuntimeIncidentSummary,
+  loadPersistedWorkerStatuses,
+  mergeWorkerRegistries,
+  persistWorkerStatus,
+  type WorkerName,
+  type WorkerRegistry,
+  type WorkerStatusEntry,
+} from '../lib/runtime/runtime-memory'
 
 const router = Router()
 
-// Track worker status in memory
-type WorkerStatusEntry = { running: boolean; lastRun: string | null; nextRun: string | null }
-type WorkerRegistry = Record<string, WorkerStatusEntry>
+let workerStatus: WorkerRegistry = createInitialWorkerRegistry()
 
-let workerStatus: WorkerRegistry = {
-  forecastPoller: { running: false, lastRun: null as string | null, nextRun: null as string | null },
-  eiaIngestion: { running: false, lastRun: null as string | null, nextRun: null as string | null },
-  intelligenceJobs: { running: false, lastRun: null as string | null, nextRun: null as string | null },
-  learningLoop: { running: false, lastRun: null as string | null, nextRun: null as string | null },
-  routingSignalWarmLoop: { running: false, lastRun: null as string | null, nextRun: null as string | null },
-  runtimeSupervisor: { running: false, lastRun: null as string | null, nextRun: null as string | null },
-  decisionEventDispatcher: { running: false, lastRun: null as string | null, nextRun: null as string | null },
-}
+export function setWorkerStatus(worker: WorkerName, status: Partial<WorkerStatusEntry>) {
+  workerStatus[worker] = {
+    ...(workerStatus[worker] ?? {
+      running: false,
+      lastRun: null,
+      nextRun: null,
+      updatedAt: null,
+    }),
+    ...status,
+    updatedAt: new Date().toISOString(),
+  }
 
-export function setWorkerStatus(worker: keyof WorkerRegistry, status: Partial<WorkerStatusEntry>) {
-  workerStatus[worker] = { ...(workerStatus[worker] ?? { running: false, lastRun: null, nextRun: null }), ...status }
+  void persistWorkerStatus(worker, workerStatus[worker]).catch((error) => {
+    console.warn(`Failed to persist worker status for ${worker}:`, error)
+  })
 }
 
 export function getWorkerStatus() {
   return workerStatus
+}
+
+export async function getWorkerStatusSnapshot() {
+  const durable = await loadPersistedWorkerStatuses().catch(() => ({}))
+  return mergeWorkerRegistries(workerStatus, durable)
 }
 
 /**
@@ -35,6 +51,11 @@ export function getWorkerStatus() {
 router.get('/status', async (req: Request, res: Response) => {
   try {
     const startTime = Date.now()
+    const runtimeIncidentSummaryPromise = getRuntimeIncidentSummary().catch((error) => {
+      console.warn('Failed to get runtime incident summary:', error)
+      return null
+    })
+    const workerSnapshotPromise = getWorkerStatusSnapshot().catch(() => workerStatus)
 
     // Get uptime
     const uptime = process.uptime()
@@ -106,8 +127,17 @@ router.get('/status', async (req: Request, res: Response) => {
       }
     }
 
+    const [runtimeIncidents, workers] = await Promise.all([
+      runtimeIncidentSummaryPromise,
+      workerSnapshotPromise,
+    ])
+
     // Overall health
-    const isHealthy = dbHealthy && redisHealthy
+    const isHealthy =
+      dbHealthy &&
+      redisHealthy &&
+      (cacheHealth?.isHealthy ?? false) &&
+      ((runtimeIncidents?.openCount ?? 0) === 0)
 
     const totalTime = Date.now() - startTime
 
@@ -118,7 +148,7 @@ router.get('/status', async (req: Request, res: Response) => {
         seconds: uptimeSeconds,
         formatted: `${uptimeHours}h ${Math.floor((uptimeMinutes % 60))}m ${Math.floor(uptime % 60)}s`
       },
-      workers: workerStatus,
+      workers,
       dependencies: {
         database: {
           healthy: dbHealthy,
@@ -153,6 +183,7 @@ router.get('/status', async (req: Request, res: Response) => {
         statusCheckMs: totalTime
       },
       decisionEventOutbox,
+      runtime: runtimeIncidents,
     })
   } catch (error) {
     console.error('Error in system status endpoint:', error)
@@ -169,13 +200,23 @@ router.get('/status', async (req: Request, res: Response) => {
  * Returns detailed worker status.
  */
 router.get('/workers', (req: Request, res: Response) => {
-  res.json({
-    timestamp: new Date().toISOString(),
-    workers: workerStatus,
-    uptime: {
-      seconds: Math.floor(process.uptime())
-    }
-  })
+  void getWorkerStatusSnapshot()
+    .then((workers) => {
+      res.json({
+        timestamp: new Date().toISOString(),
+        workers,
+        uptime: {
+          seconds: Math.floor(process.uptime())
+        }
+      })
+    })
+    .catch((error) => {
+      console.error('Error getting worker status snapshot:', error)
+      res.status(500).json({
+        error: 'Failed to get worker status snapshot',
+        timestamp: new Date().toISOString(),
+      })
+    })
 })
 
 /**

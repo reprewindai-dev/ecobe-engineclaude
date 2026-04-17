@@ -770,6 +770,26 @@ model IntegrationEvent {
   @@index([source, success, createdAt])
 }
 
+model RuntimeIncident {
+  id              String   @id @default(cuid())
+  incidentKey     String   @unique
+  component       String
+  severity        String
+  status          String   @default("OPEN")
+  summary         String
+  details         Json     @default("{}")
+  firstDetectedAt DateTime @default(now())
+  lastDetectedAt  DateTime @default(now())
+  lastRecoveredAt DateTime?
+  detectionCount  Int      @default(1)
+  recoveryCount   Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status, severity, updatedAt])
+  @@index([component, updatedAt])
+}
+
 enum IntegrationWebhookSinkStatus {
   ACTIVE
   PAUSED

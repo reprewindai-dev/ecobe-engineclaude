@@ -26,6 +26,7 @@ const SUPPORTED_REGIONS =
 
 const recentRegions = new Map<string, number>()
 let warmLoopTimer: NodeJS.Timeout | null = null
+let warmCycleRunning = false
 
 function getWarmRegions() {
   const now = Date.now()
@@ -52,6 +53,11 @@ export function trackRecentRoutingRegions(regions: string[]) {
 }
 
 export async function warmCacheOnStartup(): Promise<void> {
+  if (warmCycleRunning) {
+    return
+  }
+
+  warmCycleRunning = true
   const startedAt = Date.now()
   const nextRunAt = new Date(startedAt + Math.max(5_000, env.ROUTING_SIGNAL_WARM_LOOP_INTERVAL_MS))
 
@@ -128,8 +134,10 @@ export async function warmCacheOnStartup(): Promise<void> {
       scope: 'warm_loop',
     })
   } finally {
+    warmCycleRunning = false
     setWorkerStatus('routingSignalWarmLoop', {
       running: Boolean(warmLoopTimer),
+      lastRun: new Date().toISOString(),
       nextRun: nextRunAt.toISOString(),
     })
   }

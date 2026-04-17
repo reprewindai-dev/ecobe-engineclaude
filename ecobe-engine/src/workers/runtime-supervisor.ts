@@ -1,10 +1,17 @@
 import { env } from '../config/env'
-import { getCacheHealthStatus } from '../lib/cache-warmer'
+import { getCacheHealthStatus, warmCacheOnStartup } from '../lib/cache-warmer'
 import { prisma } from '../lib/db'
 import { recordTelemetryMetric, telemetryMetricNames } from '../lib/observability/telemetry'
 import { redis } from '../lib/redis'
+import {
+  getRuntimeIncidentSummary,
+  recordRuntimeIncident,
+  resolveRuntimeIncident,
+  type WorkerStatusEntry,
+} from '../lib/runtime/runtime-memory'
+import { getProviderFreshness } from '../lib/routing'
 import { recoverWaterArtifactsFromLastKnownGood, validateWaterArtifacts } from '../lib/water/bundle'
-import { getWorkerStatus, setWorkerStatus } from '../routes/system'
+import { getWorkerStatusSnapshot, setWorkerStatus } from '../routes/system'
 import { runForecastRefresh } from './forecast-poller'
 import { refreshRegionReliabilityModel } from './learning-loop'
 import { scheduleIntelligenceJobs } from './intelligence-scheduler'
@@ -25,6 +32,59 @@ function isWorkerStale(lastRun: string | null, staleMinutes: number): boolean {
   return Date.now() - ts > staleMinutes * 60 * 1000
 }
 
+async function reconcileDependencyIncident(
+  incidentKey: string,
+  component: string,
+  healthy: boolean,
+  summary: string,
+  details: Record<string, unknown>
+) {
+  if (healthy) {
+    await resolveRuntimeIncident(incidentKey, details)
+    return
+  }
+
+  await recordRuntimeIncident({
+    incidentKey,
+    component,
+    severity: 'critical',
+    summary,
+    details,
+  })
+}
+
+async function reconcileWorkerIncident(
+  worker: string,
+  stale: boolean,
+  status: WorkerStatusEntry | undefined,
+  staleMinutes: number
+) {
+  const incidentKey = `worker:${worker}:stale`
+  if (!stale) {
+    await resolveRuntimeIncident(incidentKey, {
+      worker,
+      staleMinutes,
+      lastRun: status?.lastRun ?? null,
+      nextRun: status?.nextRun ?? null,
+    })
+    return
+  }
+
+  await recordRuntimeIncident({
+    incidentKey,
+    component: worker,
+    severity: 'high',
+    summary: `Worker ${worker} is stale`,
+    details: {
+      worker,
+      staleMinutes,
+      lastRun: status?.lastRun ?? null,
+      nextRun: status?.nextRun ?? null,
+      running: status?.running ?? false,
+    },
+  })
+}
+
 async function runSupervisorCycle() {
   if (running) return
   running = true
@@ -33,21 +93,36 @@ async function runSupervisorCycle() {
   const intervalMs = Math.max(10, env.RUNTIME_SUPERVISOR_INTERVAL_SEC) * 1000
 
   try {
-    const workerStatus = getWorkerStatus()
+    const workerStatus = await getWorkerStatusSnapshot()
+    let dbHealthy = true
+    let redisHealthy = true
 
     try {
       await prisma.$queryRaw`SELECT 1`
     } catch (error) {
+      dbHealthy = false
       console.error('Runtime supervisor: database ping failed', error)
     }
 
     try {
       await redis.ping()
     } catch (error) {
+      redisHealthy = false
       console.error('Runtime supervisor: redis ping failed', error)
     }
 
-    const cacheHealth = await getCacheHealthStatus()
+    await Promise.all([
+      reconcileDependencyIncident('dependency:database', 'database', dbHealthy, 'Database dependency degraded', {
+        dependency: 'database',
+        checkedAt: startedAt.toISOString(),
+      }),
+      reconcileDependencyIncident('dependency:redis', 'redis', redisHealthy, 'Redis dependency degraded', {
+        dependency: 'redis',
+        checkedAt: startedAt.toISOString(),
+      }),
+    ])
+
+    let cacheHealth = await getCacheHealthStatus()
     recordTelemetryMetric(
       telemetryMetricNames.routingCacheCoveragePct,
       'gauge',
@@ -56,24 +131,105 @@ async function runSupervisorCycle() {
     )
     if (!cacheHealth.isHealthy) {
       console.warn('Runtime supervisor detected degraded routing cache health', cacheHealth)
+      await recordRuntimeIncident({
+        incidentKey: 'routing-cache:coverage',
+        component: 'routing-cache',
+        severity: 'high',
+        summary: 'Required routing cache coverage degraded',
+        details: {
+          requiredWarmCoveragePct: cacheHealth.requiredWarmCoveragePct,
+          requiredLkgCoveragePct: cacheHealth.requiredLkgCoveragePct,
+          requiredRegions: cacheHealth.requiredRegions,
+        },
+      })
+
+      await warmCacheOnStartup()
+      cacheHealth = await getCacheHealthStatus()
+    }
+
+    if (cacheHealth.isHealthy) {
+      await resolveRuntimeIncident('routing-cache:coverage', {
+        requiredWarmCoveragePct: cacheHealth.requiredWarmCoveragePct,
+        requiredLkgCoveragePct: cacheHealth.requiredLkgCoveragePct,
+      })
     }
 
     const artifactHealth = validateWaterArtifacts()
     if (!artifactHealth.healthy) {
+      await recordRuntimeIncident({
+        incidentKey: 'water-artifacts:invalid',
+        component: 'water-artifacts',
+        severity: 'critical',
+        summary: 'Water artifact bundle validation failed',
+        details: artifactHealth as Record<string, unknown>,
+      })
+
       const recovery = recoverWaterArtifactsFromLastKnownGood()
       if (recovery.recovered) {
         console.warn('Runtime supervisor recovered water artifacts from last-known-good snapshot')
+        const recoveredHealth = validateWaterArtifacts()
+        if (recoveredHealth.healthy) {
+          await resolveRuntimeIncident('water-artifacts:invalid', {
+            recovered: true,
+            recoveredAt: new Date().toISOString(),
+          })
+        }
       } else {
         console.error('Runtime supervisor could not recover water artifacts:', recovery.reason)
       }
+    } else {
+      await resolveRuntimeIncident('water-artifacts:invalid', {
+        recovered: true,
+        checkedAt: new Date().toISOString(),
+      })
+    }
+
+    const providerFreshness = await getProviderFreshness().catch(() => [])
+    const staleProviders = providerFreshness.filter((provider) => provider.isStale)
+    recordTelemetryMetric(
+      telemetryMetricNames.providerStaleCount,
+      'gauge',
+      staleProviders.length,
+      { scope: 'runtime_supervisor' }
+    )
+
+    if (staleProviders.length > 0) {
+      await recordRuntimeIncident({
+        incidentKey: 'providers:stale',
+        component: 'provider-freshness',
+        severity: 'high',
+        summary: 'One or more routing providers are stale',
+        details: {
+          providers: staleProviders,
+        },
+      })
+
+      await warmCacheOnStartup()
+    } else {
+      await resolveRuntimeIncident('providers:stale', {
+        checkedAt: new Date().toISOString(),
+      })
     }
 
     if (
       env.FORECAST_REFRESH_ENABLED &&
       isWorkerStale(workerStatus.forecastPoller?.lastRun ?? null, env.SUPERVISOR_FORECAST_STALE_MIN)
     ) {
+      await reconcileWorkerIncident(
+        'forecastPoller',
+        true,
+        workerStatus.forecastPoller,
+        env.SUPERVISOR_FORECAST_STALE_MIN
+      )
       console.warn('Runtime supervisor detected stale forecast worker, forcing refresh run')
       await runForecastRefresh()
+    } else {
+      await reconcileWorkerIncident(
+        'forecastPoller',
+        false,
+        workerStatus.forecastPoller,
+        env.SUPERVISOR_FORECAST_STALE_MIN
+      )
     }
 
     if (
@@ -82,16 +238,42 @@ async function runSupervisorCycle() {
         env.SUPERVISOR_INTELLIGENCE_STALE_MIN
       )
     ) {
+      await reconcileWorkerIncident(
+        'intelligenceJobs',
+        true,
+        workerStatus.intelligenceJobs,
+        env.SUPERVISOR_INTELLIGENCE_STALE_MIN
+      )
       console.warn('Runtime supervisor detected stale intelligence scheduler, re-running schedule sync')
       await scheduleIntelligenceJobs()
+    } else {
+      await reconcileWorkerIncident(
+        'intelligenceJobs',
+        false,
+        workerStatus.intelligenceJobs,
+        env.SUPERVISOR_INTELLIGENCE_STALE_MIN
+      )
     }
 
     if (
       env.LEARNING_LOOP_ENABLED &&
       isWorkerStale(workerStatus.learningLoop?.lastRun ?? null, env.SUPERVISOR_LEARNING_STALE_MIN)
     ) {
+      await reconcileWorkerIncident(
+        'learningLoop',
+        true,
+        workerStatus.learningLoop,
+        env.SUPERVISOR_LEARNING_STALE_MIN
+      )
       console.warn('Runtime supervisor detected stale learning loop, forcing refresh run')
       await refreshRegionReliabilityModel()
+    } else {
+      await reconcileWorkerIncident(
+        'learningLoop',
+        false,
+        workerStatus.learningLoop,
+        env.SUPERVISOR_LEARNING_STALE_MIN
+      )
     }
 
     if (
@@ -101,9 +283,103 @@ async function runSupervisorCycle() {
         env.SUPERVISOR_DECISION_EVENT_STALE_MIN
       )
     ) {
+      await reconcileWorkerIncident(
+        'decisionEventDispatcher',
+        true,
+        workerStatus.decisionEventDispatcher,
+        env.SUPERVISOR_DECISION_EVENT_STALE_MIN
+      )
       console.warn('Runtime supervisor detected stale decision event dispatcher, forcing cycle')
       await runDecisionEventDispatchCycle()
+    } else {
+      await reconcileWorkerIncident(
+        'decisionEventDispatcher',
+        false,
+        workerStatus.decisionEventDispatcher,
+        env.SUPERVISOR_DECISION_EVENT_STALE_MIN
+      )
     }
+
+    const warmLoopStaleMinutes = Math.max(2, Math.ceil((env.ROUTING_SIGNAL_WARM_LOOP_INTERVAL_MS * 4) / 60_000))
+    if (isWorkerStale(workerStatus.routingSignalWarmLoop?.lastRun ?? null, warmLoopStaleMinutes)) {
+      await reconcileWorkerIncident(
+        'routingSignalWarmLoop',
+        true,
+        workerStatus.routingSignalWarmLoop,
+        warmLoopStaleMinutes
+      )
+      console.warn('Runtime supervisor detected stale routing warm loop, forcing cache warm run')
+      await warmCacheOnStartup()
+    } else {
+      await reconcileWorkerIncident(
+        'routingSignalWarmLoop',
+        false,
+        workerStatus.routingSignalWarmLoop,
+        warmLoopStaleMinutes
+      )
+    }
+
+    if (dbHealthy) {
+      const [pendingCount, deadLetterCount, oldestPending] = await Promise.all([
+        prisma.decisionEventOutbox.count({ where: { status: 'PENDING' } }),
+        prisma.decisionEventOutbox.count({ where: { status: 'DEAD_LETTER' } }),
+        prisma.decisionEventOutbox.findFirst({
+          where: { status: 'PENDING' },
+          orderBy: { createdAt: 'asc' },
+          select: { createdAt: true },
+        }),
+      ])
+
+      const oldestPendingLagMinutes = oldestPending
+        ? Math.max(0, Math.round((Date.now() - oldestPending.createdAt.getTime()) / 60_000))
+        : 0
+      const outboxDegraded =
+        deadLetterCount >= env.DECISION_EVENT_ALERT_DEADLETTER_COUNT ||
+        oldestPendingLagMinutes >= env.DECISION_EVENT_ALERT_LAG_MINUTES
+
+      recordTelemetryMetric(
+        telemetryMetricNames.outboxLagSeconds,
+        'gauge',
+        oldestPending ? Math.max(0, Math.round((Date.now() - oldestPending.createdAt.getTime()) / 1000)) : 0,
+        { scope: 'runtime_supervisor' }
+      )
+
+      if (outboxDegraded) {
+        await recordRuntimeIncident({
+          incidentKey: 'decision-outbox:degraded',
+          component: 'decision-event-outbox',
+          severity: deadLetterCount > 0 ? 'critical' : 'high',
+          summary: 'Decision event outbox is degraded',
+          details: {
+            pendingCount,
+            deadLetterCount,
+            oldestPendingLagMinutes,
+          },
+        })
+
+        if (env.DECISION_EVENT_DISPATCH_ENABLED) {
+          await runDecisionEventDispatchCycle()
+        }
+      } else {
+        await resolveRuntimeIncident('decision-outbox:degraded', {
+          pendingCount,
+          deadLetterCount,
+          oldestPendingLagMinutes,
+        })
+      }
+    }
+
+    const runtimeSummary = await getRuntimeIncidentSummary().catch(() => null)
+    recordTelemetryMetric(
+      telemetryMetricNames.runtimeOpenIncidentCount,
+      'gauge',
+      runtimeSummary?.openCount ?? 0,
+      { scope: 'runtime_supervisor' }
+    )
+    await resolveRuntimeIncident('runtime-supervisor:cycle-failed', {
+      recovered: true,
+      checkedAt: new Date().toISOString(),
+    })
 
     setWorkerStatus('runtimeSupervisor', {
       running: true,
@@ -112,6 +388,15 @@ async function runSupervisorCycle() {
     })
   } catch (error) {
     console.error('Runtime supervisor cycle failed:', error)
+    await recordRuntimeIncident({
+      incidentKey: 'runtime-supervisor:cycle-failed',
+      component: 'runtime-supervisor',
+      severity: 'critical',
+      summary: 'Runtime supervisor cycle failed',
+      details: {
+        error: error instanceof Error ? error.message : String(error),
+      },
+    }).catch(() => undefined)
     setWorkerStatus('runtimeSupervisor', {
       running: false,
       lastRun: startedAt.toISOString(),

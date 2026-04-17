@@ -42,13 +42,13 @@ async function gracefulShutdown(signal: string) {
       })
     }
 
-    console.log('Disconnecting from database...')
-    await prisma.$disconnect()
-
     stopRuntimeSupervisor()
     stopLearningLoopWorker()
     stopDecisionEventDispatcherWorker()
     stopRoutingSignalWarmLoop()
+
+    console.log('Disconnecting from database...')
+    await prisma.$disconnect()
 
     console.log('Closing Redis connection...')
     await redis.quit().catch(() => undefined)

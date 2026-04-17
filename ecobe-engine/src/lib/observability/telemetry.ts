@@ -148,4 +148,6 @@ export const telemetryMetricNames = {
   otelSpanExportCount: "ecobe.otel.span.export.count",
   otelSpanExportFailureCount: "ecobe.otel.span.export.failure.count",
   outboxLagSeconds: "ecobe.outbox.lag.seconds",
+  runtimeOpenIncidentCount: "ecobe.runtime.incident.open.count",
+  providerStaleCount: "ecobe.provider.stale.count",
 } as const;
