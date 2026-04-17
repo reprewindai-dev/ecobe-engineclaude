@@ -15,6 +15,7 @@ export interface ResolvedCandidateOverride {
   region: string
   runner: string
   carbonIntensity: number
+  carbonObservedAt?: string
   carbonConfidence: number
   carbonSourceUsed: string
   carbonFallbackUsed: boolean
@@ -37,6 +38,13 @@ export interface ResolvedCandidateOverride {
   providerResolutionMs: number
   carbonFreshnessSec: number | null
   waterFreshnessSec: number | null
+  clusterId?: string | null
+  clusterRole?: 'ALWAYS_ON_PREFERRED' | 'TEMPORAL_ONLY' | 'AVOID_IF_POSSIBLE' | 'DUMP_ELIGIBLE' | null
+  clusterBiasApplied?: number
+  clusterReason?: string | null
+  ensoPhase?: 'NEUTRAL' | 'EL_NINO_WATCH' | 'EL_NINO_MODERATE' | 'EL_NINO_STRONG' | 'EL_NINO_SUPER'
+  structuralModifier?: number
+  temporalWindowQualified?: boolean
 }
 
 export interface TraceStageTimings {
@@ -89,6 +97,13 @@ export interface TraceEnvelopeSeed {
       carbonFreshnessSec: number | null
       waterFreshnessSec: number | null
       fallbackApplied: boolean
+      clusterId: string | null
+      clusterRole: 'ALWAYS_ON_PREFERRED' | 'TEMPORAL_ONLY' | 'AVOID_IF_POSSIBLE' | 'DUMP_ELIGIBLE' | null
+      clusterBiasApplied: number
+      clusterReason: string | null
+      ensoPhase: 'NEUTRAL' | 'EL_NINO_WATCH' | 'EL_NINO_MODERATE' | 'EL_NINO_STRONG' | 'EL_NINO_SUPER'
+      structuralModifier: number
+      temporalWindowQualified: boolean
     }>
   }
   decisionPath: {
@@ -102,6 +117,8 @@ export interface TraceEnvelopeSeed {
     action: string
     reasonCode: string
     operatingMode: string
+    selectedClusterId: string | null
+    selectedClusterRole: 'ALWAYS_ON_PREFERRED' | 'TEMPORAL_ONLY' | 'AVOID_IF_POSSIBLE' | 'DUMP_ELIGIBLE' | null
     rerouteFrom: string | null
     precedenceOverrideApplied: boolean
     delayWindow: {

@@ -3,6 +3,9 @@ import { ember } from '../ember'
 import { gbCarbonIntensity } from '../gb-carbon-intensity'
 import { denmarkCarbon } from '../denmark-carbon'
 import { finlandCarbon } from '../finland-carbon'
+import { ontarioCarbon } from '../ontario-carbon'
+import { quebecCarbon } from '../quebec-carbon'
+import { bcCarbon } from '../bc-carbon'
 import { env } from '../../config/env'
 import { toRoutingCacheBucket } from '../cache/routing-cache-bucket'
 import { CachedRoutingSignalRecord, GridSignalCache } from '../grid-signals/grid-signal-cache'
@@ -33,7 +36,18 @@ export interface ProviderDisagreement {
 
 export interface RoutingSignal {
   carbonIntensity: number
-  source: 'watttime' | 'electricity_maps' | 'ember' | 'gb_carbon_intensity' | 'dk_carbon' | 'fi_carbon' | 'gridstatus_fuel_mix' | 'fallback'
+  source:
+    | 'watttime'
+    | 'electricity_maps'
+    | 'ember'
+    | 'gb_carbon_intensity'
+    | 'dk_carbon'
+    | 'fi_carbon'
+    | 'on_carbon'
+    | 'qc_carbon'
+    | 'bc_carbon'
+    | 'gridstatus_fuel_mix'
+    | 'fallback'
   isForecast: boolean
   confidence: number
   signalMode: 'marginal' | 'average' | 'fallback'
@@ -191,6 +205,78 @@ export class ProviderRouter {
     }
 
     // ── TIER 1b: GB regions → GB Carbon Intensity API (free, no auth, 96h forecast) ──
+    const onSignal = await this.getOntarioSignal(region)
+    if (onSignal) {
+      const validation = await this.validateWithEmber(onSignal, region, timestamp, [onSignal])
+
+      return {
+        carbonIntensity: onSignal.carbonIntensity,
+        source: 'on_carbon',
+        isForecast: onSignal.isForecast,
+        confidence: validation.adjustedConfidence,
+        signalMode: 'average',
+        accountingMethod: 'average',
+        provenance: {
+          sourceUsed: 'ON_CARBON',
+          contributingSources: ['on_carbon'],
+          referenceTime,
+          fetchedAt,
+          fallbackUsed: false,
+          disagreementFlag: validation.disagreement.level !== 'none',
+          disagreementPct: validation.disagreement.disagreementPct,
+          validationNotes: validation.validationNotes,
+        },
+      }
+    }
+
+    const qcSignal = await this.getQuebecSignal(region)
+    if (qcSignal) {
+      const validation = await this.validateWithEmber(qcSignal, region, timestamp, [qcSignal])
+
+      return {
+        carbonIntensity: qcSignal.carbonIntensity,
+        source: 'qc_carbon',
+        isForecast: qcSignal.isForecast,
+        confidence: validation.adjustedConfidence,
+        signalMode: 'average',
+        accountingMethod: 'average',
+        provenance: {
+          sourceUsed: 'QC_CARBON',
+          contributingSources: ['qc_carbon'],
+          referenceTime,
+          fetchedAt,
+          fallbackUsed: false,
+          disagreementFlag: validation.disagreement.level !== 'none',
+          disagreementPct: validation.disagreement.disagreementPct,
+          validationNotes: validation.validationNotes,
+        },
+      }
+    }
+
+    const bcSignal = await this.getBritishColumbiaSignal(region)
+    if (bcSignal) {
+      const validation = await this.validateWithEmber(bcSignal, region, timestamp, [bcSignal])
+
+      return {
+        carbonIntensity: bcSignal.carbonIntensity,
+        source: 'bc_carbon',
+        isForecast: bcSignal.isForecast,
+        confidence: validation.adjustedConfidence,
+        signalMode: 'average',
+        accountingMethod: 'average',
+        provenance: {
+          sourceUsed: 'BC_CARBON',
+          contributingSources: ['bc_carbon'],
+          referenceTime,
+          fetchedAt,
+          fallbackUsed: false,
+          disagreementFlag: validation.disagreement.level !== 'none',
+          disagreementPct: validation.disagreement.disagreementPct,
+          validationNotes: validation.validationNotes,
+        },
+      }
+    }
+
     const gbSignal = await this.getGBCarbonIntensitySignal(region)
     if (gbSignal) {
       const validation = await this.validateWithEmber(gbSignal, region, timestamp, [gbSignal])
@@ -411,6 +497,108 @@ export class ProviderRouter {
   }
 
   // Cloud regions that map to Great Britain grid
+  private static ON_REGIONS = new Set([
+    'northamerica-northeast2',
+    'canadacentral',
+  ])
+
+  private async getOntarioSignal(region: string): Promise<ProviderSignal | null> {
+    if (!ProviderRouter.ON_REGIONS.has(region)) return null
+
+    try {
+      const data = await ontarioCarbon.getCurrentIntensity()
+      if (!data) return null
+
+      return {
+        carbonIntensity: data.carbonIntensity,
+        isForecast: data.isForecast,
+        source: 'on_carbon',
+        timestamp: data.timestamp,
+        estimatedFlag: false,
+        syntheticFlag: false,
+        confidence: data.confidence,
+        metadata: {
+          ...data.metadata,
+          authorityStatus: data.authorityStatus,
+          authorityMode: data.authorityMode,
+          zone: data.zone,
+        },
+      }
+    } catch (error) {
+      console.warn(`Ontario carbon signal failed for ${region}:`, error)
+    }
+
+    return null
+  }
+
+  private static QC_REGIONS = new Set([
+    'ca-central-1',
+    'northamerica-northeast1',
+    'canadaeast',
+  ])
+
+  private async getQuebecSignal(region: string): Promise<ProviderSignal | null> {
+    if (!ProviderRouter.QC_REGIONS.has(region)) return null
+
+    try {
+      const data = await quebecCarbon.getCurrentIntensity()
+      if (!data) return null
+
+      return {
+        carbonIntensity: data.carbonIntensity,
+        isForecast: data.isForecast,
+        source: 'qc_carbon',
+        timestamp: data.timestamp,
+        estimatedFlag: false,
+        syntheticFlag: false,
+        confidence: data.confidence,
+        metadata: {
+          ...data.metadata,
+          authorityStatus: data.authorityStatus,
+          authorityMode: data.authorityMode,
+          zone: data.zone,
+        },
+      }
+    } catch (error) {
+      console.warn(`Quebec carbon signal failed for ${region}:`, error)
+    }
+
+    return null
+  }
+
+  private static BC_REGIONS = new Set([
+    'canadawest',
+  ])
+
+  private async getBritishColumbiaSignal(region: string): Promise<ProviderSignal | null> {
+    if (!ProviderRouter.BC_REGIONS.has(region)) return null
+
+    try {
+      const data = await bcCarbon.getCurrentIntensity()
+      if (!data) return null
+
+      return {
+        carbonIntensity: data.carbonIntensity,
+        isForecast: data.isForecast,
+        source: 'bc_carbon',
+        timestamp: data.timestamp,
+        estimatedFlag: false,
+        syntheticFlag: false,
+        confidence: data.confidence,
+        metadata: {
+          ...data.metadata,
+          authorityStatus: data.authorityStatus,
+          authorityMode: data.authorityMode,
+          zone: data.zone,
+        },
+      }
+    } catch (error) {
+      console.warn(`BC carbon signal failed for ${region}:`, error)
+    }
+
+    return null
+  }
+
   private static GB_REGIONS = new Set([
     'eu-west-2',       // AWS London
     'europe-west2',    // GCP London
@@ -710,7 +898,10 @@ export class ProviderRouter {
     'us-central1': 'USA', 'us-east4': 'USA', 'us-west1': 'USA',
     'eastus': 'USA', 'eastus2': 'USA', 'westus2': 'USA', 'centralus': 'USA', 'southcentralus': 'USA',
     'eu-west-1': 'IRL', 'eu-west-2': 'GBR', 'eu-central-1': 'DEU',
+    'ca-central-1': 'CAN', 'northamerica-northeast1': 'CAN', 'northamerica-northeast2': 'CAN',
+    'canadacentral': 'CAN', 'canadaeast': 'CAN', 'canadawest': 'CAN',
     'europe-west1': 'BEL',
+    'norwayeast': 'NOR', 'norwaywest': 'NOR', 'swedencentral': 'SWE', 'dk1-west': 'DNK', 'dk2-east': 'DNK',
     'ap-southeast-1': 'SGP', 'ap-northeast-1': 'JPN', 'ap-south-1': 'IND',
   }
 

@@ -124,6 +124,9 @@ const LIVE_SIGNAL_SOURCES = [
   'GB_CARBON',
   'DK_CARBON',
   'FI_CARBON',
+  'ON_CARBON',
+  'QC_CARBON',
+  'BC_CARBON',
 ] as const
 
 const isoLatest = (...values: Array<Date | null | undefined>) => {
@@ -1151,13 +1154,16 @@ router.get('/methodology/providers', async (_req, res) => {
     )
 
     const providers = [
-      ['WattTime', 'WATTTIME'],
-      ['GridStatus EIA-930', 'GRIDSTATUS'],
-      ['Ember', 'EMBER'],
-      ['GB Carbon Intensity', 'GB_CARBON'],
-      ['DK Carbon', 'DK_CARBON'],
-      ['FI Carbon', 'FI_CARBON'],
-    ].map(([name, source]) => {
+      { name: 'WattTime', source: 'WATTTIME', authorityMode: 'marginal_live', computed: false },
+      { name: 'GridStatus EIA-930', source: 'GRIDSTATUS', authorityMode: 'predictive_telemetry', computed: false },
+      { name: 'Ember', source: 'EMBER', authorityMode: 'structural_baseline', computed: false },
+      { name: 'Ontario Carbon', source: 'ON_CARBON', authorityMode: 'computed_provincial', computed: true },
+      { name: 'Quebec Carbon', source: 'QC_CARBON', authorityMode: 'computed_provincial', computed: true },
+      { name: 'BC Carbon', source: 'BC_CARBON', authorityMode: 'computed_provincial', computed: true },
+      { name: 'GB Carbon Intensity', source: 'GB_CARBON', authorityMode: 'regional_live', computed: false },
+      { name: 'DK Carbon', source: 'DK_CARBON', authorityMode: 'regional_live', computed: false },
+      { name: 'FI Carbon', source: 'FI_CARBON', authorityMode: 'regional_live', computed: false },
+    ].map(({ name, source, authorityMode, computed }) => {
       const metric = bySource.get(source)
       const successRate = metric ? computeIntegrationSuccessRate(metric) : null
       const stalenessSec = metric?.lastSuccessAt
@@ -1177,6 +1183,8 @@ router.get('/methodology/providers', async (_req, res) => {
         lastSuccessAt: metric?.lastSuccessAt?.toISOString() ?? null,
         stalenessSec,
         disagreementPct: null,
+        authorityMode,
+        computed,
       }
     })
 

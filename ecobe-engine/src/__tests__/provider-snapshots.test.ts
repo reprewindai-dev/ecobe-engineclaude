@@ -10,4 +10,10 @@ describe('provider snapshot identity canonicalization', () => {
     expect(canonicalizeProviderIdentity('watttime')).toBe('WATTTIME_MOER')
     expect(canonicalizeProviderIdentity('WATTTIME_MOER')).toBe('WATTTIME_MOER')
   })
+
+  it('preserves computed Canada providers as first-class canonical identities', () => {
+    expect(canonicalizeProviderIdentity('on_carbon')).toBe('ON_CARBON')
+    expect(canonicalizeProviderIdentity('qc_carbon')).toBe('QC_CARBON')
+    expect(canonicalizeProviderIdentity('bc_carbon')).toBe('BC_CARBON')
+  })
 })

@@ -74,6 +74,8 @@ import { loadRegionReliabilityMultipliers } from "../lib/learning/region-reliabi
 import { evaluateExternalPolicyHook } from "../lib/policy/external-hook";
 import { evaluateSekedPolicyAdapter } from "../lib/policy/seked-policy-adapter";
 import { persistExportBatch } from "../lib/proof/export-chain";
+import { resolveClusterDoctrine } from "../lib/routing/cluster-doctrine";
+import { storeProviderSnapshot } from "../lib/routing/provider-snapshots";
 import { env } from "../config/env";
 import { trackRecentRoutingRegions } from "../lib/cache-warmer";
 import {
@@ -764,6 +766,7 @@ async function evaluateCandidates(
         fallbackUsed: signal.provenance.fallbackUsed,
         signalPolicy: data.signalPolicy as AuthorizationSignalPolicy,
       });
+      const clusterDoctrine = resolveClusterDoctrine(region, signal);
       const providerSnapshotRef = `${region}:${signal.provenance.sourceUsed}:${signal.provenance.referenceTime}`;
       const freshnessSec = Math.max(
         0,
@@ -835,15 +838,47 @@ async function evaluateCandidates(
       });
       const reliabilityMultiplier = reliabilityByRegion[region] ?? 1;
       const score = Number(
-        (baseScore / reliabilityMultiplier + defensiblePenalty.penalty).toFixed(
-          6,
-        ),
+        (
+          (baseScore + clusterDoctrine.clusterBiasApplied) / reliabilityMultiplier +
+          defensiblePenalty.penalty
+        ).toFixed(6),
       );
+
+      void storeProviderSnapshot({
+        provider: signal.provenance.sourceUsed,
+        zone: region,
+        signalType: signalSemantics.signalMode,
+        signalValue: signal.carbonIntensity,
+        observedAt: new Date(signal.provenance.referenceTime),
+        freshnessSec: freshnessSec,
+        confidence: signal.confidence,
+        metadata: {
+          contributingSources: signal.provenance.contributingSources,
+          fallbackUsed: signal.provenance.fallbackUsed,
+          disagreementPct: signal.provenance.disagreementPct,
+          validationNotes: signal.provenance.validationNotes ?? null,
+          cacheStatus,
+          clusterId: clusterDoctrine.clusterId,
+          clusterRole: clusterDoctrine.clusterRole,
+          clusterBiasApplied: clusterDoctrine.clusterBiasApplied,
+          clusterReason: clusterDoctrine.clusterReason,
+          ensoPhase: clusterDoctrine.ensoPhase,
+          structuralModifier: clusterDoctrine.structuralModifier,
+          temporalWindowQualified: clusterDoctrine.temporalWindowQualified,
+          computed: ['ON_CARBON', 'QC_CARBON', 'BC_CARBON'].includes(signal.provenance.sourceUsed),
+          authorityMode: ['ON_CARBON', 'QC_CARBON', 'BC_CARBON'].includes(signal.provenance.sourceUsed)
+            ? 'computed_provincial'
+            : 'live_provider',
+        },
+      }).catch((error) => {
+        console.warn('Failed to persist provider snapshot', { region, error })
+      })
 
       return {
         region,
         runner,
         carbonIntensity: signal.carbonIntensity,
+        carbonObservedAt: signal.provenance.referenceTime,
         carbonConfidence: signal.confidence,
         carbonSourceUsed: signal.provenance.sourceUsed,
         carbonFallbackUsed: signal.provenance.fallbackUsed,
@@ -866,6 +901,13 @@ async function evaluateCandidates(
         providerResolutionMs,
         carbonFreshnessSec: freshnessSec,
         waterFreshnessSec,
+        clusterId: clusterDoctrine.clusterId,
+        clusterRole: clusterDoctrine.clusterRole,
+        clusterBiasApplied: clusterDoctrine.clusterBiasApplied,
+        clusterReason: clusterDoctrine.clusterReason,
+        ensoPhase: clusterDoctrine.ensoPhase,
+        structuralModifier: clusterDoctrine.structuralModifier,
+        temporalWindowQualified: clusterDoctrine.temporalWindowQualified,
       } satisfies CandidateEvaluation;
     }),
   );
@@ -1104,6 +1146,13 @@ function buildCiResponse(input: {
       supplierSet: candidate.waterAuthority.supplierSet,
       evidenceRefs: candidate.waterAuthority.evidenceRefs,
       authorityMode: candidate.waterAuthority.authorityMode,
+      clusterId: candidate.clusterId ?? null,
+      clusterRole: candidate.clusterRole ?? null,
+      clusterBiasApplied: candidate.clusterBiasApplied ?? 0,
+      clusterReason: candidate.clusterReason ?? null,
+      ensoPhase: candidate.ensoPhase ?? 'NEUTRAL',
+      structuralModifier: candidate.structuralModifier ?? 0,
+      temporalWindowQualified: candidate.temporalWindowQualified ?? false,
       guardrailCandidateBlocked: candidate.guardrailCandidateBlocked,
       guardrailReasons: candidate.guardrailReasons,
     })),
@@ -1141,6 +1190,13 @@ function buildCiResponse(input: {
       adapter_version: input.transport.adapterVersion,
       enforcement_result: input.transport.enforcementResult,
       observed_runtime_target: input.transport.observedRuntimeTarget ?? null,
+      selected_cluster_id: input.selected.clusterId ?? null,
+      selected_cluster_role: input.selected.clusterRole ?? null,
+      cluster_bias_applied: input.selected.clusterBiasApplied ?? 0,
+      cluster_reason: input.selected.clusterReason ?? null,
+      enso_phase: input.selected.ensoPhase ?? 'NEUTRAL',
+      structural_modifier: input.selected.structuralModifier ?? 0,
+      temporal_window_qualified: input.selected.temporalWindowQualified ?? false,
     },
     adapterContext: input.transport,
   };
@@ -1907,6 +1963,13 @@ export async function createDecision(
           candidate.carbonFallbackUsed ||
           candidate.waterSignal.fallbackUsed ||
           candidate.waterAuthority.authorityMode === "fallback",
+        clusterId: candidate.clusterId ?? null,
+        clusterRole: candidate.clusterRole ?? null,
+        clusterBiasApplied: candidate.clusterBiasApplied ?? 0,
+        clusterReason: candidate.clusterReason ?? null,
+        ensoPhase: candidate.ensoPhase ?? 'NEUTRAL',
+        structuralModifier: candidate.structuralModifier ?? 0,
+        temporalWindowQualified: candidate.temporalWindowQualified ?? false,
       })),
     },
     decisionPath: {
@@ -1929,6 +1992,8 @@ export async function createDecision(
       action: decision,
       reasonCode,
       operatingMode,
+      selectedClusterId: selected.clusterId ?? null,
+      selectedClusterRole: selected.clusterRole ?? null,
       rerouteFrom: rerouteFrom?.region ?? null,
       precedenceOverrideApplied,
       delayWindow: {

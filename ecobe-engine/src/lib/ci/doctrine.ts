@@ -24,6 +24,9 @@ export type CandidateLike = {
   score: number
   carbonIntensity: number
   carbonSourceUsed: string
+  clusterId?: string | null
+  clusterRole?: 'ALWAYS_ON_PREFERRED' | 'TEMPORAL_ONLY' | 'AVOID_IF_POSSIBLE' | 'DUMP_ELIGIBLE' | null
+  clusterReason?: string | null
   carbonDisagreementFlag: boolean
   carbonDisagreementPct: number
   carbonFallbackUsed: boolean

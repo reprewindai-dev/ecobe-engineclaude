@@ -91,6 +91,9 @@ const PROVIDER_FRESHNESS_THRESHOLDS_SEC: Record<string, number> = {
   GB_CARBON: 1800,
   DK_CARBON: 1800,
   FI_CARBON: 1800,
+  ON_CARBON: 21600,
+  QC_CARBON: 21600,
+  BC_CARBON: 21600,
 }
 
 const INTEGRATION_SOURCE_TO_PROVIDER: Record<string, string> = {
@@ -101,6 +104,9 @@ const INTEGRATION_SOURCE_TO_PROVIDER: Record<string, string> = {
   GB_CARBON: 'GB_CARBON',
   DK_CARBON: 'DK_CARBON',
   FI_CARBON: 'FI_CARBON',
+  ON_CARBON: 'ON_CARBON',
+  QC_CARBON: 'QC_CARBON',
+  BC_CARBON: 'BC_CARBON',
 }
 
 function normalizeProviderToken(provider: string): string {
@@ -131,6 +137,12 @@ export function canonicalizeProviderIdentity(provider: string): string {
       return 'DK_CARBON'
     case 'fi_carbon':
       return 'FI_CARBON'
+    case 'on_carbon':
+      return 'ON_CARBON'
+    case 'qc_carbon':
+      return 'QC_CARBON'
+    case 'bc_carbon':
+      return 'BC_CARBON'
     default:
       return provider.trim().toUpperCase().replace(/[\s-]+/g, '_')
   }
