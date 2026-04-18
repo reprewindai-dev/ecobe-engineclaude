@@ -2,8 +2,6 @@ import express from 'express'
 import cors from 'cors'
 
 import { env } from './config/env'
-import { prisma } from './lib/db'
-import { redis } from './lib/redis'
 import energyRoutes from './routes/energy'
 import dekesRoutes from './routes/dekes'
 import routingRoutes from './routes/routing'
@@ -37,9 +35,7 @@ import adaptersRoutes from './routes/adapters'
 import designPartnerRoutes from './routes/design-partners'
 import internalPolicyRoutes from './routes/internal-policy'
 import { recordTelemetryMetric, telemetryMetricNames } from './lib/observability/telemetry'
-import { eia930 } from './lib/grid-signals/eia-client'
-import { runtimeBuildInfo } from './lib/runtime/build-info'
-import { validateWaterArtifacts } from './lib/water/bundle'
+import { buildPublicHealthSnapshot } from './lib/runtime/public-health'
 
 function rawBodySaver(_req: express.Request, _res: express.Response, buf: Buffer) {
   if (buf?.length) {
@@ -51,52 +47,8 @@ function rawBodySaver(_req: express.Request, _res: express.Response, buf: Buffer
 function attachHealthRoutes(app: express.Express) {
   async function healthHandler(_req: express.Request, res: express.Response) {
     try {
-      await prisma.$queryRaw`SELECT 1`
-
-      let redisOk = true
-      try {
-        await redis.ping()
-      } catch {
-        redisOk = false
-      }
-
-      const waterArtifacts = validateWaterArtifacts()
-      const ok = waterArtifacts.healthy && redisOk
-
-      res.status(ok ? 200 : 503).json({
-        status: ok ? 'ok' : 'degraded',
-        engine: 'online',
-        router: true,
-        fingrid: Boolean(env.FINGRID_API_KEY),
-        providers: {
-          watttime: Boolean(env.WATTTIME_API_KEY || (env.WATTTIME_USERNAME && env.WATTTIME_PASSWORD)),
-          gridstatus: Boolean(env.GRIDSTATUS_API_KEY),
-          eia930: eia930.isAvailable,
-          ember: Boolean(env.EMBER_API_KEY),
-          gbCarbon: true,
-          dkCarbon: true,
-          fiCarbon: Boolean(env.FINGRID_API_KEY),
-          onCarbon: Boolean(env.ON_CARBON_FUEL_MIX_JSON || env.ON_CARBON_INTENSITY_G_PER_KWH != null),
-          qcCarbon: Boolean(env.QC_CARBON_FUEL_MIX_JSON || env.QC_CARBON_INTENSITY_G_PER_KWH != null),
-          bcCarbon: Boolean(env.BC_CARBON_FUEL_MIX_JSON || env.BC_CARBON_INTENSITY_G_PER_KWH != null),
-          static: true
-        },
-        providerModes: {
-          eia930: eia930.mode,
-        },
-        build: runtimeBuildInfo,
-        timestamp: new Date().toISOString(),
-        checks: {
-          database: true,
-          redis: redisOk,
-          waterArtifacts: waterArtifacts.checks,
-        },
-        dependencies: {
-          database: true,
-          redis: redisOk,
-        },
-        waterArtifactErrors: waterArtifacts.errors,
-      })
+      const snapshot = await buildPublicHealthSnapshot()
+      res.status(snapshot.statusCode).json(snapshot.body)
     } catch (error) {
       res.status(503).json({
         status: 'unhealthy',
