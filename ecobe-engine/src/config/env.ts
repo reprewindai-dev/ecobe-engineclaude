@@ -171,6 +171,17 @@ const envSchema = z.object({
   ECOBE_ENGINE_URL: z.string().optional(),
   ECOBE_ENGINE_API_KEY: z.string().optional(),
 
+  // Platform build/runtime metadata
+  RENDER_GIT_COMMIT: z.string().optional(),
+  RENDER_GIT_BRANCH: z.string().optional(),
+  RENDER_SERVICE_ID: z.string().optional(),
+  RENDER_SERVICE_NAME: z.string().optional(),
+  RENDER_INSTANCE_ID: z.string().optional(),
+  GITHUB_SHA: z.string().optional(),
+  GITHUB_REF_NAME: z.string().optional(),
+  SOURCE_VERSION: z.string().optional(),
+  ECOBE_CANONICAL_STRICT: z.string().optional(),
+
   // Observability / OTLP-aligned export
   OTEL_EXPORT_ENABLED: z.string().optional(),
   OTEL_EXPORT_ENDPOINT: z.string().optional(),

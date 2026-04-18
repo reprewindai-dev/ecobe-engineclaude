@@ -14,6 +14,7 @@ import { startLearningLoopWorker } from './workers/learning-loop'
 import { stopLearningLoopWorker } from './workers/learning-loop'
 import { startRuntimeSupervisor, stopRuntimeSupervisor } from './workers/runtime-supervisor'
 import { startDecisionEventDispatcherWorker, stopDecisionEventDispatcherWorker } from './workers/decision-event-dispatcher'
+import { runtimeBuildInfo } from './lib/runtime/build-info'
 import { recoverWaterArtifactsFromLastKnownGood, validateWaterArtifacts } from './lib/water/bundle'
 import { ensureDecisionEventVerifierSink } from './lib/ci/event-verifier-sink'
 
@@ -158,6 +159,13 @@ async function start() {
     server = app.listen(env.PORT, () => {
       console.log(`ECOBE Engine running on port ${env.PORT}`)
       console.log(`  Environment: ${env.NODE_ENV}`)
+      console.log(
+        `  Build: ${runtimeBuildInfo.revision ?? 'unknown'}${runtimeBuildInfo.branch ? ` (${runtimeBuildInfo.branch})` : ''}`
+      )
+      console.log(`  Runtime root: ${runtimeBuildInfo.runtimeRoot}`)
+      console.log(
+        `  Nested duplicate root detected: ${runtimeBuildInfo.nestedDuplicatePathDetected ? 'yes' : 'no'}`
+      )
       console.log(`  Health: http://localhost:${env.PORT}/health`)
       console.log(`  Internal Health: http://localhost:${env.PORT}/internal/v1/health`)
       console.log(`  Routing API: http://localhost:${env.PORT}/internal/v1/routing-decisions`)
