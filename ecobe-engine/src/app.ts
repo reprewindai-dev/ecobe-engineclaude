@@ -37,6 +37,8 @@ import adaptersRoutes from './routes/adapters'
 import designPartnerRoutes from './routes/design-partners'
 import internalPolicyRoutes from './routes/internal-policy'
 import { recordTelemetryMetric, telemetryMetricNames } from './lib/observability/telemetry'
+import { eia930 } from './lib/grid-signals/eia-client'
+import { runtimeBuildInfo } from './lib/runtime/build-info'
 import { validateWaterArtifacts } from './lib/water/bundle'
 
 function rawBodySaver(_req: express.Request, _res: express.Response, buf: Buffer) {
@@ -69,7 +71,7 @@ function attachHealthRoutes(app: express.Express) {
         providers: {
           watttime: Boolean(env.WATTTIME_API_KEY || (env.WATTTIME_USERNAME && env.WATTTIME_PASSWORD)),
           gridstatus: Boolean(env.GRIDSTATUS_API_KEY),
-          eia930: Boolean(env.EIA_API_KEY),
+          eia930: eia930.isAvailable,
           ember: Boolean(env.EMBER_API_KEY),
           gbCarbon: true,
           dkCarbon: true,
@@ -79,6 +81,10 @@ function attachHealthRoutes(app: express.Express) {
           bcCarbon: Boolean(env.BC_CARBON_FUEL_MIX_JSON || env.BC_CARBON_INTENSITY_G_PER_KWH != null),
           static: true
         },
+        providerModes: {
+          eia930: eia930.mode,
+        },
+        build: runtimeBuildInfo,
         timestamp: new Date().toISOString(),
         checks: {
           database: true,
