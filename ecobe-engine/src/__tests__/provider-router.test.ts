@@ -83,10 +83,16 @@ describe('ProviderRouter', () => {
     const { ember } = require('../lib/ember')
     const { gridStatus } = require('../lib/grid-signals/gridstatus-client')
     const { eia930 } = require('../lib/grid-signals/eia-client')
+    const { GridSignalCache } = require('../lib/grid-signals/grid-signal-cache')
     ember.deriveStructuralProfile.mockResolvedValue(null)
     gridStatus.isAvailable = false
     eia930.getFuelMix.mockResolvedValue([])
     eia930.getSubregion.mockResolvedValue([])
+    GridSignalCache.getCachedRoutingSignal.mockResolvedValue(null)
+    GridSignalCache.getCachedRoutingSignalWithSource.mockResolvedValue(null)
+    GridSignalCache.getLastKnownGoodRoutingSignal.mockResolvedValue(null)
+    GridSignalCache.getLastKnownGoodRoutingSignalWithSource.mockResolvedValue(null)
+    GridSignalCache.getCachedProviderDisagreement.mockResolvedValue(null)
   })
 
   describe('getRoutingSignal — tier order (WattTime Tier 1)', () => {
@@ -484,7 +490,7 @@ describe('ProviderRouter', () => {
       expect(wattTime.getMOERForecast).not.toHaveBeenCalled()
     })
 
-    it('falls back to deterministic degraded-safe output when no hot-path cache data exists', async () => {
+    it('attempts a live refresh on cache miss before falling back', async () => {
       const { GridSignalCache } = require('../lib/grid-signals/grid-signal-cache')
       const { wattTime } = require('../lib/watttime')
 
@@ -493,11 +499,11 @@ describe('ProviderRouter', () => {
 
       const record = await router.getHotPathRoutingSignalRecord('us-east-1', new Date())
 
-      expect(record.cacheSource).toBe('degraded-safe')
+      expect(record.cacheSource).toBe('live')
       expect(record.signal.source).toBe('fallback')
       expect(record.signal.provenance.fallbackUsed).toBe(true)
-      expect(wattTime.getCurrentMOER).not.toHaveBeenCalled()
-      expect(wattTime.getMOERForecast).not.toHaveBeenCalled()
+      expect(record.signal.provenance.sourceUsed).toBe('REGION_SAFE_STATIC_FALLBACK')
+      expect(wattTime.getCurrentMOER).toHaveBeenCalled()
     })
 
     it('uses region-aware degraded-safe baselines instead of a flat static fallback', async () => {
@@ -517,8 +523,114 @@ describe('ProviderRouter', () => {
       const apRecord = await router.getHotPathRoutingSignalRecord('ap-northeast-1', new Date())
 
       expect(euRecord.signal.carbonIntensity).toBe(300)
-      expect(euRecord.signal.provenance.sourceUsed).toBe('DEGRADED_SAFE_REGION_BASELINE')
+      expect(euRecord.signal.provenance.sourceUsed).toBe('REGION_SAFE_STATIC_FALLBACK')
       expect(apRecord.signal.carbonIntensity).toBe(400)
+    })
+
+    it('ignores cached degraded fallback records and refreshes from live backbone providers', async () => {
+      const { GridSignalCache } = require('../lib/grid-signals/grid-signal-cache')
+      const { wattTime } = require('../lib/watttime')
+      const { eia930 } = require('../lib/grid-signals/eia-client')
+
+      const pointTime = new Date().toISOString()
+
+      GridSignalCache.getCachedRoutingSignalWithSource.mockResolvedValue({
+        source: 'warm',
+        record: {
+          signal: {
+            carbonIntensity: 450,
+            source: 'fallback',
+            isForecast: false,
+            confidence: 0.05,
+            signalMode: 'fallback',
+            accountingMethod: 'average',
+            provenance: {
+              sourceUsed: 'WARM_CACHE_REGION_SAFE_STATIC_FALLBACK',
+              contributingSources: [],
+              referenceTime: pointTime,
+              fetchedAt: pointTime,
+              fallbackUsed: true,
+              disagreementFlag: false,
+              disagreementPct: 0,
+            },
+          },
+          fetchedAt: pointTime,
+          stalenessSec: 10,
+          lastLatencyMs: 2,
+          degraded: true,
+          cacheSource: 'warm',
+        },
+      })
+      GridSignalCache.getLastKnownGoodRoutingSignalWithSource.mockResolvedValue(null)
+      wattTime.getCurrentMOER.mockResolvedValue(null)
+      wattTime.getMOERForecast.mockResolvedValue([])
+      eia930.getFuelMix.mockResolvedValue([
+        {
+          interval_start_utc: pointTime,
+          interval_end_utc: new Date(new Date(pointTime).getTime() + 60 * 60 * 1000).toISOString(),
+          respondent: 'BPAT',
+          respondent_name: 'Bonneville Power Administration',
+          coal: 5,
+          hydro: 70,
+          natural_gas: 10,
+          nuclear: 10,
+          other: null,
+          petroleum: null,
+          solar: 0,
+          wind: 5,
+          battery_storage: null,
+          pumped_storage: null,
+          solar_with_integrated_battery_storage: null,
+          unknown_energy_storage: null,
+          geothermal: null,
+          other_energy_storage: null,
+          wind_with_integrated_battery_storage: null,
+        },
+      ])
+
+      const record = await router.getHotPathRoutingSignalRecord('us-west-2', new Date(pointTime))
+
+      expect(record.cacheSource).toBe('live')
+      expect(record.signal.provenance.sourceUsed).toBe('EIA930_GRIDMONITOR_FUEL_MIX')
+      expect(record.signal.provenance.fallbackUsed).toBe(false)
+    })
+  })
+
+  describe('cacheRoutingSignal', () => {
+    it('does not persist degraded fallback records into the hot-path cache', async () => {
+      const { GridSignalCache } = require('../lib/grid-signals/grid-signal-cache')
+
+      await router.cacheRoutingSignal(
+        'us-east-1',
+        {
+          signal: {
+            carbonIntensity: 450,
+            source: 'fallback',
+            isForecast: false,
+            confidence: 0.05,
+            signalMode: 'fallback',
+            accountingMethod: 'average',
+            provenance: {
+              sourceUsed: 'DEGRADED_SAFE_REGION_BASELINE',
+              contributingSources: [],
+              referenceTime: new Date().toISOString(),
+              fetchedAt: new Date().toISOString(),
+              fallbackUsed: true,
+              disagreementFlag: false,
+              disagreementPct: 0,
+            },
+          },
+          fetchedAt: new Date().toISOString(),
+          stalenessSec: 0,
+          lastLatencyMs: 0,
+          degraded: true,
+          cacheSource: 'degraded-safe',
+        },
+        new Date(),
+      )
+
+      expect(GridSignalCache.cacheRoutingSignal).not.toHaveBeenCalled()
+      expect(GridSignalCache.cacheProviderDisagreement).not.toHaveBeenCalled()
     })
   })
 })

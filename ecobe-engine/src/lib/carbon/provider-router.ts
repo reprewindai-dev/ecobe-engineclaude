@@ -167,27 +167,15 @@ export class ProviderRouter {
       region,
       timestamp.toISOString()
     )
-    if (cached) {
+    if (
+      cached &&
+      !cached.record.degraded &&
+      !cached.record.signal.provenance.fallbackUsed &&
+      cached.record.signal.signalMode !== 'fallback'
+    ) {
       return this.withCacheSource(cached.record, cached.source)
     }
-
-    const lastKnownGood = await GridSignalCache.getLastKnownGoodRoutingSignalWithSource(region)
-    const ageSec =
-      lastKnownGood?.record.stalenessSec ??
-      this.computeSignalStalenessSec(lastKnownGood?.record.signal, timestamp)
-
-    if (
-      lastKnownGood &&
-      (ageSec ?? ProviderRouter.LAST_KNOWN_GOOD_MAX_AGE_SEC + 1) <=
-        ProviderRouter.LAST_KNOWN_GOOD_MAX_AGE_SEC
-    ) {
-      return this.buildConservativeLastKnownGoodRecord(
-        this.withCacheSource(lastKnownGood.record, lastKnownGood.source),
-        timestamp
-      )
-    }
-
-    return this.buildDegradedSafeRecord(region, timestamp)
+    return this.getRoutingSignalRecord(region, timestamp)
   }
 
   /**
@@ -1306,6 +1294,14 @@ export class ProviderRouter {
   ): Promise<void> {
     const record =
       'signal' in signal ? signal : this.buildCachedRoutingSignalRecord(signal, timestamp, null)
+
+    if (
+      record.degraded ||
+      record.signal.provenance.fallbackUsed ||
+      record.signal.signalMode === 'fallback'
+    ) {
+      return
+    }
 
     await GridSignalCache.cacheRoutingSignal(region, timestamp.toISOString(), record)
     await GridSignalCache.cacheProviderDisagreement(
