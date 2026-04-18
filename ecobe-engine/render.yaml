@@ -1,0 +1,74 @@
+services:
+  - type: web
+    name: ecobe-engineclaude-co2router
+    runtime: docker
+    plan: starter
+    region: oregon
+    branch: main
+    autoDeployTrigger: checksPass
+    healthCheckPath: /health
+    rootDir: .
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    buildFilter:
+      paths:
+        - Dockerfile
+        - package.json
+        - package-lock.json
+        - tsconfig.json
+        - prisma/**
+        - scripts/**
+        - src/**
+        - data/normalized/water/**
+      ignoredPaths:
+        - demo/**
+        - dist/**
+        - docs/**
+        - ecobe-dashboard/**
+        - ecobe-engine/**
+        - node_modules/**
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "8080"
+      - key: ECOBE_CANONICAL_STRICT
+        value: "true"
+      - key: ENGINE_BACKGROUND_WORKERS_ENABLED
+        value: "true"
+      - key: FORECAST_REFRESH_ENABLED
+        value: "true"
+      - key: LEARNING_LOOP_ENABLED
+        value: "true"
+      - key: RUNTIME_SUPERVISOR_ENABLED
+        value: "true"
+      - key: DECISION_EVENT_DISPATCH_ENABLED
+        value: "true"
+      - key: SEKED_POLICY_ADAPTER_ENABLED
+        value: "true"
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: ECOBE_INTERNAL_API_KEY
+        sync: false
+      - key: DECISION_API_SIGNATURE_SECRET
+        sync: false
+      - key: WATTTIME_API_KEY
+        sync: false
+      - key: GRIDSTATUS_API_KEY
+        sync: false
+      - key: EIA_API_KEY
+        sync: false
+      - key: EMBER_API_KEY
+        sync: false
+      - key: FINGRID_API_KEY
+        sync: false
+      - key: ON_CARBON_FUEL_MIX_JSON
+        sync: false
+      - key: QC_CARBON_FUEL_MIX_JSON
+        sync: false
+      - key: BC_CARBON_FUEL_MIX_JSON
+        sync: false
