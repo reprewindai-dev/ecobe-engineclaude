@@ -8,7 +8,17 @@ function extractToken(req: Request) {
     return authorization.slice('Bearer '.length).trim()
   }
 
-  return req.header('x-ecobe-internal-key')?.trim()
+  const ecobeInternalKey = req.header('x-ecobe-internal-key')
+  if (ecobeInternalKey?.trim()) {
+    return ecobeInternalKey.trim()
+  }
+
+  const apiKey = req.header('x-api-key')
+  if (apiKey?.trim()) {
+    return apiKey.trim()
+  }
+
+  return null
 }
 
 export function internalServiceGuard(req: Request, res: Response, next: NextFunction) {
