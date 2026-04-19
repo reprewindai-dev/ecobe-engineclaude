@@ -34,6 +34,7 @@ import eventsRoutes from './routes/events'
 import adaptersRoutes from './routes/adapters'
 import designPartnerRoutes from './routes/design-partners'
 import internalPolicyRoutes from './routes/internal-policy'
+import internalRoutes from './routes/internal'
 import { recordTelemetryMetric, telemetryMetricNames } from './lib/observability/telemetry'
 import { buildPublicHealthSnapshot } from './lib/runtime/public-health'
 
@@ -283,6 +284,7 @@ function attachApiRoutes(app: express.Express) {
   app.use('/api/v1/carbon-ledger', carbonLedgerRoutes)
   // CI/CD green routing
   app.use('/api/v1/ci', ciRoutes)
+  app.use('/internal/v1', internalRoutes)
   app.use('/api/v1/internal', internalPolicyRoutes)
   app.use('/api/v1/events', eventsRoutes)
   app.use('/api/v1/adapters', adaptersRoutes)
