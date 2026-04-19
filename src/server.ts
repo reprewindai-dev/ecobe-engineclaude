@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type Server } from 'http'
+import { createServer, type IncomingMessage, type RequestListener, type Server, type ServerResponse } from 'http'
 
 import { env } from './config/env'
 import { createApp } from './app'
@@ -39,10 +39,10 @@ let server: Server | null = null
 let isShuttingDown = false
 
 function requestPath(req: IncomingMessage) {
-  return new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`).pathname.replace(/\/+$/, '') || '/'
+  return new URL(req.url ?? '/', 'http://localhost').pathname.replace(/\/+$/, '') || '/'
 }
 
-function writeJson(res: any, statusCode: number, payload: unknown) {
+function writeJson(res: ServerResponse, statusCode: number, payload: unknown) {
   const body = JSON.stringify(payload)
   res.statusCode = statusCode
   res.setHeader('content-type', 'application/json; charset=utf-8')
@@ -70,7 +70,14 @@ function extractInternalToken(req: IncomingMessage) {
 }
 
 function isProtectedEnginePath(pathname: string) {
-  return pathname === '/ui' || pathname.startsWith('/api/v1') || pathname.startsWith('/internal/v1')
+  return (
+    pathname === '/ui' ||
+    pathname.startsWith('/ui/') ||
+    pathname === '/api/v1' ||
+    pathname.startsWith('/api/v1/') ||
+    pathname === '/internal/v1' ||
+    pathname.startsWith('/internal/v1/')
+  )
 }
 
 function isInternalRequest(req: IncomingMessage) {
@@ -78,7 +85,7 @@ function isInternalRequest(req: IncomingMessage) {
   return extractInternalToken(req) === env.ECOBE_INTERNAL_API_KEY
 }
 
-function engineRequestListener(req: IncomingMessage, res: any) {
+const engineRequestListener: RequestListener = (req, res) => {
   const pathname = requestPath(req)
 
   if (pathname === '/health') {
@@ -98,7 +105,7 @@ function engineRequestListener(req: IncomingMessage, res: any) {
     return
   }
 
-  void app(req as any, res as any)
+  app(req, res)
 }
 
 async function gracefulShutdown(signal: string) {
