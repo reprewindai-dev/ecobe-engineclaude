@@ -8,6 +8,11 @@ const REQUIRED_TABLES = [
   "DoctrineProposal",
   "DoctrineVersion",
   "DoctrineAuditEvent",
+  "Region",
+  "CarbonForecast",
+  "CarbonCommandOutcome",
+  "WorkloadEmbeddingIndex",
+  "AdaptiveProfile",
 ] as const;
 
 const REQUIRED_PGL_TABLES = [
