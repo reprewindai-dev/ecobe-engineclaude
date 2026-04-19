@@ -1,0 +1,146 @@
+name: CI Root
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/**'
+      - 'src/**'
+      - 'prisma/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'ecobe-dashboard/**'
+      - 'docs/public/**'
+      - 'docs/private/design-partner-program/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/**'
+      - 'src/**'
+      - 'prisma/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'ecobe-dashboard/**'
+      - 'docs/public/**'
+      - 'docs/private/design-partner-program/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-root-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  freeze-scope:
+    name: Freeze Scope
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify canonical freeze scope
+        run: node .github/scripts/check-freeze-scope.mjs
+        env:
+          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+
+  dashboard-build:
+    name: Dashboard Build
+    runs-on: ubuntu-latest
+    needs: freeze-scope
+    defaults:
+      run:
+        working-directory: ecobe-dashboard
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: ecobe-dashboard/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run type-check
+
+      - name: Build
+        run: npm run build
+        env:
+          ECOBE_API_URL: http://localhost:3000
+          NEXT_PUBLIC_ECOBE_API_URL: /api/ecobe
+
+  engine-build:
+    name: Engine Build
+    runs-on: ubuntu-latest
+    needs: freeze-scope
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prisma generate
+        run: npx prisma generate
+        env:
+          DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+          DIRECT_DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+
+      - name: Type check
+        run: npm run type-check
+
+      - name: Build
+        run: npm run build
+        env:
+          DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+          DIRECT_DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+
+      - name: Run targeted tests
+        run: npm test -- --runInBand --passWithNoTests ci-authorization ci-response-v2-contract ci-replay-determinism ci-trace provider-router routing-contract seked-internal grid-signal-cache-bucket
+        env:
+          DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+          DIRECT_DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+          NODE_ENV: test
+
+  ci-status:
+    name: CI
+    runs-on: ubuntu-latest
+    needs: [freeze-scope, dashboard-build, engine-build]
+    if: always()
+    steps:
+      - name: Check job statuses
+        shell: bash
+        run: |
+          if [ "${{ needs.freeze-scope.result }}" != "success" ] || \
+             [ "${{ needs.dashboard-build.result }}" != "success" ] || \
+             [ "${{ needs.engine-build.result }}" != "success" ]; then
+            echo "CI pipeline failed"
+            exit 1
+          fi
+          echo "All CI checks passed"
