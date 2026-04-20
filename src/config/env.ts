@@ -52,6 +52,7 @@ const envSchema = z.object({
   // Intelligence / vectors
   UPSTASH_VECTOR_REST_URL: z.string().optional(),
   UPSTASH_VECTOR_REST_TOKEN: z.string().optional(),
+  UPSTASH_SEARCH_REST_TOKEN: z.string().optional(),
   UPSTASH_VECTOR_INDEX_NAME: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
@@ -60,6 +61,16 @@ const envSchema = z.object({
   // Intelligence jobs / scheduling
   QSTASH_TOKEN: z.string().optional(),
   QSTASH_BASE_URL: z.string().optional(),
+  QSTASH_URL: z.string().optional(),
+  QSTASH_REGION: z.string().optional(),
+  EU_CENTRAL_1_QSTASH_URL: z.string().optional(),
+  EU_CENTRAL_1_QSTASH_TOKEN: z.string().optional(),
+  EU_CENTRAL_1_QSTASH_CURRENT_SIGNING_KEY: z.string().optional(),
+  EU_CENTRAL_1_QSTASH_NEXT_SIGNING_KEY: z.string().optional(),
+  US_EAST_1_QSTASH_URL: z.string().optional(),
+  US_EAST_1_QSTASH_TOKEN: z.string().optional(),
+  US_EAST_1_QSTASH_CURRENT_SIGNING_KEY: z.string().optional(),
+  US_EAST_1_QSTASH_NEXT_SIGNING_KEY: z.string().optional(),
   INTELLIGENCE_JOB_TOKEN: z.string().optional(),
   QSTASH_CURRENT_SIGNING_KEY: z.string().optional(),
   QSTASH_NEXT_SIGNING_KEY: z.string().optional(),
@@ -69,6 +80,7 @@ const envSchema = z.object({
 
   FORECAST_REFRESH_ENABLED: z.string().optional(),
   FORECAST_REFRESH_CRON: z.string().default("*/30 * * * *"),
+  EIA_INGESTION_REGION_STAGGER_MS: z.string().default("1500"),
 
   // Autonomy loops
   LEARNING_LOOP_ENABLED: z.string().optional(),
@@ -305,8 +317,35 @@ export const env = {
   INTELLIGENCE_VECTOR_CLEANUP_CRON:
     parsed.data.INTELLIGENCE_VECTOR_CLEANUP_CRON,
   INTELLIGENCE_CALIBRATION_CRON: parsed.data.INTELLIGENCE_CALIBRATION_CRON,
+  EIA_INGESTION_REGION_STAGGER_MS: parseInt(
+    parsed.data.EIA_INGESTION_REGION_STAGGER_MS,
+  ),
   DOCTRINE_DEFAULT_ORG_ID: parsed.data.DOCTRINE_DEFAULT_ORG_ID,
   DOCTRINE_CACHE_TTL_SEC: parseInt(parsed.data.DOCTRINE_CACHE_TTL_SEC),
+  QSTASH_BASE_URL:
+    parsed.data.QSTASH_BASE_URL ??
+    parsed.data.QSTASH_URL ??
+    (parsed.data.QSTASH_REGION?.startsWith("eu")
+      ? parsed.data.EU_CENTRAL_1_QSTASH_URL
+      : parsed.data.US_EAST_1_QSTASH_URL) ??
+    parsed.data.EU_CENTRAL_1_QSTASH_URL ??
+    parsed.data.US_EAST_1_QSTASH_URL ??
+    "https://qstash.upstash.io",
+  QSTASH_TOKEN:
+    parsed.data.QSTASH_TOKEN ??
+    parsed.data.EU_CENTRAL_1_QSTASH_TOKEN ??
+    parsed.data.US_EAST_1_QSTASH_TOKEN,
+  QSTASH_CURRENT_SIGNING_KEY:
+    parsed.data.QSTASH_CURRENT_SIGNING_KEY ??
+    parsed.data.EU_CENTRAL_1_QSTASH_CURRENT_SIGNING_KEY ??
+    parsed.data.US_EAST_1_QSTASH_CURRENT_SIGNING_KEY,
+  QSTASH_NEXT_SIGNING_KEY:
+    parsed.data.QSTASH_NEXT_SIGNING_KEY ??
+    parsed.data.EU_CENTRAL_1_QSTASH_NEXT_SIGNING_KEY ??
+    parsed.data.US_EAST_1_QSTASH_NEXT_SIGNING_KEY,
+  UPSTASH_VECTOR_REST_TOKEN:
+    parsed.data.UPSTASH_VECTOR_REST_TOKEN ??
+    parsed.data.UPSTASH_SEARCH_REST_TOKEN,
 };
 
 export type Env = typeof env;

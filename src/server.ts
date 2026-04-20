@@ -5,6 +5,8 @@ import { createApp } from './app'
 import { prisma } from './lib/db'
 import { assertSchemaReadiness } from './lib/db/schema-readiness'
 import { redis } from './lib/redis'
+import { ensureMigrationsReady } from './startup/ensure-migrations-ready'
+import { ensureReferenceRegions } from './startup/ensure-reference-regions'
 import {
   startRoutingSignalWarmLoop,
   stopRoutingSignalWarmLoop,
@@ -228,8 +230,12 @@ async function start() {
       }
     }
 
+    ensureMigrationsReady()
+
     await prisma.$connect()
     console.log('Database connected')
+
+    await ensureReferenceRegions()
 
     await assertSchemaReadiness()
     console.log('Schema readiness gate passed')

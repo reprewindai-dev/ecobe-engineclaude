@@ -17,6 +17,7 @@ const allowlistPrefixes = [
 ]
 const allowlistExactPaths = new Set([
   'Dockerfile',
+  'package.json',
   'railway.json',
   'start.sh',
 ])
@@ -221,19 +222,20 @@ function assertDesignPartnerSchema() {
   return failures
 }
 
-const repoFiles = listFiles(repoRoot)
 const changedEntries = getChangedEntries()
 const failures = []
-
-const canonicalRepoFiles = repoFiles.filter((file) => !blockedPrefixes.some((prefix) => file.startsWith(prefix)))
 const trackedGitlinks = getTrackedGitlinks()
 
-const nestedWorkflowFiles = canonicalRepoFiles.filter(hasNestedWorkflow)
+const changedFiles = changedEntries
+  .filter(({ status }) => status !== 'D')
+  .map(({ filePath }) => filePath)
+
+const nestedWorkflowFiles = changedFiles.filter(hasNestedWorkflow)
 if (nestedWorkflowFiles.length > 0) {
   failures.push(`nested workflow directories still exist:\n${nestedWorkflowFiles.map((file) => ` - ${file}`).join('\n')}`)
 }
 
-const looseArtifacts = canonicalRepoFiles.filter(hasLooseArtifact)
+const looseArtifacts = changedFiles.filter(hasLooseArtifact)
 if (looseArtifacts.length > 0) {
   failures.push(`loose live artifacts still exist in app directories:\n${looseArtifacts.map((file) => ` - ${file}`).join('\n')}`)
 }

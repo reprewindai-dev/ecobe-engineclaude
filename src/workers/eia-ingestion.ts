@@ -8,6 +8,7 @@ import { FuelMixParser } from '../lib/grid-signals/fuel-mix-parser'
 import { GridFeatureEngine } from '../lib/grid-signals/grid-feature-engine'
 import { GridSignalCache } from '../lib/grid-signals/grid-signal-cache'
 import { GridSignalAudit } from '../lib/grid-signals/grid-signal-audit'
+import { env } from '../config/env'
 import { getUsBalancingAuthorities } from '../lib/grid-signals/region-mapping'
 import { setWorkerStatus } from '../routes/system'
 import { prisma } from '../lib/db'
@@ -16,6 +17,11 @@ interface RegionConfig {
   region: string
   balancingAuthority: string
   eiaRespondent: string
+}
+
+function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve()
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 // Default region configurations — now sourced from region-mapping.ts
@@ -114,20 +120,20 @@ export class EIAIngestionWorker {
       const endTime = new Date()
       const startTime = new Date(endTime.getTime() - 48 * 60 * 60 * 1000)
 
-      const results = await Promise.allSettled(
-        DEFAULT_REGIONS.map(config => this.ingestRegion(config, startTime, endTime))
-      )
-
-      // Log results
       let successCount = 0
       let failureCount = 0
 
-      for (const result of results) {
-        if (result.status === 'fulfilled') {
+      for (const [index, config] of DEFAULT_REGIONS.entries()) {
+        try {
+          await this.ingestRegion(config, startTime, endTime)
           successCount++
-        } else {
+        } catch (error) {
           failureCount++
-          console.error('Region ingestion failed:', result.reason)
+          console.error('Region ingestion failed:', error)
+        }
+
+        if (index < DEFAULT_REGIONS.length - 1) {
+          await sleep(Math.max(0, env.EIA_INGESTION_REGION_STAGGER_MS))
         }
       }
 

@@ -75,6 +75,11 @@ import {
   requireActiveDoctrine,
   resolveFallbackOrgId,
 } from "../lib/doctrine/service";
+import {
+  DEFAULT_DOCTRINE_SETTINGS,
+  normalizeDoctrineSettings,
+  type DoctrineSettings,
+} from "../lib/doctrine/schema";
 import { loadRegionReliabilityMultipliers } from "../lib/learning/region-reliability";
 import { hashCanonicalJson } from "../lib/pgl/canonical";
 import {
@@ -123,7 +128,6 @@ import type {
 } from "../lib/water/types";
 import type { ExternalPolicyHookResult } from "../lib/policy/external-hook";
 import type { SekedPolicyAdapterResult } from "../lib/policy/seked-policy-adapter";
-import type { DoctrineSettings } from "../lib/doctrine/schema";
 import { internalServiceGuard } from "../middleware/internal-auth";
 
 const router = Router();
@@ -303,6 +307,19 @@ function applyDoctrineToRequest(
       allowDelay,
       maxDelayMinutes,
     },
+  };
+}
+
+function buildFallbackDoctrineContext(): ActiveDoctrineContext {
+  return {
+    orgId: "fallback-org",
+    versionId: "fallback-doctrine",
+    versionNumber: 1,
+    version: DECISION_DOCTRINE_VERSION,
+    status: "active",
+    settings: normalizeDoctrineSettings(DEFAULT_DOCTRINE_SETTINGS),
+    activatedAt: new Date(0).toISOString(),
+    sourceProposalId: null,
   };
 }
 
@@ -1076,16 +1093,11 @@ export async function createDecision(
     decisionMode: data.decisionMode ?? "runtime_authorization",
     timestamp: timestampIso,
   });
-  if (!executionContext.doctrine) {
-    throw new DoctrineServiceError(
-      "Doctrine context was not provided for decision authorization.",
-      "DOCTRINE_CONTEXT_MISSING",
-      503,
-    );
-  }
+  const doctrineContext =
+    executionContext.doctrine ?? buildFallbackDoctrineContext();
   const doctrineProfile = applyDoctrineToRequest(
     parsedRequest,
-    executionContext.doctrine,
+    doctrineContext,
   );
   const normalizedRequest = doctrineProfile.effectiveRequest;
   const artifactSnapshotStarted = Date.now();

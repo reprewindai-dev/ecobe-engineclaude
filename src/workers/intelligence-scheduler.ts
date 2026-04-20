@@ -34,9 +34,24 @@ const qstashClient = env.QSTASH_TOKEN
 
 const resolvedQstashBase = env.QSTASH_BASE_URL ?? 'https://qstash.upstash.io'
 
+function resolveEngineBaseUrl() {
+  const renderUrl = process.env.RENDER_EXTERNAL_URL?.trim()
+  if (env.ECOBE_ENGINE_URL?.trim()) {
+    return env.ECOBE_ENGINE_URL.trim().replace(/\/$/, '')
+  }
+  if (renderUrl) {
+    return renderUrl.replace(/\/$/, '')
+  }
+  const renderHostname = process.env.RENDER_EXTERNAL_HOSTNAME?.trim()
+  if (renderHostname) {
+    return `https://${renderHostname.replace(/\/$/, '')}`
+  }
+  return null
+}
+
 function buildDestination(path: string) {
-  if (!env.ECOBE_ENGINE_URL) return null
-  const base = env.ECOBE_ENGINE_URL.replace(/\/$/, '')
+  const base = resolveEngineBaseUrl()
+  if (!base) return null
   return `${base}${path}`
 }
 
@@ -64,8 +79,9 @@ async function publishSchedule(job: IntelligenceJobDefinition, destination: stri
 }
 
 export async function scheduleIntelligenceJobs() {
-  if (!env.QSTASH_TOKEN || !env.ECOBE_ENGINE_URL) {
-    console.warn('Skipping intelligence job scheduling; QStash token or ECOBE_ENGINE_URL missing')
+  const engineBaseUrl = resolveEngineBaseUrl()
+  if (!env.QSTASH_TOKEN || !engineBaseUrl) {
+    console.warn('Skipping intelligence job scheduling; QStash token or engine URL missing')
     setWorkerStatus('intelligenceJobs', {
       running: false,
       lastRun: new Date().toISOString(),
@@ -79,6 +95,7 @@ export async function scheduleIntelligenceJobs() {
     'QStash scheduling check',
     JSON.stringify({
       baseUrl: resolvedQstashBase,
+      engineBaseUrl,
       jobs: jobDefinitions.length,
     })
   )

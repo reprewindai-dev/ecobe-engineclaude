@@ -9,7 +9,7 @@
     "prebuild": "npm run verify:canonical-root && node -e \"console.log('ECOBE_ENGINE_URL present:', Boolean(process.env.ECOBE_ENGINE_URL))\"",
     "build": "tsc && prisma generate",
     "prisma:migrate:deploy": "prisma migrate deploy",
-    "start": "npm run verify:canonical-root && npm run prisma:migrate:deploy && node dist/server.js",
+    "start": "npm run verify:canonical-root && node dist/server.js",
     "test": "npm run verify:canonical-root && jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
