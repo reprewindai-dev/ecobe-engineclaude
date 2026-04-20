@@ -1,19 +1,24 @@
 import { Index } from '@upstash/vector'
-import { env } from '../config/env'
+
+import { resolveUpstashVectorConfig } from './upstash-config'
 
 let vectorIndex: Index | null = null
 
-export const vectorNamespace = env.UPSTASH_VECTOR_INDEX_NAME
+const vectorConfig = resolveUpstashVectorConfig()
+
+export const vectorNamespace = vectorConfig.indexName
 
 export function getWorkloadVectorIndex(): Index | null {
-  if (!env.UPSTASH_VECTOR_REST_URL || !env.UPSTASH_VECTOR_REST_TOKEN) {
+  if (!vectorConfig.url || !vectorConfig.token) {
     return null
   }
+
   if (!vectorIndex) {
     vectorIndex = new Index({
-      url: env.UPSTASH_VECTOR_REST_URL,
-      token: env.UPSTASH_VECTOR_REST_TOKEN,
+      url: vectorConfig.url,
+      token: vectorConfig.token,
     })
   }
+
   return vectorIndex
 }
