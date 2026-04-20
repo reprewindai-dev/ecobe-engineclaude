@@ -1,18 +1,10 @@
 import { PrismaClient } from '@prisma/client'
+import { REFERENCE_REGIONS } from '../src/constants/reference-regions'
 
 const prisma = new PrismaClient()
 
 async function main() {
-  const regions = [
-    { code: 'US-CAL-CISO', name: 'California (US)', country: 'US' },
-    { code: 'FR', name: 'France', country: 'FR' },
-    { code: 'DE', name: 'Germany', country: 'DE' },
-    { code: 'GB', name: 'United Kingdom', country: 'GB' },
-    { code: 'SE', name: 'Sweden', country: 'SE' },
-    { code: 'NO', name: 'Norway', country: 'NO' },
-  ]
-
-  for (const region of regions) {
+  for (const region of REFERENCE_REGIONS) {
     await prisma.region.upsert({
       where: { code: region.code },
       update: {

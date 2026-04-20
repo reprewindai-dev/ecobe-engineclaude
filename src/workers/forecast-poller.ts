@@ -10,6 +10,9 @@ import {
   DEFAULT_FORECAST_LOOKBACK_HOURS,
   FORECAST_REFRESH_STATE_KEY,
 } from '../constants/forecasting'
+import { REFERENCE_REGIONS } from '../constants/reference-regions'
+
+const FALLBACK_FORECAST_REGIONS = REFERENCE_REGIONS.map((region) => region.code)
 
 async function upsertCarbonSample(region: string, timestamp: Date, intensity: number) {
   await prisma.carbonIntensity.upsert({
@@ -74,17 +77,25 @@ export async function runForecastRefresh() {
   const runStart = new Date()
   try {
     const regions = await prisma.region.findMany({ where: { enabled: true }, select: { code: true } })
+    const regionCodes =
+      regions.length > 0
+        ? regions.map((region: { code: string }) => region.code)
+        : FALLBACK_FORECAST_REGIONS
     let totalRecords = 0
     let totalForecasts = 0
     let failed = false
     let failureMessage: string | undefined
 
-    for (const region of regions) {
+    if (regions.length === 0) {
+      console.warn('Forecast refresh: Region table is empty; falling back to canonical region list')
+    }
+
+    for (const regionCode of regionCodes) {
       try {
-        const result = await ingestRegionHistory(region.code)
+        const result = await ingestRegionHistory(regionCode)
         totalRecords += result.recordsIngested
         totalForecasts += result.forecastsGenerated
-        await recordRefresh(region.code, {
+        await recordRefresh(regionCode, {
           recordsIngested: result.recordsIngested,
           forecastsGenerated: result.forecastsGenerated,
           status: 'SUCCESS',
@@ -92,8 +103,8 @@ export async function runForecastRefresh() {
       } catch (error: any) {
         failed = true
         failureMessage = error?.message ?? 'Unknown forecast refresh error'
-        console.error(`Forecast refresh failed for ${region.code}:`, error)
-        await recordRefresh(region.code, {
+        console.error(`Forecast refresh failed for ${regionCode}:`, error)
+        await recordRefresh(regionCode, {
           recordsIngested: 0,
           forecastsGenerated: 0,
           status: 'FAILURE',
@@ -104,7 +115,7 @@ export async function runForecastRefresh() {
 
     await redis.hset(FORECAST_REFRESH_STATE_KEY, {
       timestamp: new Date().toISOString(),
-      totalRegions: regions.length.toString(),
+      totalRegions: regionCodes.length.toString(),
       totalRecords: totalRecords.toString(),
       totalForecasts: totalForecasts.toString(),
       status: failed ? 'FAILURE' : 'SUCCESS',
