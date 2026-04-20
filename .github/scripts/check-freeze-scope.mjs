@@ -17,6 +17,7 @@ const allowlistPrefixes = [
 ]
 const allowlistExactPaths = new Set([
   'Dockerfile',
+  'package.json',
   'railway.json',
   'start.sh',
 ])
