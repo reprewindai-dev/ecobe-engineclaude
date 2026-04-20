@@ -17,6 +17,27 @@ import { EIABalanceData, EIAInterchangeData, GridStatusFuelMixData } from './typ
 
 const GRIDSTATUS_BASE_URL = 'https://api.gridstatus.io/v1/datasets'
 const REQUEST_TIMEOUT = 15000
+const GRIDSTATUS_REQUEST_GAP_MS = 1200
+
+let gridstatusRequestChain: Promise<void> = Promise.resolve()
+
+async function runGridStatusRequest<T>(request: () => Promise<T>): Promise<T> {
+  const previousRequest = gridstatusRequestChain
+  let releaseQueue: () => void = () => undefined
+
+  gridstatusRequestChain = new Promise<void>((resolve) => {
+    releaseQueue = resolve
+  })
+
+  await previousRequest.catch(() => undefined)
+
+  try {
+    return await request()
+  } finally {
+    await new Promise((resolve) => setTimeout(resolve, GRIDSTATUS_REQUEST_GAP_MS))
+    releaseQueue()
+  }
+}
 
 export class GridStatusClient {
   private apiKey?: string
@@ -73,10 +94,12 @@ export class GridStatusClient {
       params.filter_column = 'respondent'
       params.filter_value = balancingAuthority
 
-      const response = await eiaResilience.execute('gridstatus-regional', () =>
-        axios.get<GridStatusRegionalResponse>(
-          `${GRIDSTATUS_BASE_URL}/eia_regional_hourly/query`,
-          { params, timeout: REQUEST_TIMEOUT }
+      const response = await runGridStatusRequest(() =>
+        eiaResilience.execute('gridstatus-regional', () =>
+          axios.get<GridStatusRegionalResponse>(
+            `${GRIDSTATUS_BASE_URL}/eia_regional_hourly/query`,
+            { params, timeout: REQUEST_TIMEOUT }
+          )
         )
       )
 
@@ -157,16 +180,20 @@ export class GridStatusClient {
       // Fetch BOTH directions: BA as exporter (from_ba) AND as importer (to_ba)
       // InterchangeParser needs both to calculate correct net interchange
       const [fromResponse, toResponse] = await Promise.all([
-        eiaResilience.execute('gridstatus-interchange-from', () =>
-          axios.get<GridStatusInterchangeResponse>(
-            `${GRIDSTATUS_BASE_URL}/eia_ba_interchange_hourly/query`,
-            { params: { ...baseParams, filter_column: 'from_ba', filter_value: balancingAuthority }, timeout: REQUEST_TIMEOUT }
+        runGridStatusRequest(() =>
+          eiaResilience.execute('gridstatus-interchange-from', () =>
+            axios.get<GridStatusInterchangeResponse>(
+              `${GRIDSTATUS_BASE_URL}/eia_ba_interchange_hourly/query`,
+              { params: { ...baseParams, filter_column: 'from_ba', filter_value: balancingAuthority }, timeout: REQUEST_TIMEOUT }
+            )
           )
         ),
-        eiaResilience.execute('gridstatus-interchange-to', () =>
-          axios.get<GridStatusInterchangeResponse>(
-            `${GRIDSTATUS_BASE_URL}/eia_ba_interchange_hourly/query`,
-            { params: { ...baseParams, filter_column: 'to_ba', filter_value: balancingAuthority }, timeout: REQUEST_TIMEOUT }
+        runGridStatusRequest(() =>
+          eiaResilience.execute('gridstatus-interchange-to', () =>
+            axios.get<GridStatusInterchangeResponse>(
+              `${GRIDSTATUS_BASE_URL}/eia_ba_interchange_hourly/query`,
+              { params: { ...baseParams, filter_column: 'to_ba', filter_value: balancingAuthority }, timeout: REQUEST_TIMEOUT }
+            )
           )
         ),
       ])
@@ -231,10 +258,12 @@ export class GridStatusClient {
       params.filter_column = 'respondent'
       params.filter_value = balancingAuthority
 
-      const response = await eiaResilience.execute('gridstatus-fuelmix', () =>
-        axios.get<GridStatusFuelMixResponse>(
-          `${GRIDSTATUS_BASE_URL}/eia_fuel_mix_hourly/query`,
-          { params, timeout: REQUEST_TIMEOUT }
+      const response = await runGridStatusRequest(() =>
+        eiaResilience.execute('gridstatus-fuelmix', () =>
+          axios.get<GridStatusFuelMixResponse>(
+            `${GRIDSTATUS_BASE_URL}/eia_fuel_mix_hourly/query`,
+            { params, timeout: REQUEST_TIMEOUT }
+          )
         )
       )
 
@@ -248,7 +277,7 @@ export class GridStatusClient {
   }
 }
 
-// ── Response types (internal to this module) ──────────────────────────
+// ── Response types (internal to this module) ──────────────────────────────────
 
 interface GridStatusRegionalRecord {
   interval_start_utc: string

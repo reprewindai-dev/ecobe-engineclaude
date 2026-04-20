@@ -19,6 +19,7 @@ const allowlistExactPaths = new Set([
   'Dockerfile',
   'railway.json',
   'start.sh',
+  '.env.example',
 ])
 const blockedPrefixes = [
   'dekes-saas/',

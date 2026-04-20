@@ -1,20 +1,23 @@
 import { Index } from '@upstash/vector'
-import { env } from '../../config/env'
+
+import { resolveUpstashVectorConfig } from '../../lib/upstash-config'
 
 const workloadNamespace = 'workloads'
 
 let workloadIndex: Index | null = null
 let workloadNamespaceClient: ReturnType<Index['namespace']> | null = null
 
+const vectorConfig = resolveUpstashVectorConfig()
+
 function ensureWorkloadNamespace() {
-  if (!env.UPSTASH_VECTOR_REST_URL || !env.UPSTASH_VECTOR_REST_TOKEN) {
+  if (!vectorConfig.url || !vectorConfig.token) {
     return null
   }
 
   if (!workloadIndex) {
     workloadIndex = new Index({
-      url: env.UPSTASH_VECTOR_REST_URL,
-      token: env.UPSTASH_VECTOR_REST_TOKEN,
+      url: vectorConfig.url,
+      token: vectorConfig.token,
     })
   }
 
