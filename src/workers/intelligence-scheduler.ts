@@ -2,6 +2,7 @@ import { Client } from '@upstash/qstash'
 
 import { env } from '../config/env'
 import { redis } from '../lib/redis'
+import { resolveQStashConfig } from '../lib/upstash-config'
 import { recordIntegrationFailure, recordIntegrationSuccess } from '../lib/integration-metrics'
 import { setWorkerStatus } from '../routes/system'
 
@@ -28,11 +29,12 @@ const jobDefinitions: IntelligenceJobDefinition[] = [
   },
 ]
 
-const qstashClient = env.QSTASH_TOKEN
-  ? new Client({ token: env.QSTASH_TOKEN, baseUrl: env.QSTASH_BASE_URL })
+const qstashConfig = resolveQStashConfig()
+const qstashClient = qstashConfig.token
+  ? new Client({ token: qstashConfig.token, baseUrl: qstashConfig.baseUrl })
   : null
 
-const resolvedQstashBase = env.QSTASH_BASE_URL ?? 'https://qstash.upstash.io'
+const resolvedQstashBase = qstashConfig.baseUrl
 
 function buildDestination(path: string) {
   if (!env.ECOBE_ENGINE_URL) return null
@@ -64,7 +66,7 @@ async function publishSchedule(job: IntelligenceJobDefinition, destination: stri
 }
 
 export async function scheduleIntelligenceJobs() {
-  if (!env.QSTASH_TOKEN || !env.ECOBE_ENGINE_URL) {
+  if (!qstashConfig.token || !env.ECOBE_ENGINE_URL) {
     console.warn('Skipping intelligence job scheduling; QStash token or ECOBE_ENGINE_URL missing')
     setWorkerStatus('intelligenceJobs', {
       running: false,
