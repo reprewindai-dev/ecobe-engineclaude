@@ -1,4 +1,4 @@
-type QStashRegion = 'EU_CENTRAL_1' | 'US_EAST_1'
+type QStashRegion = 'EU_CENTRAL_1' | 'EU_EAST_1' | 'US_EAST_1'
 
 function readEnv(key: string) {
   const value = process.env[key]
@@ -7,7 +7,7 @@ function readEnv(key: string) {
 
 function resolveRegion(regionValue?: string): QStashRegion | undefined {
   const normalized = regionValue?.trim().toUpperCase()
-  if (normalized === 'EU_CENTRAL_1' || normalized === 'US_EAST_1') {
+  if (normalized === 'EU_CENTRAL_1' || normalized === 'EU_EAST_1' || normalized === 'US_EAST_1') {
     return normalized
   }
   return undefined
@@ -20,6 +20,15 @@ function regionQStashConfig(region: QStashRegion | undefined) {
       token: readEnv('EU_CENTRAL_1_QSTASH_TOKEN'),
       currentSigningKey: readEnv('EU_CENTRAL_1_QSTASH_CURRENT_SIGNING_KEY'),
       nextSigningKey: readEnv('EU_CENTRAL_1_QSTASH_NEXT_SIGNING_KEY'),
+    }
+  }
+
+  if (region === 'EU_EAST_1') {
+    return {
+      url: readEnv('EU_EAST_1_QSTASH_URL'),
+      token: readEnv('EU_EAST_1_QSTASH_TOKEN'),
+      currentSigningKey: readEnv('EU_EAST_1_QSTASH_CURRENT_SIGNING_KEY'),
+      nextSigningKey: readEnv('EU_EAST_1_QSTASH_NEXT_SIGNING_KEY'),
     }
   }
 
