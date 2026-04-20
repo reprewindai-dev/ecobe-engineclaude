@@ -2,12 +2,14 @@ import type { NextFunction, Request, Response } from 'express'
 import { Receiver } from '@upstash/qstash'
 
 import { env } from '../config/env'
+import { resolveQStashConfig } from '../lib/upstash-config'
 
+const qstashConfig = resolveQStashConfig()
 const receiver =
-  env.QSTASH_CURRENT_SIGNING_KEY && env.QSTASH_NEXT_SIGNING_KEY
+  qstashConfig.currentSigningKey && qstashConfig.nextSigningKey
     ? new Receiver({
-        currentSigningKey: env.QSTASH_CURRENT_SIGNING_KEY,
-        nextSigningKey: env.QSTASH_NEXT_SIGNING_KEY,
+        currentSigningKey: qstashConfig.currentSigningKey,
+        nextSigningKey: qstashConfig.nextSigningKey,
       })
     : null
 
