@@ -10,6 +10,13 @@ type MigrationHistoryRow = {
   rolled_back_at: Date | null
 }
 
+export const REQUIRED_TABLE_NAMES = [
+  'Region',
+  'CarbonCommandOutcome',
+  'WorkloadEmbeddingIndex',
+  'AdaptiveProfile',
+] as const
+
 const prisma = new PrismaClient({ log: ['error'] })
 const MIGRATIONS_DIR = path.resolve(__dirname, '../../prisma/migrations')
 
@@ -39,6 +46,27 @@ async function prismaMigrationTableExists() {
   )) as ExistsRow[]
 
   return Boolean(rows[0]?.exists)
+}
+
+async function prismaTableExists(tableName: string) {
+  const safeTableName = tableName.replace(/"/g, '""')
+  const rows = (await prisma.$queryRawUnsafe(
+    `SELECT to_regclass('public."${safeTableName}"') IS NOT NULL AS "exists"`
+  )) as ExistsRow[]
+
+  return Boolean(rows[0]?.exists)
+}
+
+export async function listMissingRequiredTables() {
+  const missingTables: string[] = []
+
+  for (const tableName of REQUIRED_TABLE_NAMES) {
+    if (!(await prismaTableExists(tableName))) {
+      missingTables.push(tableName)
+    }
+  }
+
+  return missingTables
 }
 
 async function listRemoteMigrationHistory() {
@@ -79,28 +107,46 @@ export async function ensureMigrationsReady() {
   try {
     const localMigrationNames = await listLocalMigrationNames()
     const migrationTableExists = await prismaMigrationTableExists()
+    const missingRequiredTables = await listMissingRequiredTables()
+
+    let remoteHistory: MigrationHistoryRow[] = []
+    let unfinishedMigrations: string[] = []
+    let pendingMigrations: string[] = localMigrationNames
+
+    if (migrationTableExists) {
+      remoteHistory = await listRemoteMigrationHistory()
+      unfinishedMigrations = remoteHistory
+        .filter((row) => !row.finished_at && !row.rolled_back_at)
+        .map((row) => row.migration_name)
+      pendingMigrations = computePendingMigrationNames(localMigrationNames, remoteHistory)
+    }
 
     if (!migrationTableExists) {
       console.log('Prisma migration history table missing; running prisma migrate deploy')
       await runPrismaMigrateDeploy()
+    } else if (pendingMigrations.length > 0 || unfinishedMigrations.length > 0) {
+      console.log(
+        `Prisma schema drift detected; pending=${pendingMigrations.length}, unfinished=${unfinishedMigrations.length}, missingTables=${missingRequiredTables.length}`
+      )
+      await runPrismaMigrateDeploy()
+    } else if (missingRequiredTables.length > 0) {
+      console.log(
+        `Prisma schema metadata is current, but required tables are missing; missingTables=${missingRequiredTables.join(', ')}`
+      )
+      await runPrismaMigrateDeploy()
+    } else {
+      console.log('Prisma schema is current; required tables present')
       return
     }
 
-    const remoteHistory = await listRemoteMigrationHistory()
-    const unfinishedMigrations = remoteHistory
-      .filter((row) => !row.finished_at && !row.rolled_back_at)
-      .map((row) => row.migration_name)
-    const pendingMigrations = computePendingMigrationNames(localMigrationNames, remoteHistory)
-
-    if (pendingMigrations.length === 0 && unfinishedMigrations.length === 0) {
-      console.log('Prisma schema is current; no pending migrations')
-      return
+    const remainingMissingTables = await listMissingRequiredTables()
+    if (remainingMissingTables.length > 0) {
+      throw new Error(
+        `Migration deploy completed but required tables are still missing: ${remainingMissingTables.join(', ')}`
+      )
     }
 
-    console.log(
-      `Prisma schema drift detected; pending=${pendingMigrations.length}, unfinished=${unfinishedMigrations.length}`
-    )
-    await runPrismaMigrateDeploy()
+    console.log('Prisma schema is current; required tables present')
   } finally {
     await prisma.$disconnect().catch(() => undefined)
   }
