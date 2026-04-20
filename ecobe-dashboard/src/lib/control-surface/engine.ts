@@ -1,17 +1,20 @@
 import crypto from 'crypto'
 
-const DEFAULT_ENGINE_URL = 'https://ecobe-engineclaude-production.up.railway.app'
 const DECISION_SIGNATURE_PATHS = new Set(['/ci/route', '/ci/authorize', '/ci/carbon-route'])
 
-export function getEngineBaseUrl() {
-  return (
+function resolveEngineBaseUrl() {
+  const value =
     process.env.ECOBE_API_URL ||
     process.env.CO2ROUTER_API_URL ||
-    process.env.NEXT_PUBLIC_ECOBE_API_URL ||
-    DEFAULT_ENGINE_URL
-  )
-    .replace(/\/api\/v1\/?$/, '')
-    .replace(/\/$/, '')
+    process.env.NEXT_PUBLIC_ECOBE_API_URL
+
+  if (!value) {
+    throw new Error(
+      'ECOBE_API_URL, CO2ROUTER_API_URL, or NEXT_PUBLIC_ECOBE_API_URL must be set'
+    )
+  }
+
+  return value.replace(/\/api\/v1\/?$/, '').replace(/\/$/, '')
 }
 
 function getInternalApiKey() {
@@ -59,7 +62,7 @@ export async function fetchEngineJson<T>(
     }
   }
 
-  const response = await fetch(`${getEngineBaseUrl()}/api/v1${path}`, {
+  const response = await fetch(`${resolveEngineBaseUrl()}/api/v1${path}`, {
     ...init,
     headers,
     cache: 'no-store',
