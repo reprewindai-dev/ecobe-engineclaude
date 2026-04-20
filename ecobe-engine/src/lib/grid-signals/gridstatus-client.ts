@@ -23,7 +23,7 @@ let gridstatusRequestChain: Promise<void> = Promise.resolve()
 
 async function runGridStatusRequest<T>(request: () => Promise<T>): Promise<T> {
   const previousRequest = gridstatusRequestChain
-  let releaseQueue = () => undefined
+  let releaseQueue: () => void = () => undefined
 
   gridstatusRequestChain = new Promise<void>((resolve) => {
     releaseQueue = resolve
