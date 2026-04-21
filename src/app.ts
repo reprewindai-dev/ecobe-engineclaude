@@ -4,6 +4,7 @@ import cors from 'cors'
 import { env } from './config/env'
 import { prisma } from './lib/db'
 import { redis } from './lib/redis'
+import evaluateRoute from './routes/evaluate'
 import energyRoutes from './routes/energy'
 import dekesRoutes from './routes/dekes'
 import routingRoutes from './routes/routing'
@@ -36,8 +37,12 @@ import eventsRoutes from './routes/events'
 import adaptersRoutes from './routes/adapters'
 import internalPolicyRoutes from './routes/internal-policy'
 import doctrineRoutes from './routes/doctrine'
+import decisionRoute from './routes/decision.route'
+import policyRoutes from './routes/policy'
 import { recordTelemetryMetric, telemetryMetricNames } from './lib/observability/telemetry'
 import { validateWaterArtifacts } from './lib/water/bundle'
+import { brokerSurfaceGuard } from './middleware/internal-auth'
+import { buildHealthSnapshot } from './services/health.service'
 
 function rawBodySaver(_req: express.Request, _res: express.Response, buf: Buffer) {
   if (buf?.length) {
@@ -49,19 +54,12 @@ function rawBodySaver(_req: express.Request, _res: express.Response, buf: Buffer
 function attachHealthRoutes(app: express.Express) {
   async function healthHandler(req: express.Request, res: express.Response) {
     try {
-      await prisma.$queryRaw`SELECT 1`
-
-      let redisOk = true
-      try {
-        await redis.ping()
-      } catch {
-        redisOk = false
-      }
-
+      const snapshot = await buildHealthSnapshot()
       const waterArtifacts = validateWaterArtifacts()
-      const ok = redisOk && waterArtifacts.healthy
+      const ok = snapshot.redis && waterArtifacts.healthy
 
       res.status(ok ? 200 : 503).json({
+        ...snapshot,
         status: ok ? 'ok' : 'degraded',
         engine: 'online',
         router: true,
@@ -78,7 +76,7 @@ function attachHealthRoutes(app: express.Express) {
         timestamp: new Date().toISOString(),
         checks: {
           database: true,
-          redis: redisOk,
+          redis: snapshot.redis,
           waterArtifacts: waterArtifacts.checks,
         },
         waterArtifactErrors: waterArtifacts.errors,
@@ -93,6 +91,7 @@ function attachHealthRoutes(app: express.Express) {
 
   app.get('/health', healthHandler)
   app.get('/api/v1/health', healthHandler)
+  app.get('/api/v1/internal/health', brokerSurfaceGuard, healthHandler)
 }
 
 function attachUiRoute(app: express.Express) {
@@ -222,6 +221,10 @@ function attachUiRoute(app: express.Express) {
       document.getElementById('decisions').onclick = () => run(() => get('/api/v1/dashboard/decisions'))
       document.getElementById('mapping').onclick = () => run(() => get('/api/v1/dashboard/region-mapping'))
 
+      document.getElementById('dekesHealth').onclick = () => run(() => get('/api/v1/dekes/health'))
+      document.getElementById('dekesPing').onclick = () => run(() => get('/api/v1/dekes/health?ping=true'))
+      document.getElementById('dekesAnalytics').onclick = () => run(() => get('/api/v1/dekes/analytics'))
+
       document.getElementById('seedDecision').onclick = () => run(async () => {
         const now = new Date().toISOString()
         const body = {
@@ -318,6 +321,8 @@ function attachApiRoutes(app: express.Express) {
   app.use('/api/v1/events', eventsRoutes)
   app.use('/api/v1/adapters', adaptersRoutes)
   app.use('/api/v1/water', waterRoutes)
+  app.use('/api/v1/decision', decisionRoute)
+  app.use('/api/v1/policy', policyRoutes)
   // Additional routes from remote merge
   app.use('/api/v1/route-simple', routeSimpleRoutes)
   app.use('/api/v1/route-test', routeTestRoutes)
@@ -332,6 +337,14 @@ function attachApiRoutes(app: express.Express) {
 }
 
 function attachFallbackHandlers(app: express.Express) {
+  app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err instanceof SyntaxError && 'body' in err) {
+      return res.status(400).json({ error: 'invalid json' })
+    }
+
+    return next(err)
+  })
+
   app.use((req, res) => {
     res.status(404).json({ error: 'Not found' })
   })
@@ -347,7 +360,7 @@ export function createApp() {
   const app = express()
 
   app.set('trust proxy', 1)
-  app.use(cors())
+  app.use(cors({ origin: false }))
   app.use(express.json({ limit: '1mb', verify: rawBodySaver }))
   app.use(express.urlencoded({ extended: true, limit: '1mb', verify: rawBodySaver }))
   app.use((req, res, next) => {
@@ -364,6 +377,8 @@ export function createApp() {
 
   attachHealthRoutes(app)
   attachUiRoute(app)
+  app.use('/evaluate', brokerSurfaceGuard, evaluateRoute)
+  app.use('/api/v1', brokerSurfaceGuard)
   attachApiRoutes(app)
   attachFallbackHandlers(app)
 
