@@ -38,6 +38,7 @@ import internalPolicyRoutes from './routes/internal-policy'
 import doctrineRoutes from './routes/doctrine'
 import { recordTelemetryMetric, telemetryMetricNames } from './lib/observability/telemetry'
 import { validateWaterArtifacts } from './lib/water/bundle'
+import { brokerSurfaceGuard } from './middleware/internal-auth'
 
 function rawBodySaver(_req: express.Request, _res: express.Response, buf: Buffer) {
   if (buf?.length) {
@@ -93,6 +94,7 @@ function attachHealthRoutes(app: express.Express) {
 
   app.get('/health', healthHandler)
   app.get('/api/v1/health', healthHandler)
+  app.get('/api/v1/internal/health', brokerSurfaceGuard, healthHandler)
 }
 
 function attachUiRoute(app: express.Express) {
