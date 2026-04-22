@@ -1,3 +1,5 @@
+// Keep this file in the PR diff so root-level engine fixes still trigger the
+// required live dashboard and release proof workflows.
 const dashboardUrl = (process.env.DASHBOARD_URL || process.env.DEFAULT_DASHBOARD_URL || '').trim().replace(/\/$/, '')
 
 if (!dashboardUrl) {
