@@ -3,6 +3,9 @@ import { env } from '../config/env'
 import { recordIntegrationFailure, recordIntegrationSuccess } from './integration-metrics'
 import { wattTimeResilience } from './resilience'
 
+let token: string | null = null
+let tokenExpiresAt: number | null = null
+
 interface WattTimeAuthResponse {
   token: string
 }
@@ -49,8 +52,6 @@ export class WattTimeClient {
   private baseUrl: string
   private username?: string
   private password?: string
-  private token?: string
-  private tokenExpiry?: Date
 
   constructor() {
     this.baseUrl = env.WATTTIME_BASE_URL || 'https://api.watttime.org'
@@ -58,43 +59,117 @@ export class WattTimeClient {
     this.password = env.WATTTIME_PASSWORD
   }
 
-  private async authenticate(): Promise<string | null> {
-    if (!this.username || !this.password) {
-      await this.logFailure('Missing WattTime credentials')
-      return null
+  private hasValidToken(): boolean {
+    return Boolean(token && tokenExpiresAt && Date.now() < tokenExpiresAt - 60_000)
+  }
+
+  private async login(): Promise<string> {
+    if (this.hasValidToken()) {
+      return token as string
     }
 
-    // Check if we have a valid token
-    if (this.token && this.tokenExpiry && this.tokenExpiry > new Date()) {
-      return this.token
+    if (!this.username || !this.password) {
+      const message = 'Missing WattTime credentials'
+      await this.logFailure(message)
+      throw new Error(message)
     }
 
     const startedAt = Date.now()
     try {
-      const response = await wattTimeResilience.execute('authenticate', () =>
-        axios.get<WattTimeAuthResponse>(
-          `${this.baseUrl}/login`,
-          {
-            auth: {
-              username: this.username!,
-              password: this.password!,
-            },
-            timeout: 8000,
-          }
-        )
+      const response = await wattTimeResilience.execute('watttime.login', () =>
+        axios.get<WattTimeAuthResponse>(`${this.baseUrl}/login`, {
+          auth: {
+            username: this.username!,
+            password: this.password!,
+          },
+          timeout: 8000,
+          validateStatus: () => true,
+        })
       )
 
-      this.token = response.data.token
-      // Token expires in 25 minutes (reduced from 30 to avoid edge cases)
-      this.tokenExpiry = new Date(Date.now() + 25 * 60 * 1000)
+      if (response.status !== 200 || !response.data?.token) {
+        const message = `WattTime login failed with status ${response.status}`
+        await this.logFailure(message, Date.now() - startedAt)
+        throw new Error(message)
+      }
+
+      token = response.data.token
+      tokenExpiresAt = Date.now() + 25 * 60 * 1000
 
       await this.logSuccess(Date.now() - startedAt)
-      return this.token ?? null
+      return token
     } catch (error: any) {
-      console.error('WattTime authentication failed:', error.message)
-      await this.logFailure(error.message ?? 'Authentication failed', Date.now() - startedAt)
-      return null
+      const message = error?.message ?? 'Authentication failed'
+      console.error('WattTime authentication failed:', message)
+      await this.logFailure(message, Date.now() - startedAt)
+      throw error instanceof Error ? error : new Error(message)
     }
+  }
+
+  private async withAuthHeaders(): Promise<Record<string, string>> {
+    const t = await this.login()
+    return { Authorization: `Bearer ${t}` }
+  }
+
+  private async requestWithAuth<T>(
+    operation: string,
+    url: string,
+    config: {
+      params?: Record<string, unknown>
+      headers?: Record<string, string>
+      timeout?: number
+    } = {}
+  ) {
+    const startedAt = Date.now()
+    const firstHeaders = {
+      ...(config.headers ?? {}),
+      ...(await this.withAuthHeaders()),
+    }
+
+    const firstResponse = await wattTimeResilience.execute(operation, () =>
+      axios.get<T>(url, {
+        ...config,
+        headers: firstHeaders,
+        timeout: config.timeout ?? 8000,
+        validateStatus: () => true,
+      })
+    )
+
+    if (firstResponse.status === 401) {
+      token = null
+      tokenExpiresAt = null
+      const retryHeaders = {
+        ...(config.headers ?? {}),
+        ...(await this.withAuthHeaders()),
+      }
+
+      const retryResponse = await wattTimeResilience.execute(`${operation}:retry`, () =>
+        axios.get<T>(url, {
+          ...config,
+          headers: retryHeaders,
+          timeout: config.timeout ?? 8000,
+          validateStatus: () => true,
+        })
+      )
+
+      if (retryResponse.status !== 200) {
+        const message = `WattTime ${operation} failed after retry with status ${retryResponse.status}`
+        await this.logFailure(message, Date.now() - startedAt)
+        throw new Error(message)
+      }
+
+      await this.logSuccess(Date.now() - startedAt)
+      return retryResponse
+    }
+
+    if (firstResponse.status !== 200) {
+      const message = `WattTime ${operation} failed with status ${firstResponse.status}`
+      await this.logFailure(message, Date.now() - startedAt)
+      throw new Error(message)
+    }
+
+    await this.logSuccess(Date.now() - startedAt)
+    return firstResponse
   }
 
   private async logSuccess(latencyMs?: number) {
@@ -114,28 +189,16 @@ export class WattTimeClient {
   }
 
   async getCurrentMOER(balancingAuthority: string): Promise<WattTimeMOER | null> {
-    const token = await this.authenticate()
-    if (!token) {
-      return null
-    }
-
-    const startedAt = Date.now()
     try {
-      const response = await wattTimeResilience.execute('getCurrentMOER', () =>
-        axios.get<{ data: Array<{ point_time: string; value: number }>; meta: { region: string; signal_type: string; units: string; data_point_period_seconds: number } }>(
-          `${this.baseUrl}/v3/signal-index`,
-          {
-            params: {
-              region: balancingAuthority,
-              signal_type: 'co2_moer',
-            },
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-            timeout: 8000,
-          }
-        )
-      )
+      const response = await this.requestWithAuth<{
+        data: Array<{ point_time: string; value: number }>
+        meta: { region: string; signal_type: string; units: string; data_point_period_seconds: number }
+      }>('watttime.getCurrentMOER', `${this.baseUrl}/v3/signal-index`, {
+        params: {
+          region: balancingAuthority,
+          signal_type: 'co2_moer',
+        },
+      })
 
       const dataPoint = response.data.data?.[0]
       if (!dataPoint) {
@@ -151,12 +214,9 @@ export class WattTimeClient {
         timestamp: dataPoint.point_time,
         frequency: `${response.data.meta.data_point_period_seconds}s`,
       }
-
-      await this.logSuccess(Date.now() - startedAt)
       return result
     } catch (error: any) {
       console.error(`Failed to fetch MOER for ${balancingAuthority}:`, error.message)
-      await this.logFailure(error.message ?? 'Failed to fetch MOER', Date.now() - startedAt)
       return null
     }
   }
@@ -166,12 +226,6 @@ export class WattTimeClient {
     startTime?: Date,
     endTime?: Date
   ): Promise<WattTimeForecast[]> {
-    const token = await this.authenticate()
-    if (!token) {
-      return []
-    }
-
-    const startedAt = Date.now()
     try {
       const params: any = {
         region: balancingAuthority,
@@ -185,18 +239,12 @@ export class WattTimeClient {
         params.end = endTime.toISOString()
       }
 
-      const response = await wattTimeResilience.execute('getMOERForecast', () =>
-        axios.get<{ data: Array<{ point_time: string; value: number }>; meta: { region: string; signal_type: string; model: { date: string } } }>(
-          `${this.baseUrl}/v3/forecast`,
-          {
-            params,
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-            timeout: 8000,
-          }
-        )
-      )
+      const response = await this.requestWithAuth<{
+        data: Array<{ point_time: string; value: number }>
+        meta: { region: string; signal_type: string; model: { date: string } }
+      }>('watttime.getMOERForecast', `${this.baseUrl}/v3/forecast`, {
+        params,
+      })
 
       const modelVersion = response.data.meta?.model?.date ?? 'unknown'
       const forecasts = (response.data.data || []).map((item) => ({
@@ -205,12 +253,9 @@ export class WattTimeClient {
         moer: item.value,
         version: modelVersion,
       }))
-
-      await this.logSuccess(Date.now() - startedAt)
       return forecasts
     } catch (error: any) {
       console.error(`Failed to fetch MOER forecast for ${balancingAuthority}:`, error.message)
-      await this.logFailure(error.message ?? 'Failed to fetch MOER forecast', Date.now() - startedAt)
       return []
     }
   }
