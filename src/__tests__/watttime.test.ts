@@ -32,7 +32,7 @@ describe('WattTimeClient', () => {
   it('logs in automatically and retries once after a 401', async () => {
     axios.get
       .mockResolvedValueOnce({ status: 200, data: { token: 'token-one' } })
-      .mockResolvedValueOnce({ status: 401, data: {} })
+      .mockRejectedValueOnce({ response: { status: 401 }, message: '401 Unauthorized' })
       .mockResolvedValueOnce({ status: 200, data: { token: 'token-two' } })
       .mockResolvedValueOnce({
         status: 200,
@@ -65,7 +65,6 @@ describe('WattTimeClient', () => {
           username: 'demo-user',
           password: 'demo-pass',
         },
-        validateStatus: expect.any(Function),
       })
     )
     expect(axios.get).toHaveBeenCalledTimes(4)

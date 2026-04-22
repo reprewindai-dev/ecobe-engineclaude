@@ -83,14 +83,11 @@ export class WattTimeClient {
             password: this.password!,
           },
           timeout: 8000,
-          validateStatus: () => true,
         })
       )
 
       if (response.status !== 200 || !response.data?.token) {
-        const message = `WattTime login failed with status ${response.status}`
-        await this.logFailure(message, Date.now() - startedAt)
-        throw new Error(message)
+        throw new Error(`WattTime login failed with status ${response.status}`)
       }
 
       token = response.data.token
@@ -126,16 +123,27 @@ export class WattTimeClient {
       ...(await this.withAuthHeaders()),
     }
 
-    const firstResponse = await wattTimeResilience.execute(operation, () =>
-      axios.get<T>(url, {
-        ...config,
-        headers: firstHeaders,
-        timeout: config.timeout ?? 8000,
-        validateStatus: () => true,
-      })
-    )
+    const performRequest = async () =>
+      wattTimeResilience.execute(operation, () =>
+        axios.get<T>(url, {
+          ...config,
+          headers: firstHeaders,
+          timeout: config.timeout ?? 8000,
+        })
+      )
 
-    if (firstResponse.status === 401) {
+    try {
+      const firstResponse = await performRequest()
+      await this.logSuccess(Date.now() - startedAt)
+      return firstResponse
+    } catch (error: any) {
+      const status = error?.response?.status
+      if (status !== 401) {
+        const message = error?.message ?? `WattTime ${operation} failed`
+        await this.logFailure(message, Date.now() - startedAt)
+        throw error instanceof Error ? error : new Error(message)
+      }
+
       token = null
       tokenExpiresAt = null
       const retryHeaders = {
@@ -143,33 +151,22 @@ export class WattTimeClient {
         ...(await this.withAuthHeaders()),
       }
 
-      const retryResponse = await wattTimeResilience.execute(`${operation}:retry`, () =>
-        axios.get<T>(url, {
-          ...config,
-          headers: retryHeaders,
-          timeout: config.timeout ?? 8000,
-          validateStatus: () => true,
-        })
-      )
-
-      if (retryResponse.status !== 200) {
-        const message = `WattTime ${operation} failed after retry with status ${retryResponse.status}`
+      try {
+        const retryResponse = await wattTimeResilience.execute(`${operation}:retry`, () =>
+          axios.get<T>(url, {
+            ...config,
+            headers: retryHeaders,
+            timeout: config.timeout ?? 8000,
+          })
+        )
+        await this.logSuccess(Date.now() - startedAt)
+        return retryResponse
+      } catch (retryError: any) {
+        const message = retryError?.message ?? `WattTime ${operation} failed after retry`
         await this.logFailure(message, Date.now() - startedAt)
-        throw new Error(message)
+        throw retryError instanceof Error ? retryError : new Error(message)
       }
-
-      await this.logSuccess(Date.now() - startedAt)
-      return retryResponse
     }
-
-    if (firstResponse.status !== 200) {
-      const message = `WattTime ${operation} failed with status ${firstResponse.status}`
-      await this.logFailure(message, Date.now() - startedAt)
-      throw new Error(message)
-    }
-
-    await this.logSuccess(Date.now() - startedAt)
-    return firstResponse
   }
 
   private async logSuccess(latencyMs?: number) {

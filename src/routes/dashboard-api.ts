@@ -216,9 +216,12 @@ router.get('/dashboard/kpis', async (req, res) => {
       .map((entry: LedgerKpiRow) => entry.carbonSpikeProbability)
       .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
 
+    const totalAccuracyCommands = accuracyRows.reduce((sum: number, row: AccuracyKpiRow) => sum + row.totalCommands, 0)
     const weightedVariance =
-      accuracyRows.reduce((sum: number, row: AccuracyKpiRow) => sum + row.avgEmissionsVariancePct * row.totalCommands, 0) /
-      Math.max(1, accuracyRows.reduce((sum: number, row: AccuracyKpiRow) => sum + row.totalCommands, 0))
+      totalAccuracyCommands > 0
+        ? accuracyRows.reduce((sum: number, row: AccuracyKpiRow) => sum + row.avgEmissionsVariancePct * row.totalCommands, 0) /
+          totalAccuracyCommands
+        : null
 
     const usageByOrg = usageCounters.reduce((acc: Record<string, number>, counter: UsageCounterKpiRow) => {
       const key = counter.organization.slug || counter.organization.name || counter.orgId
@@ -271,9 +274,9 @@ router.get('/dashboard/kpis', async (req, res) => {
           ? Number(((disagreementCount / monthEntries.length) * 100).toFixed(2))
           : 0,
       forecastAccuracyVsRealized:
-        Number.isFinite(weightedVariance)
-          ? Number(Math.max(0, 100 - weightedVariance).toFixed(2))
-          : null,
+        weightedVariance === null
+          ? null
+          : Number(Math.max(0, 100 - weightedVariance).toFixed(2)),
       curtailmentOpportunityDetection: curtailmentOpportunityCount,
       carbonSpikeRisk:
         spikeRiskValues.length > 0
