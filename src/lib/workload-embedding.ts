@@ -1,10 +1,25 @@
 import OpenAI from 'openai'
-import type { CarbonCommand } from '@prisma/client'
 
 import { prisma } from './db'
 import type { CarbonCommandPayload } from './carbon-command'
 import { env } from '../config/env'
 import { getWorkloadVectorIndex, vectorNamespace } from './vector'
+
+type CarbonCommand = {
+  id: string
+  orgId: string
+  workloadType?: string | null
+  modelFamily?: string | null
+  executionMode?: string | null
+  mode?: string | null
+  selectedRegion?: string | null
+  selectedStartAt?: Date | null
+  expectedCarbonIntensity?: number | null
+  expectedLatencyMs?: number | null
+  expectedCostIndex?: number | null
+  estimatedEmissionsKgCo2e?: number | null
+  estimatedSavingsKgCo2e?: number | null
+}
 
 const openaiClient = env.OPENAI_API_KEY ? new OpenAI({ apiKey: env.OPENAI_API_KEY }) : null
 const EMBEDDING_MODEL = env.OPENAI_EMBEDDING_MODEL
@@ -64,8 +79,8 @@ const buildVectorMetadata = (command: CarbonCommand, payload: CarbonCommandPaylo
   orgId: command.orgId,
   workloadType: command.workloadType ?? payload.workload.type,
   modelFamily: command.modelFamily ?? payload.workload.modelFamily ?? null,
-  executionMode: command.executionMode ?? command.mode,
   selectedRegion: command.selectedRegion ?? null,
+  executionMode: command.executionMode ?? command.mode ?? null,
 })
 
 export async function indexWorkloadEmbedding(command: CarbonCommand, payload: CarbonCommandPayload) {

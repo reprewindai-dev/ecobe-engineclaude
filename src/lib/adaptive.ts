@@ -1,8 +1,15 @@
-import { Prisma } from '@prisma/client'
 import { prisma } from './db'
 import type { CarbonCommandPayload } from './carbon-command'
 
-type CarbonCommand = Prisma.CarbonCommandGetPayload<Record<string, never>>
+type CarbonCommand = {
+  id: string
+  orgId: string
+  workloadType?: string | null
+  modelFamily?: string | null
+  selectedRegion?: string | null
+  executionMode?: string | null
+  mode?: string | null
+}
 type AdaptiveProfileKey = {
   orgId: string
   workloadType: string | null
@@ -16,7 +23,7 @@ function toNullableFilter(value: string | null): string | typeof equalsNullFilte
   return value ?? equalsNullFilter
 }
 
-function toAdaptiveProfileWhere(key: AdaptiveProfileKey): Prisma.AdaptiveProfileWhereInput {
+function toAdaptiveProfileWhere(key: AdaptiveProfileKey) {
   return {
     orgId: key.orgId,
     workloadType: toNullableFilter(key.workloadType),
@@ -91,10 +98,10 @@ export async function upsertAdaptiveProfile(options: {
   }
 
   const updateData = {
-    weightModifiersJson: (options.weightModifiers ?? {}) as Prisma.JsonObject,
-    regionAdjustmentsJson: (options.regionAdjustments ?? {}) as Prisma.JsonObject,
-    executionModeAdjustmentsJson: (options.executionAdjustments ?? {}) as Prisma.JsonObject,
-    confidenceModifiersJson: (options.confidenceModifiers ?? {}) as Prisma.JsonObject,
+    weightModifiersJson: (options.weightModifiers ?? {}) as Record<string, unknown>,
+    regionAdjustmentsJson: (options.regionAdjustments ?? {}) as Record<string, unknown>,
+    executionModeAdjustmentsJson: (options.executionAdjustments ?? {}) as Record<string, unknown>,
+    confidenceModifiersJson: (options.confidenceModifiers ?? {}) as Record<string, unknown>,
     lastUpdatedAt: new Date(),
   }
 
@@ -175,11 +182,12 @@ export async function buildAdaptiveRun(
     }
 
     const confidenceModifiers = (profile.confidenceModifiersJson as Record<string, number>) || {}
-    if (typeof confidenceModifiers[command.executionMode ?? command.mode] === 'number') {
-      finalScores.total = Number((finalScores.total + confidenceModifiers[command.executionMode ?? command.mode]).toFixed(4))
+    const executionModeKey = command.executionMode ?? command.mode ?? null
+    if (executionModeKey && typeof confidenceModifiers[executionModeKey] === 'number') {
+      finalScores.total = Number((finalScores.total + confidenceModifiers[executionModeKey]).toFixed(4))
       adjustments.push({
         metric: 'total',
-        value: confidenceModifiers[command.executionMode ?? command.mode],
+        value: confidenceModifiers[executionModeKey],
         reason: 'confidence_modifier',
       })
     }

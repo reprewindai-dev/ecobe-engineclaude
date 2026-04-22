@@ -6,6 +6,8 @@ export type CarbonSignalSource = 'watttime' | 'electricitymaps' | 'sandbox-mock'
 
 export async function buildHealthSnapshot() {
   let redisOk = true
+  let databaseOk = true
+  let totalDecisionsServed = 0
 
   try {
     await redis.ping()
@@ -13,10 +15,16 @@ export async function buildHealthSnapshot() {
     redisOk = false
   }
 
-  const totalDecisionsServed = await prisma.decisionTraceEnvelope.count()
+  try {
+    totalDecisionsServed = await prisma.decisionTraceEnvelope.count()
+  } catch (error) {
+    databaseOk = false
+    console.error('Failed to read decision count for health snapshot', error)
+  }
+
   const carbonSignalSource: CarbonSignalSource = env.ELECTRICITY_MAPS_API_KEY
     ? 'electricitymaps'
-    : env.WATTTIME_USERNAME || env.WATTTIME_PASSWORD || env.WATTTIME_API_KEY
+    : (env.WATTTIME_API_KEY || (env.WATTTIME_USERNAME && env.WATTTIME_PASSWORD))
       ? 'watttime'
       : 'sandbox-mock'
   const privateBoundaryConfigured = Boolean(env.ECOBE_INTERNAL_API_KEY)
@@ -29,7 +37,7 @@ export async function buildHealthSnapshot() {
     privateBoundaryConfigured,
     totalDecisionsServed,
     uptime: Math.round(process.uptime()),
-    database: true,
+    database: databaseOk,
     redis: redisOk,
   }
 }

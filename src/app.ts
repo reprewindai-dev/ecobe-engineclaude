@@ -47,13 +47,17 @@ function rawBodySaver(_req: express.Request, _res: express.Response, buf: Buffer
 }
 
 function attachHealthRoutes(app: express.Express) {
-  async function healthHandler(req: express.Request, res: express.Response) {
+  async function healthHandler(
+    req: express.Request,
+    res: express.Response,
+    includeInternalFields: boolean
+  ) {
     try {
       const snapshot = await buildHealthSnapshot()
       const waterArtifacts = validateWaterArtifacts()
-      const ok = snapshot.redis && waterArtifacts.healthy
+      const ok = snapshot.redis && snapshot.database && waterArtifacts.healthy
 
-      res.status(ok ? 200 : 503).json({
+      const responsePayload = {
         ...snapshot,
         status: ok ? 'ok' : 'degraded',
         engine: 'online',
@@ -66,16 +70,30 @@ function attachHealthRoutes(app: express.Express) {
           gbCarbon: true,
           dkCarbon: true,
           fiCarbon: Boolean(env.FINGRID_API_KEY),
-          static: true
+          static: true,
         },
         timestamp: new Date().toISOString(),
         checks: {
-          database: true,
+          database: snapshot.database,
           redis: snapshot.redis,
           waterArtifacts: waterArtifacts.checks,
         },
         waterArtifactErrors: waterArtifacts.errors,
-      })
+      }
+
+      if (includeInternalFields) {
+        res.status(ok ? 200 : 503).json(responsePayload)
+        return
+      }
+
+      const {
+        totalDecisionsServed: _totalDecisionsServed,
+        carbonSignalSource: _carbonSignalSource,
+        privateBoundaryConfigured: _privateBoundaryConfigured,
+        ...publicPayload
+      } = responsePayload
+
+      res.status(ok ? 200 : 503).json(publicPayload)
     } catch (error) {
       res.status(503).json({
         status: 'unhealthy',
@@ -84,9 +102,9 @@ function attachHealthRoutes(app: express.Express) {
     }
   }
 
-  app.get('/health', healthHandler)
-  app.get('/api/v1/health', healthHandler)
-  app.get('/api/v1/internal/health', internalServiceGuard, healthHandler)
+  app.get('/health', (req, res) => healthHandler(req, res, false))
+  app.get('/api/v1/health', (req, res) => healthHandler(req, res, false))
+  app.get('/api/v1/internal/health', internalServiceGuard, (req, res) => healthHandler(req, res, true))
 }
 
 function attachUiRoute(app: express.Express) {
