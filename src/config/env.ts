@@ -25,6 +25,7 @@ const envSchema = z.object({
   WATTTIME_USERNAME: z.string().optional(),
   WATTTIME_PASSWORD: z.string().optional(),
   WATTTIME_BASE_URL: z.string().optional(),
+  WTT_BASE_URL: z.string().optional(),
 
   // Ember
   EMBER_API_KEY: z.string().optional(),
