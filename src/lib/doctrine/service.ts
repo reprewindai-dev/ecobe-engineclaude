@@ -3,7 +3,7 @@ import type {
   DoctrineAuditEvent,
   DoctrineProposal,
   DoctrineVersion,
-} from "@prisma/client";
+} from "@prisma/client/index";
 import { prisma } from "../db";
 import { redis } from "../redis";
 import { env } from "../../config/env";
