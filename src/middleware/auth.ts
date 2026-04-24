@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
-import type { OperatorRole } from "@prisma/client";
+import type { OperatorRole } from "@prisma/client/index";
 
 import { env } from "../config/env";
 import { prisma } from "../lib/db";
