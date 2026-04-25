@@ -3,6 +3,7 @@ import { redis } from '../redis'
 export const REGION_RELIABILITY_HASH_KEY = 'ci:region-reliability:v1'
 export const REGION_RELIABILITY_META_KEY = 'ci:region-reliability:meta:v1'
 const REGION_RELIABILITY_CACHE_TTL_MS = 5 * 60_000
+const REGION_RELIABILITY_HOT_PATH_TIMEOUT_MS = 10
 
 let regionReliabilityCache:
   | {
@@ -14,6 +15,13 @@ let regionReliabilityLoadPromise: Promise<Record<string, number>> | null = null
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value))
+}
+
+function defaultReliabilityMultipliers(regions: string[]) {
+  return regions.reduce<Record<string, number>>((acc, region) => {
+    acc[region] = 1
+    return acc
+  }, {})
 }
 
 export interface RegionLearningStats {
@@ -75,17 +83,23 @@ export async function loadRegionReliabilityMultipliers(
       })
     }
 
-    const cachedValues = await regionReliabilityLoadPromise
+    const cachedValues = await Promise.race([
+      regionReliabilityLoadPromise,
+      new Promise<null>((resolve) =>
+        setTimeout(resolve, REGION_RELIABILITY_HOT_PATH_TIMEOUT_MS, null)
+      ),
+    ])
+
+    if (!cachedValues) {
+      return defaultReliabilityMultipliers(regions)
+    }
 
     return regions.reduce<Record<string, number>>((acc, region) => {
       acc[region] = cachedValues[region] ?? 1
       return acc
     }, {})
   } catch {
-    return regions.reduce<Record<string, number>>((acc, region) => {
-      acc[region] = 1
-      return acc
-    }, {})
+    return defaultReliabilityMultipliers(regions)
   }
 }
 
