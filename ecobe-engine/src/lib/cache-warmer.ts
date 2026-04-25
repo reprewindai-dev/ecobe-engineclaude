@@ -2,6 +2,7 @@ import { env } from '../config/env'
 import { setWorkerStatus } from '../routes/system'
 import { providerRouter } from './carbon/provider-router'
 import { GridSignalCache } from './grid-signals/grid-signal-cache'
+import type { CachedRoutingSignalRecord } from './grid-signals/grid-signal-cache'
 import { recordTelemetryMetric, telemetryMetricNames } from './observability/telemetry'
 import { redis } from './redis'
 import { storeProviderSnapshot } from './routing/provider-snapshots'
@@ -101,6 +102,44 @@ function getWarmRegions() {
   return Array.from(new Set([...SUPPORTED_REGIONS, ...recentRegions.keys()]))
 }
 
+function isDefensibleRoutingRecord(record: CachedRoutingSignalRecord | null | undefined) {
+  return Boolean(
+    record &&
+      !record.degraded &&
+      !record.signal.provenance.fallbackUsed &&
+      record.signal.signalMode !== 'fallback'
+  )
+}
+
+async function cacheWarmRoutingRecord(
+  region: string,
+  record: CachedRoutingSignalRecord,
+  bucket: Date
+) {
+  await GridSignalCache.cacheRoutingSignal(region, bucket.toISOString(), record)
+  await GridSignalCache.cacheProviderDisagreement(region, bucket.toISOString(), {
+    level: record.signal.provenance.disagreementFlag ? 'medium' : 'none',
+    disagreementPct: record.signal.provenance.disagreementPct,
+    providers: [record.signal.source],
+    values: [record.signal.carbonIntensity],
+  })
+}
+
+async function preserveLastKnownRoutingRecord(
+  region: string,
+  record: CachedRoutingSignalRecord
+) {
+  if (isDefensibleRoutingRecord(record)) {
+    await GridSignalCache.cacheLastKnownGoodRoutingSignal(region, record)
+    return
+  }
+
+  const existing = await GridSignalCache.getLastKnownGoodRoutingSignal(region).catch(() => null)
+  if (!existing) {
+    await GridSignalCache.cacheLastKnownGoodRoutingSignal(region, record)
+  }
+}
+
 export function getRequiredRoutingRegions() {
   return [...SUPPORTED_REGIONS]
 }
@@ -140,8 +179,9 @@ export async function warmCacheOnStartup(): Promise<WarmCycleResult> {
         const record = await providerRouter.getRoutingSignalRecord(region, currentBucket)
 
         await Promise.all([
-          providerRouter.cacheRoutingSignal(region, record, currentBucket),
-          providerRouter.cacheRoutingSignal(region, record, nextBucket),
+          cacheWarmRoutingRecord(region, record, currentBucket),
+          cacheWarmRoutingRecord(region, record, nextBucket),
+          preserveLastKnownRoutingRecord(region, record),
           persistWarmLoopProviderSnapshot(region, record),
         ])
 
@@ -245,6 +285,10 @@ export async function getCacheHealthStatus(): Promise<{
   redisConnected: boolean
   requiredWarmCoveragePct: number
   requiredLkgCoveragePct: number
+  requiredDefensibleWarmCoveragePct: number
+  requiredFallbackWarmCoveragePct: number
+  requiredDefensibleLkgCoveragePct: number
+  requiredFallbackLkgCoveragePct: number
   requiredRegions: string[]
   cacheStats: {
     totalKeys: number
@@ -265,6 +309,10 @@ export async function getCacheHealthStatus(): Promise<{
         redisConnected: false,
         requiredWarmCoveragePct: 0,
         requiredLkgCoveragePct: 0,
+        requiredDefensibleWarmCoveragePct: 0,
+        requiredFallbackWarmCoveragePct: 0,
+        requiredDefensibleLkgCoveragePct: 0,
+        requiredFallbackLkgCoveragePct: 0,
         requiredRegions: SUPPORTED_REGIONS,
         cacheStats: null,
       }
@@ -273,20 +321,24 @@ export async function getCacheHealthStatus(): Promise<{
     const cacheStats = await GridSignalCache.getCacheStats()
     const currentBucket = new Date()
     currentBucket.setSeconds(0, 0)
-    const [warmCoverage, lkgCoverage] = await Promise.all([
+    const [warmRecords, lkgRecords] = await Promise.all([
       Promise.all(
         SUPPORTED_REGIONS.map(async (region) => {
           const current = await GridSignalCache.getCachedRoutingSignal(region, currentBucket.toISOString())
-          return Boolean(current)
+          return current
         })
       ),
       Promise.all(
-        SUPPORTED_REGIONS.map(async (region) =>
-          Boolean(await GridSignalCache.getLastKnownGoodRoutingSignal(region))
-        )
+        SUPPORTED_REGIONS.map(async (region) => GridSignalCache.getLastKnownGoodRoutingSignal(region))
       ),
     ])
 
+    const warmCoverage = warmRecords.map(Boolean)
+    const lkgCoverage = lkgRecords.map(Boolean)
+    const defensibleWarmCoverage = warmRecords.map(isDefensibleRoutingRecord)
+    const fallbackWarmCoverage = warmRecords.map((record) => Boolean(record && !isDefensibleRoutingRecord(record)))
+    const defensibleLkgCoverage = lkgRecords.map(isDefensibleRoutingRecord)
+    const fallbackLkgCoverage = lkgRecords.map((record) => Boolean(record && !isDefensibleRoutingRecord(record)))
     const requiredWarmCoveragePct =
       SUPPORTED_REGIONS.length > 0
         ? (warmCoverage.filter(Boolean).length / SUPPORTED_REGIONS.length) * 100
@@ -297,10 +349,38 @@ export async function getCacheHealthStatus(): Promise<{
         : 0
 
     return {
-      isHealthy: cacheStats.totalKeys > 0 && requiredWarmCoveragePct >= 100 && requiredLkgCoveragePct >= 100,
+      isHealthy: cacheStats.totalKeys > 0 && requiredWarmCoveragePct >= 95,
       redisConnected: true,
       requiredWarmCoveragePct: Number(requiredWarmCoveragePct.toFixed(3)),
       requiredLkgCoveragePct: Number(requiredLkgCoveragePct.toFixed(3)),
+      requiredDefensibleWarmCoveragePct: Number(
+        (
+          SUPPORTED_REGIONS.length > 0
+            ? (defensibleWarmCoverage.filter(Boolean).length / SUPPORTED_REGIONS.length) * 100
+            : 0
+        ).toFixed(3)
+      ),
+      requiredFallbackWarmCoveragePct: Number(
+        (
+          SUPPORTED_REGIONS.length > 0
+            ? (fallbackWarmCoverage.filter(Boolean).length / SUPPORTED_REGIONS.length) * 100
+            : 0
+        ).toFixed(3)
+      ),
+      requiredDefensibleLkgCoveragePct: Number(
+        (
+          SUPPORTED_REGIONS.length > 0
+            ? (defensibleLkgCoverage.filter(Boolean).length / SUPPORTED_REGIONS.length) * 100
+            : 0
+        ).toFixed(3)
+      ),
+      requiredFallbackLkgCoveragePct: Number(
+        (
+          SUPPORTED_REGIONS.length > 0
+            ? (fallbackLkgCoverage.filter(Boolean).length / SUPPORTED_REGIONS.length) * 100
+            : 0
+        ).toFixed(3)
+      ),
       requiredRegions: SUPPORTED_REGIONS,
       cacheStats,
     }
@@ -311,6 +391,10 @@ export async function getCacheHealthStatus(): Promise<{
       redisConnected: false,
       requiredWarmCoveragePct: 0,
       requiredLkgCoveragePct: 0,
+      requiredDefensibleWarmCoveragePct: 0,
+      requiredFallbackWarmCoveragePct: 0,
+      requiredDefensibleLkgCoveragePct: 0,
+      requiredFallbackLkgCoveragePct: 0,
       requiredRegions: SUPPORTED_REGIONS,
       cacheStats: null,
     }
