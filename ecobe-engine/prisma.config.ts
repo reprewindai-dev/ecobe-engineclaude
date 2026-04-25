@@ -1,6 +1,24 @@
 import 'dotenv/config'
 import { defineConfig } from '@prisma/config'
 
+function normalizeDatabaseUrl(url: string) {
+  try {
+    const parsed = new URL(url)
+
+    if (!parsed.port && parsed.hostname.includes(';')) {
+      const [hostname, port] = parsed.hostname.split(';')
+      if (hostname && /^\d+$/.test(port ?? '')) {
+        parsed.hostname = hostname
+        parsed.port = port
+      }
+    }
+
+    return parsed.toString()
+  } catch {
+    return url.replace(/(@[^/?#:]+);(\d+)(?=\/|\?|#|$)/, '$1:$2')
+  }
+}
+
 /**
  * Prisma Config — Accelerate-aware
  *
@@ -12,6 +30,6 @@ import { defineConfig } from '@prisma/config'
  */
 export default defineConfig({
   datasource: {
-    url: process.env.DIRECT_DATABASE_URL || process.env.DATABASE_URL || '',
+    url: normalizeDatabaseUrl(process.env.DIRECT_DATABASE_URL || process.env.DATABASE_URL || ''),
   },
 })
