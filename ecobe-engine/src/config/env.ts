@@ -3,6 +3,24 @@ import dotenv from 'dotenv'
 
 dotenv.config()
 
+function normalizeDatabaseUrl(url: string | undefined) {
+  if (!url?.trim()) return url
+
+  try {
+    const parsed = new URL(url)
+    if (!parsed.port && parsed.hostname.includes(';')) {
+      const [hostname, port] = parsed.hostname.split(';')
+      if (hostname && /^\d+$/.test(port ?? '')) {
+        parsed.hostname = hostname
+        parsed.port = port
+      }
+    }
+    return parsed.toString()
+  } catch {
+    return url.replace(/(@[^/?#:]+);(\d+)(?=\/|\?|#|$)/, '$1:$2')
+  }
+}
+
 export function resolveProductionEnvIssues(input: {
   NODE_ENV: 'development' | 'production' | 'test'
   DIRECT_DATABASE_URL?: string
@@ -224,6 +242,9 @@ if (productionEnvIssues.length > 0) {
 
 export const env = {
   ...parsed.data,
+  DATABASE_URL: normalizeDatabaseUrl(parsed.data.DATABASE_URL) ?? parsed.data.DATABASE_URL,
+  DIRECT_DATABASE_URL:
+    normalizeDatabaseUrl(parsed.data.DIRECT_DATABASE_URL) ?? parsed.data.DIRECT_DATABASE_URL,
   DEFAULT_MAX_CARBON_G_PER_KWH: parseInt(parsed.data.DEFAULT_MAX_CARBON_G_PER_KWH),
   PORT: parseInt(parsed.data.PORT),
   GRID_SIGNAL_CACHE_TTL: parseInt(parsed.data.GRID_SIGNAL_CACHE_TTL),
