@@ -490,7 +490,7 @@ describe('ProviderRouter', () => {
       expect(wattTime.getMOERForecast).not.toHaveBeenCalled()
     })
 
-    it('attempts a live refresh on cache miss before falling back', async () => {
+    it('uses deterministic degraded-safe state on cache miss without touching live providers', async () => {
       const { GridSignalCache } = require('../lib/grid-signals/grid-signal-cache')
       const { wattTime } = require('../lib/watttime')
 
@@ -499,11 +499,12 @@ describe('ProviderRouter', () => {
 
       const record = await router.getHotPathRoutingSignalRecord('us-east-1', new Date())
 
-      expect(record.cacheSource).toBe('live')
+      expect(record.cacheSource).toBe('degraded-safe')
       expect(record.signal.source).toBe('fallback')
       expect(record.signal.provenance.fallbackUsed).toBe(true)
-      expect(record.signal.provenance.sourceUsed).toBe('REGION_SAFE_STATIC_FALLBACK')
-      expect(wattTime.getCurrentMOER).toHaveBeenCalled()
+      expect(record.signal.provenance.sourceUsed).toBe('DEGRADED_SAFE_REGION_BASELINE')
+      expect(wattTime.getCurrentMOER).not.toHaveBeenCalled()
+      expect(wattTime.getMOERForecast).not.toHaveBeenCalled()
     })
 
     it('uses region-aware degraded-safe baselines instead of a flat static fallback', async () => {
@@ -523,11 +524,11 @@ describe('ProviderRouter', () => {
       const apRecord = await router.getHotPathRoutingSignalRecord('ap-northeast-1', new Date())
 
       expect(euRecord.signal.carbonIntensity).toBe(300)
-      expect(euRecord.signal.provenance.sourceUsed).toBe('REGION_SAFE_STATIC_FALLBACK')
+      expect(euRecord.signal.provenance.sourceUsed).toBe('DEGRADED_SAFE_REGION_BASELINE')
       expect(apRecord.signal.carbonIntensity).toBe(400)
     })
 
-    it('ignores cached degraded fallback records and refreshes from live backbone providers', async () => {
+    it('uses cached degraded fallback records instead of refreshing from live providers', async () => {
       const { GridSignalCache } = require('../lib/grid-signals/grid-signal-cache')
       const { wattTime } = require('../lib/watttime')
       const { eia930 } = require('../lib/grid-signals/eia-client')
@@ -590,9 +591,12 @@ describe('ProviderRouter', () => {
 
       const record = await router.getHotPathRoutingSignalRecord('us-west-2', new Date(pointTime))
 
-      expect(record.cacheSource).toBe('live')
-      expect(record.signal.provenance.sourceUsed).toBe('EIA930_GRIDMONITOR_FUEL_MIX')
-      expect(record.signal.provenance.fallbackUsed).toBe(false)
+      expect(record.cacheSource).toBe('warm')
+      expect(record.signal.provenance.sourceUsed).toBe('WARM_CACHE_REGION_SAFE_STATIC_FALLBACK')
+      expect(record.signal.provenance.fallbackUsed).toBe(true)
+      expect(wattTime.getCurrentMOER).not.toHaveBeenCalled()
+      expect(wattTime.getMOERForecast).not.toHaveBeenCalled()
+      expect(eia930.getFuelMix).not.toHaveBeenCalled()
     })
   })
 

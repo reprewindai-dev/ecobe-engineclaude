@@ -167,15 +167,16 @@ export class ProviderRouter {
       region,
       timestamp.toISOString()
     )
-    if (
-      cached &&
-      !cached.record.degraded &&
-      !cached.record.signal.provenance.fallbackUsed &&
-      cached.record.signal.signalMode !== 'fallback'
-    ) {
+    if (cached) {
       return this.withCacheSource(cached.record, cached.source)
     }
-    return this.getRoutingSignalRecord(region, timestamp)
+
+    const lastKnownGood = await GridSignalCache.getLastKnownGoodRoutingSignalWithSource(region)
+    if (lastKnownGood) {
+      return this.withCacheSource(lastKnownGood.record, lastKnownGood.source)
+    }
+
+    return this.buildDegradedSafeRecord(region, timestamp)
   }
 
   /**
@@ -1122,7 +1123,9 @@ export class ProviderRouter {
           sourceUsed:
             source === 'lkg'
               ? record.signal.provenance.sourceUsed
-              : `${provenanceSourcePrefix}_${record.signal.provenance.sourceUsed}`,
+              : record.signal.provenance.sourceUsed.startsWith(`${provenanceSourcePrefix}_`)
+                ? record.signal.provenance.sourceUsed
+                : `${provenanceSourcePrefix}_${record.signal.provenance.sourceUsed}`,
         },
       },
       degraded: source === 'lkg' ? true : record.degraded,
