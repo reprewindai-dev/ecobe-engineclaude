@@ -1,5 +1,6 @@
 import { env } from '../../config/env'
 import { prisma } from '../db'
+import { getSchemaReadinessResult } from '../db/schema-readiness'
 import { eia930 } from '../grid-signals/eia-client'
 import { redis } from '../redis'
 import { recoverWaterArtifactsFromLastKnownGood, validateWaterArtifacts } from '../water/bundle'
@@ -7,6 +8,7 @@ import { runtimeBuildInfo } from './build-info'
 
 export async function buildPublicHealthSnapshot() {
   await prisma.$queryRaw`SELECT 1`
+  const schemaReadiness = await getSchemaReadinessResult()
 
   let redisOk = true
   try {
@@ -24,7 +26,7 @@ export async function buildPublicHealthSnapshot() {
       waterArtifacts = validateWaterArtifacts()
     }
   }
-  const ok = waterArtifacts.healthy && redisOk
+  const ok = waterArtifacts.healthy && redisOk && schemaReadiness.ready
 
   return {
     statusCode: ok ? 200 : 503,
@@ -54,12 +56,15 @@ export async function buildPublicHealthSnapshot() {
       checks: {
         database: true,
         redis: redisOk,
+        schemaReadiness: schemaReadiness.ready,
         waterArtifacts: waterArtifacts.checks,
       },
       dependencies: {
         database: true,
         redis: redisOk,
+        schemaReadiness: schemaReadiness.ready,
       },
+      schemaReadinessFailures: schemaReadiness.failures,
       waterArtifactErrors: waterArtifacts.errors,
       waterArtifactRecovery,
     },

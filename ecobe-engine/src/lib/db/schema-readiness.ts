@@ -4,6 +4,11 @@ const REQUIRED_TABLES = [
   'CIDecision',
   'IntegrationWebhookSink',
   'DecisionEventOutbox',
+  'DecisionTraceEnvelope',
+  'WaterPolicyEvidence',
+  'WaterProviderSnapshot',
+  'FacilityWaterTelemetry',
+  'WaterScenarioRun',
 ] as const
 
 const REQUIRED_ENUMS = [
@@ -28,6 +33,8 @@ const REQUIRED_CI_COLUMNS = [
 const REQUIRED_MIGRATIONS = [
   '20260324193000_add_water_control_plane',
   '20260324211500_add_decision_event_outbox',
+  '20260326113000_add_water_enforcement_plane',
+  '20260328143000_add_decision_trace_envelope',
 ] as const
 
 type ExistsRow = { exists: boolean }
@@ -60,7 +67,7 @@ async function prismaMigrationTableExists() {
   return Boolean(rows[0]?.exists)
 }
 
-export async function assertSchemaReadiness() {
+export async function getSchemaReadinessResult() {
   const failures: string[] = []
 
   for (const table of REQUIRED_TABLES) {
@@ -107,7 +114,16 @@ export async function assertSchemaReadiness() {
     }
   }
 
-  if (failures.length > 0) {
+  return {
+    ready: failures.length === 0,
+    failures,
+  }
+}
+
+export async function assertSchemaReadiness() {
+  const { ready, failures } = await getSchemaReadinessResult()
+
+  if (!ready) {
     const message = [
       'Schema readiness gate failed.',
       ...failures.map((failure) => `- ${failure}`),
