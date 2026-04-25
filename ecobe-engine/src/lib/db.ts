@@ -3,6 +3,24 @@ import { withAccelerate } from '@prisma/extension-accelerate'
 import { withOptimize } from '@prisma/extension-optimize'
 import { env } from '../config/env'
 
+export function normalizeDatabaseUrl(url: string) {
+  try {
+    const parsed = new URL(url)
+
+    if (!parsed.port && parsed.hostname.includes(';')) {
+      const [hostname, port] = parsed.hostname.split(';')
+      if (hostname && /^\d+$/.test(port ?? '')) {
+        parsed.hostname = hostname
+        parsed.port = port
+      }
+    }
+
+    return parsed.toString()
+  } catch {
+    return url.replace(/(@[^/?#:]+);(\d+)(?=\/|\?|#|$)/, '$1:$2')
+  }
+}
+
 /**
  * Ensure Neon pooler URLs have pgbouncer=true for Prisma compatibility.
  * Neon's pooler uses PgBouncer under the hood; without this flag Prisma's
@@ -39,7 +57,7 @@ function ensureNeonPoolerParams(url: string): string {
  * Migrations / introspection use DIRECT_DATABASE_URL via prisma.config.ts.
  */
 const createPrismaClient = () => {
-  const dbUrl = ensureNeonPoolerParams(env.DATABASE_URL)
+  const dbUrl = ensureNeonPoolerParams(normalizeDatabaseUrl(env.DATABASE_URL))
 
   const baseClient = new PrismaClient({
     log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],

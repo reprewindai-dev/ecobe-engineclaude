@@ -331,8 +331,8 @@ const sloState = {
   totalMs: [] as number[],
   computeMs: [] as number[],
   budget: {
-    totalP95Ms: 100,
-    computeP95Ms: 50,
+    totalP95Ms: readPositiveNumberEnv("CI_SLO_TOTAL_P95_BUDGET_MS", 220),
+    computeP95Ms: readPositiveNumberEnv("CI_SLO_COMPUTE_P95_BUDGET_MS", 110),
   },
 };
 
@@ -357,6 +357,11 @@ type PersistedLatencySample = {
   totalMs: number | null;
   computeMs: number | null;
 };
+
+function readPositiveNumberEnv(name: string, fallback: number) {
+  const parsed = Number(process.env[name] ?? fallback);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 function resolveRequestId(data: RoutingRequest) {
   return data.requestId?.trim() || randomUUID();

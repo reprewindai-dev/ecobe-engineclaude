@@ -2,7 +2,7 @@ import { env } from '../../config/env'
 import { prisma } from '../db'
 import { eia930 } from '../grid-signals/eia-client'
 import { redis } from '../redis'
-import { validateWaterArtifacts } from '../water/bundle'
+import { recoverWaterArtifactsFromLastKnownGood, validateWaterArtifacts } from '../water/bundle'
 import { runtimeBuildInfo } from './build-info'
 
 export async function buildPublicHealthSnapshot() {
@@ -15,7 +15,15 @@ export async function buildPublicHealthSnapshot() {
     redisOk = false
   }
 
-  const waterArtifacts = validateWaterArtifacts()
+  let waterArtifacts = validateWaterArtifacts()
+  let waterArtifactRecovery: 'not-needed' | 'recovered' | 'unavailable' = 'not-needed'
+  if (!waterArtifacts.healthy) {
+    const recovery = recoverWaterArtifactsFromLastKnownGood()
+    waterArtifactRecovery = recovery.recovered ? 'recovered' : 'unavailable'
+    if (recovery.recovered) {
+      waterArtifacts = validateWaterArtifacts()
+    }
+  }
   const ok = waterArtifacts.healthy && redisOk
 
   return {
@@ -53,6 +61,7 @@ export async function buildPublicHealthSnapshot() {
         redis: redisOk,
       },
       waterArtifactErrors: waterArtifacts.errors,
+      waterArtifactRecovery,
     },
   }
 }
