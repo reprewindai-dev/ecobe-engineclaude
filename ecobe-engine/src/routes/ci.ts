@@ -324,6 +324,7 @@ export type DecisionExecutionContext = {
   decisionFrameId?: string;
   nowIso?: string;
   resolvedCandidateOverrides?: CandidateEvaluation[];
+  fastSimulation?: boolean;
 };
 
 const sloState = {
@@ -1406,8 +1407,39 @@ export async function createDecision(
   };
 
   const policyHookStarted = Date.now();
-  const sekedPolicy = await evaluateSekedPolicyAdapter(policyRequest);
-  const externalPolicy = await evaluateExternalPolicyHook(policyRequest);
+  const [sekedPolicy, externalPolicy] = executionContext.fastSimulation
+    ? [
+        {
+          enabled: false,
+          strict: false,
+          evaluated: false,
+          applied: false,
+          hookStatus: "skipped",
+          reasonCodes: ["FAST_SIMULATION_POLICY_HOOK_SKIPPED"],
+          policyReference: null,
+          fallbackUsed: false,
+          hardFailure: false,
+          enforcedFailureAction: null,
+          response: null,
+        } satisfies SekedPolicyAdapterResult,
+        {
+          enabled: false,
+          strict: false,
+          evaluated: false,
+          applied: false,
+          hookStatus: "skipped",
+          reasonCodes: ["FAST_SIMULATION_POLICY_HOOK_SKIPPED"],
+          policyReference: null,
+          fallbackUsed: false,
+          hardFailure: false,
+          enforcedFailureAction: null,
+          response: null,
+        } satisfies ExternalPolicyHookResult,
+      ]
+    : await Promise.all([
+        evaluateSekedPolicyAdapter(policyRequest),
+        evaluateExternalPolicyHook(policyRequest),
+      ]);
   const policyHookMs = Date.now() - policyHookStarted;
 
   const applyPolicyDirectives = (
@@ -2636,13 +2668,15 @@ async function routeDecisionHandler(req: Request, res: Response) {
       }
     }
 
-    computeStarted = Date.now();
-    const result = await createDecision(data);
-    computeMs = Date.now() - computeStarted;
     const isFastSimulationRequest = isInternalFastSimulationRequest(
       req,
-      result.persistable.request,
+      data,
     );
+    computeStarted = Date.now();
+    const result = await createDecision(data, {
+      fastSimulation: isFastSimulationRequest,
+    });
+    computeMs = Date.now() - computeStarted;
     let validatedResponse: CiResponseV2;
     let persistedTraceHash: string | null = null;
 
