@@ -479,7 +479,13 @@ function assuranceToProofPosture(
   return "operational" as const;
 }
 
-function recordLatency(totalMs: number, computeMs: number) {
+function recordLatency(
+  totalMs: number,
+  computeMs: number,
+  decisionMode: WaterDecisionMode,
+) {
+  if (decisionMode !== "runtime_authorization") return;
+
   const windowSize = 250;
   sloState.totalMs.push(totalMs);
   sloState.computeMs.push(computeMs);
@@ -546,7 +552,10 @@ async function getPersistedLatencyWindow(
   }> = [];
 
   for (const decision of recentDecisions) {
-    const latency = (decision.metadata as any)?.response?.latencyMs;
+    const response = (decision.metadata as any)?.response;
+    if (response?.decisionMode !== "runtime_authorization") continue;
+
+    const latency = response?.latencyMs;
     const totalMs = isFiniteLatency(latency?.total) ? latency.total : null;
     const computeMs = isFiniteLatency(latency?.compute)
       ? latency.compute
@@ -2744,7 +2753,11 @@ async function routeDecisionHandler(req: Request, res: Response) {
       }
     }
 
-    recordLatency(recordedTotalMs, computeMs);
+    recordLatency(
+      recordedTotalMs,
+      computeMs,
+      validatedResponse.decisionMode as WaterDecisionMode,
+    );
     recordTelemetryMetric(
       telemetryMetricNames.authorizationDecisionCount,
       "counter",
@@ -2820,7 +2833,13 @@ async function routeDecisionHandler(req: Request, res: Response) {
         ? Math.max(0, Date.now() - computeStarted)
         : totalMs);
 
-    recordLatency(totalMs, fallbackComputeMs);
+    recordLatency(
+      totalMs,
+      fallbackComputeMs,
+      req.body?.decisionMode === "scenario_planning"
+        ? "scenario_planning"
+        : "runtime_authorization",
+    );
     recordTelemetryMetric(
       telemetryMetricNames.authorizationDecisionCount,
       "counter",
