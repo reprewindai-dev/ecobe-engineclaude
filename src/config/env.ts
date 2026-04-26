@@ -143,6 +143,8 @@ const envSchema = z.object({
 
   // Internal service auth (used by internal-auth middleware and admin routes)
   ECOBE_INTERNAL_API_KEY: z.string().optional(),
+  ECOBE_TRUSTED_BROKER_ID: z.string().default("ecobe-mvp"),
+  ECOBE_ENFORCE_BROKER_ID: z.string().optional(),
 
   // External integrations
   ECOBE_ENGINE_URL: z.string().optional(),
@@ -199,6 +201,10 @@ export const env = {
     parsed.data.ENGINE_BACKGROUND_WORKERS_ENABLED !== undefined
       ? parsed.data.ENGINE_BACKGROUND_WORKERS_ENABLED === "true"
       : false,
+  ECOBE_ENFORCE_BROKER_ID:
+    parsed.data.ECOBE_ENFORCE_BROKER_ID !== undefined
+      ? parsed.data.ECOBE_ENFORCE_BROKER_ID === "true"
+      : parsed.data.NODE_ENV === "production",
   FORECAST_REFRESH_ENABLED:
     parsed.data.FORECAST_REFRESH_ENABLED !== undefined
       ? parsed.data.FORECAST_REFRESH_ENABLED === "true"
