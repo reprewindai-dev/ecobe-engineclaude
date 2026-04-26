@@ -2,12 +2,17 @@ import { prisma } from "../db";
 
 const REQUIRED_TABLES = [
   "CIDecision",
+  "DecisionTraceEnvelope",
   "IntegrationWebhookSink",
   "DecisionEventOutbox",
   "Operator",
   "DoctrineProposal",
   "DoctrineVersion",
   "DoctrineAuditEvent",
+  "WaterPolicyEvidence",
+  "WaterProviderSnapshot",
+  "FacilityWaterTelemetry",
+  "WaterScenarioRun",
 ] as const;
 
 const REQUIRED_PGL_TABLES = [
@@ -45,6 +50,8 @@ const REQUIRED_CI_COLUMNS = [
 const REQUIRED_MIGRATIONS = [
   "20260324193000_add_water_control_plane",
   "20260324211500_add_decision_event_outbox",
+  "20260326113000_add_water_enforcement_plane",
+  "20260328143000_add_decision_trace_envelope",
   "20260411120000_add_pgl_v0",
   "20260414120000_add_doctrine_authority_control_plane",
 ] as const;
@@ -52,6 +59,11 @@ const REQUIRED_MIGRATIONS = [
 type ExistsRow = { exists: boolean };
 type ColumnRow = { column_name: string };
 type MigrationRow = { migration_name: string; finished_at: Date | null };
+
+export type SchemaReadinessResult = {
+  ready: boolean;
+  failures: string[];
+};
 
 async function tableExists(tableName: string) {
   const rows = (await prisma.$queryRawUnsafe(
@@ -86,7 +98,7 @@ async function prismaMigrationTableExists() {
   return Boolean(rows[0]?.exists);
 }
 
-export async function assertSchemaReadiness() {
+export async function getSchemaReadinessResult(): Promise<SchemaReadinessResult> {
   const failures: string[] = [];
 
   for (const table of REQUIRED_TABLES) {
@@ -141,10 +153,19 @@ export async function assertSchemaReadiness() {
     }
   }
 
-  if (failures.length > 0) {
+  return {
+    ready: failures.length === 0,
+    failures,
+  };
+}
+
+export async function assertSchemaReadiness() {
+  const readiness = await getSchemaReadinessResult();
+
+  if (!readiness.ready) {
     const message = [
       "Schema readiness gate failed.",
-      ...failures.map((failure) => `- ${failure}`),
+      ...readiness.failures.map((failure) => `- ${failure}`),
     ].join("\n");
     throw new Error(message);
   }
