@@ -244,7 +244,9 @@ export const ecobeApi = {
 
   async getDashboardSavings(window: '24h' | '7d' | '30d' = '24h'): Promise<DashboardSavings> {
     try {
-      const { data } = await api.get('/dashboard/savings', { params: { window } })
+      const { data } = await api.get<DashboardSavings | CompactDashboardSavings>('/dashboard/savings', {
+        params: { window },
+      })
       return normalizeDashboardSavings(data)
     } catch (error) {
       console.error('Failed to fetch dashboard savings:', error)
@@ -346,7 +348,7 @@ export const ecobeApi = {
 
   async getMethodology(): Promise<MethodologyCard> {
     try {
-      const { data } = await api.get('/methodology')
+      const { data } = await api.get<MethodologyCard>('/methodology')
       return data
     } catch (error) {
       console.error('Failed to fetch methodology:', error)
@@ -361,7 +363,7 @@ export const ecobeApi = {
     policyMode?: 'default' | 'sec_disclosure_strict' | 'eu_24x7_ready'
   }): Promise<DisclosureExportResponse> {
     try {
-      const { data } = await api.get('/disclosure/export', {
+      const { data } = await api.get<DisclosureExportResponse>('/disclosure/export', {
         params: {
           format: 'json',
           ...params,
@@ -376,7 +378,7 @@ export const ecobeApi = {
 
   async getDisclosureBatches(limit = 20): Promise<DisclosureBatchResponse> {
     try {
-      const { data } = await api.get('/disclosure/batches', { params: { limit } })
+      const { data } = await api.get<DisclosureBatchResponse>('/disclosure/batches', { params: { limit } })
       return data
     } catch (error) {
       console.error('Failed to fetch disclosure batches:', error)

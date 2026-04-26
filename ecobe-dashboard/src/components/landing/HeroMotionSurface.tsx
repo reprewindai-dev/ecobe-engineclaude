@@ -1,6 +1,4 @@
 'use client'
-
-import Link from 'next/link'
 import { motion } from 'framer-motion'
 
 import { CO2RouterLogo } from '@/components/CO2RouterLogo'
@@ -97,26 +95,26 @@ export function HeroMotionSurface({
             carbon, water, latency, cost, and policy before workloads run, then attaches proof,
             trace, replay, and provenance to the same decision frame.
           </p>
-          <div className="mt-8 flex flex-wrap gap-3">
-            <Link
-              href="/console"
-              className="rounded-2xl bg-gradient-to-r from-emerald-300 via-cyan-300 to-sky-400 px-5 py-3 text-sm font-bold uppercase tracking-[0.18em] text-slate-950 transition hover:brightness-105"
-            >
-              Open Control Surface
-            </Link>
-            <Link
-              href="/methodology"
-              className="rounded-2xl border border-cyan-300/20 bg-cyan-300/8 px-5 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-cyan-100 transition hover:border-cyan-300/40 hover:bg-cyan-300/12"
-            >
-              Read Methodology
-            </Link>
-            <a
-              href="#live-decision"
-              className="rounded-2xl border border-white/12 bg-white/5 px-5 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-white transition hover:border-cyan-300/40 hover:bg-cyan-300/8"
-            >
-              Watch Live Decisions
-            </a>
-          </div>
+        <div className="mt-8 flex flex-wrap gap-3">
+          <a
+            href="#live-decision"
+            className="rounded-2xl bg-gradient-to-r from-emerald-300 via-cyan-300 to-sky-400 px-5 py-3 text-sm font-bold uppercase tracking-[0.18em] text-slate-950 transition hover:brightness-105"
+          >
+            Watch the live demo
+          </a>
+          <a
+            href="#proof"
+            className="rounded-2xl border border-cyan-300/20 bg-cyan-300/8 px-5 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-cyan-100 transition hover:border-cyan-300/40 hover:bg-cyan-300/12"
+          >
+            Inspect proof
+          </a>
+          <a
+            href="#signals"
+            className="rounded-2xl border border-white/12 bg-white/5 px-5 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-white transition hover:border-cyan-300/40 hover:bg-cyan-300/8"
+          >
+            Review signals
+          </a>
+        </div>
         </div>
 
         <div className="grid gap-4">
