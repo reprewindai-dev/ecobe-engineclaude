@@ -1,7 +1,5 @@
 'use client'
 
-import Link from 'next/link'
-
 export function PricingOrControlSection() {
   const plans = [
     {
@@ -71,24 +69,24 @@ export function PricingOrControlSection() {
         ))}
       </div>
       <div className="mt-8 flex flex-wrap gap-3">
-        <Link
-          href="/console"
+        <a
+          href="#live-system"
           className="rounded-2xl bg-gradient-to-r from-emerald-300 via-cyan-300 to-sky-400 px-5 py-3 text-sm font-bold uppercase tracking-[0.18em] text-slate-950"
         >
           Open the Control Surface
-        </Link>
-        <Link
-          href="/methodology"
+        </a>
+        <a
+          href="#proof"
           className="rounded-2xl border border-white/12 bg-white/[0.04] px-5 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-white"
         >
           View methodology
-        </Link>
-        <Link
-          href="/contact"
+        </a>
+        <a
+          href="#hero"
           className="rounded-2xl border border-white/12 bg-white/[0.04] px-5 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-white"
         >
           Contact sales
-        </Link>
+        </a>
       </div>
     </section>
   )
