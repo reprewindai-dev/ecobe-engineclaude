@@ -44,4 +44,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD node -e "const http = require('http'); const req = http.get('http://localhost:8080/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }); req.on('error', () => process.exit(1)); req.setTimeout(5000, () => process.exit(1));"
 
-CMD ["sh", "-c", "node -e \"if(!process.env.DATABASE_URL){console.error('Missing DATABASE_URL');process.exit(1)}; if(!process.env.DIRECT_DATABASE_URL){console.error('Missing DIRECT_DATABASE_URL');process.exit(1)}\" && node dist/server.js"]
+CMD ["sh", "-c", "node -e \"if(!process.env.DATABASE_URL){console.error('Missing DATABASE_URL');process.exit(1)}; if(!process.env.DIRECT_DATABASE_URL){console.error('Missing DIRECT_DATABASE_URL');process.exit(1)}\" && node scripts/ensure-prisma-client.cjs && npx prisma migrate deploy && node dist/server.js"]
