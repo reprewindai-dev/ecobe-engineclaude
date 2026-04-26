@@ -39,3 +39,5 @@ export function internalServiceGuard(req: Request, res: Response, next: NextFunc
 
   return next()
 }
+
+export const brokerSurfaceGuard = internalServiceGuard
