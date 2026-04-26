@@ -9,7 +9,6 @@ import {
   addMonths,
   formatISO,
 } from 'date-fns'
-import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/db'
 import { getIntegrationMetricsSummary, computeIntegrationSuccessRate } from '../lib/integration-metrics'
 import { getForecastRefreshSummary, getLastForecastRefreshState } from '../lib/forecast-refresh'
@@ -159,9 +158,9 @@ function summarizeWaterProviderTrust(
     scenario: string
     authorityMode: string
     confidence: number | null
-    evidenceRefs: Prisma.JsonValue
+    evidenceRefs: unknown
     observedAt: Date
-    metadata: Prisma.JsonValue
+    metadata: unknown
   }>
 ): WaterProviderTrustRow[] {
   const summaryRows = summarizeWaterProviders()
@@ -567,7 +566,7 @@ router.get('/accuracy', async (req, res) => {
 
     const { start, end } = resolveAccuracyRange(range, startDate, endDate)
 
-    const commandWhere: Prisma.CarbonCommandWhereInput = {
+    const commandWhere: Record<string, unknown> = {
       orgId,
       createdAt: { gte: start, lte: end },
     }

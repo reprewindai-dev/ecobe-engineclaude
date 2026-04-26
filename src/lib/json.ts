@@ -1,9 +1,9 @@
 import { Prisma } from '@prisma/client'
 import type { InputJsonValue, JsonValue } from '@prisma/client/runtime/library'
 
-type PrismaJsonNull = (typeof Prisma.JsonNullValueInput)['JsonNull']
+type PrismaJsonNull = null
 
-const JSON_NULL: PrismaJsonNull = Prisma.JsonNullValueInput.JsonNull
+const JSON_NULL: PrismaJsonNull = null
 
 export type JsonInput = InputJsonValue | PrismaJsonNull
 

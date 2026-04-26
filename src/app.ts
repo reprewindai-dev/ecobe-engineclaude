@@ -2,8 +2,6 @@ import express from 'express'
 import cors from 'cors'
 
 import { env } from './config/env'
-import { prisma } from './lib/db'
-import { redis } from './lib/redis'
 import energyRoutes from './routes/energy'
 import dekesRoutes from './routes/dekes'
 import routingRoutes from './routes/routing'
@@ -38,6 +36,8 @@ import internalPolicyRoutes from './routes/internal-policy'
 import doctrineRoutes from './routes/doctrine'
 import { recordTelemetryMetric, telemetryMetricNames } from './lib/observability/telemetry'
 import { validateWaterArtifacts } from './lib/water/bundle'
+import { internalServiceGuard } from './middleware/internal-auth'
+import { buildHealthSnapshot } from './services/health.service'
 
 function rawBodySaver(_req: express.Request, _res: express.Response, buf: Buffer) {
   if (buf?.length) {
@@ -47,21 +47,18 @@ function rawBodySaver(_req: express.Request, _res: express.Response, buf: Buffer
 }
 
 function attachHealthRoutes(app: express.Express) {
-  async function healthHandler(req: express.Request, res: express.Response) {
+  async function healthHandler(
+    req: express.Request,
+    res: express.Response,
+    includeInternalFields: boolean
+  ) {
     try {
-      await prisma.$queryRaw`SELECT 1`
-
-      let redisOk = true
-      try {
-        await redis.ping()
-      } catch {
-        redisOk = false
-      }
-
+      const snapshot = await buildHealthSnapshot()
       const waterArtifacts = validateWaterArtifacts()
-      const ok = redisOk && waterArtifacts.healthy
+      const ok = snapshot.redis && snapshot.database && waterArtifacts.healthy
 
-      res.status(ok ? 200 : 503).json({
+      const responsePayload = {
+        ...snapshot,
         status: ok ? 'ok' : 'degraded',
         engine: 'online',
         router: true,
@@ -73,16 +70,30 @@ function attachHealthRoutes(app: express.Express) {
           gbCarbon: true,
           dkCarbon: true,
           fiCarbon: Boolean(env.FINGRID_API_KEY),
-          static: true
+          static: true,
         },
         timestamp: new Date().toISOString(),
         checks: {
-          database: true,
-          redis: redisOk,
+          database: snapshot.database,
+          redis: snapshot.redis,
           waterArtifacts: waterArtifacts.checks,
         },
         waterArtifactErrors: waterArtifacts.errors,
-      })
+      }
+
+      if (includeInternalFields) {
+        res.status(ok ? 200 : 503).json(responsePayload)
+        return
+      }
+
+      const {
+        totalDecisionsServed: _totalDecisionsServed,
+        carbonSignalSource: _carbonSignalSource,
+        privateBoundaryConfigured: _privateBoundaryConfigured,
+        ...publicPayload
+      } = responsePayload
+
+      res.status(ok ? 200 : 503).json(publicPayload)
     } catch (error) {
       res.status(503).json({
         status: 'unhealthy',
@@ -91,8 +102,9 @@ function attachHealthRoutes(app: express.Express) {
     }
   }
 
-  app.get('/health', healthHandler)
-  app.get('/api/v1/health', healthHandler)
+  app.get('/health', (req, res) => healthHandler(req, res, false))
+  app.get('/api/v1/health', (req, res) => healthHandler(req, res, false))
+  app.get('/api/v1/internal/health', internalServiceGuard, (req, res) => healthHandler(req, res, true))
 }
 
 function attachUiRoute(app: express.Express) {
