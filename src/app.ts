@@ -3,6 +3,7 @@ import cors from 'cors'
 
 import { env } from './config/env'
 import { prisma } from './lib/db'
+import { getSchemaReadinessResult } from './lib/db/schema-readiness'
 import { redis } from './lib/redis'
 import energyRoutes from './routes/energy'
 import dekesRoutes from './routes/dekes'
@@ -59,7 +60,8 @@ function attachHealthRoutes(app: express.Express) {
       }
 
       const waterArtifacts = validateWaterArtifacts()
-      const ok = redisOk && waterArtifacts.healthy
+      const schemaReadiness = await getSchemaReadinessResult()
+      const ok = redisOk && waterArtifacts.healthy && schemaReadiness.ready
 
       res.status(ok ? 200 : 503).json({
         status: ok ? 'ok' : 'degraded',
@@ -80,8 +82,10 @@ function attachHealthRoutes(app: express.Express) {
           database: true,
           redis: redisOk,
           waterArtifacts: waterArtifacts.checks,
+          schemaReadiness: schemaReadiness.ready,
         },
         waterArtifactErrors: waterArtifacts.errors,
+        schemaReadinessFailures: schemaReadiness.failures,
       })
     } catch (error) {
       res.status(503).json({

@@ -2,9 +2,9 @@
 
 ## Canonical source validation
 - Confirm deploy source is only:
-  - `C:\Users\antho\.windsurf\ecobe-engineclaude\ecobe-dashboard`
-  - `C:\Users\antho\.windsurf\ecobe-engineclaude\ecobe-engine`
-- Confirm no side worktree, nested repo copy, or root wrapper is the active Railway source
+  - `C:\Users\antho\OneDrive\Desktop\.windsurf\ecobe-engineclaude\ecobe-dashboard`
+  - `C:\Users\antho\OneDrive\Desktop\.windsurf\ecobe-engineclaude\ecobe-engine`
+- Confirm no side worktree, nested repo copy, or root wrapper is the active Hetzner source
 
 ## Build validation
 - Engine:
@@ -122,3 +122,10 @@
 - `p95 total <= 100ms`
 - `p95 compute <= 50ms`
 - signed event delivery verified
+
+## Windsurf handoff
+- Handoff target: engine repo only
+- Handoff boundary: Hetzner-hosted engine, Postgres, Redis, and internal auth
+- Remove any remaining legacy deployment assumptions before transfer
+- Keep the public site and external preview/testing stack separate from the engine runtime
+- Validate `/internal/v1/health` and the CI decision endpoints immediately after the transfer

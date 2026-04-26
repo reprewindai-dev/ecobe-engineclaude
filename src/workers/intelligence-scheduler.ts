@@ -35,16 +35,8 @@ const qstashClient = env.QSTASH_TOKEN
 const resolvedQstashBase = env.QSTASH_BASE_URL ?? 'https://qstash.upstash.io'
 
 function resolveEngineBaseUrl() {
-  const renderUrl = process.env.RENDER_EXTERNAL_URL?.trim()
   if (env.ECOBE_ENGINE_URL?.trim()) {
     return env.ECOBE_ENGINE_URL.trim().replace(/\/$/, '')
-  }
-  if (renderUrl) {
-    return renderUrl.replace(/\/$/, '')
-  }
-  const renderHostname = process.env.RENDER_EXTERNAL_HOSTNAME?.trim()
-  if (renderHostname) {
-    return `https://${renderHostname.replace(/\/$/, '')}`
   }
   return null
 }
