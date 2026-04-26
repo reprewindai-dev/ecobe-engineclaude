@@ -11,10 +11,10 @@ export interface SiteLinkSection {
 export const primaryNavLinks: SiteLink[] = [
   { href: '/', label: 'Overview' },
   { href: '/design-partners', label: 'Design Partners' },
-  { href: '/console', label: 'Control Surface' },
+  { href: '/#live-system', label: 'Control Surface' },
   { href: '/assurance', label: 'Assurance' },
   { href: '/status', label: 'Status' },
-  { href: '/methodology', label: 'Methodology' },
+  { href: '/#proof', label: 'Methodology' },
   { href: '/blog', label: 'Blog' },
 ]
 
@@ -24,10 +24,10 @@ export const footerLinkSections: SiteLinkSection[] = [
     links: [
       { href: '/', label: 'Overview' },
       { href: '/design-partners', label: 'Design Partners' },
-      { href: '/console', label: 'Control Surface' },
+      { href: '/#live-system', label: 'Control Surface' },
       { href: '/assurance', label: 'Assurance' },
       { href: '/status', label: 'Status' },
-      { href: '/methodology', label: 'Methodology' },
+      { href: '/#proof', label: 'Methodology' },
       { href: '/blog', label: 'Blog' },
     ],
   },
