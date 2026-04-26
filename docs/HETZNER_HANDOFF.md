@@ -17,6 +17,25 @@ Run the CO2 Router engine as the only backend service on Hetzner with:
 - background workers
 - decision proof and replay support
 
+## Repo map
+
+This checkout contains multiple worktrees under one local root. Windsurf should treat them as separate responsibilities, even if they live side by side here.
+
+| Worktree / repo | Purpose | Handoff rule |
+| --- | --- | --- |
+| `ecobe-engine` | Canonical internal engine | Move to Hetzner only; keep Postgres, Redis, internal auth, schema readiness, and proof/replay here |
+| `ecobe-dashboard` | Public control-surface UI | Keep separate from the engine; point it at the engine host via env vars |
+| `ecobe-engine-integration` | Integration / adapter harness | Use for end-to-end verification, not as the canonical runtime |
+| `ecobe-engine-mainline-gate` | Mainline gate / validation copy | Use for merge gating and proof checks, not as the live runtime |
+| `co2router-tech` | Local dependency cache / stray workspace | Not a production source repo; do not deploy from it |
+
+## System boundary
+
+- Engine runtime: Hetzner
+- Public site/UI: separate repo and deployment target
+- Autonoma / preview checks: GitHub-connected quality gate only
+- Render: no longer part of the engine runtime path
+
 ## Required services
 
 - PostgreSQL
@@ -169,3 +188,22 @@ If schema readiness fails, the engine should report degraded instead of pretendi
 - Do not skip migrations before boot.
 - Do not treat missing optional integrations as fatal if they are intentionally unused.
 
+## Windsurf handoff summary
+
+- Scope: engine only.
+- Final home: Hetzner-hosted engine, PostgreSQL, Redis, and internal auth.
+- Out of scope: public site repo, Render runtime assumptions, and preview-layer testing setup.
+- First verification after transfer:
+  - `GET /internal/v1/health`
+  - `POST /internal/v1/routing-decisions`
+  - `GET /internal/v1/routing-decisions/:decisionId`
+  - `POST /internal/v1/routing-decisions/:decisionId/execute`
+- If any of those fail, fix the engine contract before touching UI or preview tooling.
+
+## Start here for Windsurf
+
+1. Open `ecobe-engine` first.
+2. Verify `ECOBE_ENGINE_URL`, `DATABASE_URL`, `DIRECT_DATABASE_URL`, and `REDIS_URL`.
+3. Verify migrations and schema readiness.
+4. Verify health and CI decision endpoints.
+5. Only after the engine is stable, update the public UI repo to point at the engine host.
