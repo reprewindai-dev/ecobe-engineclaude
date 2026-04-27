@@ -23,9 +23,15 @@ const devRequiredFiles = ['src/routes/ci.ts', 'prisma/schema.prisma', 'src/serve
 const prodRequiredFiles = ['dist/server.js', 'prisma/schema.prisma', 'scripts/verify-canonical-root.cjs']
 const lifecycleEvent = process.env.npm_lifecycle_event || ''
 const isBuildLifecycle = lifecycleEvent === 'prebuild' || lifecycleEvent === 'build'
+const hasDistServer = fs.existsSync(path.join(cwd, 'dist', 'server.js'))
+const isPrebuildVerifyLifecycle =
+  lifecycleEvent === 'verify:canonical-root' &&
+  process.env.npm_lifecycle_script === 'node scripts/verify-canonical-root.cjs' &&
+  !hasDistServer &&
+  fs.existsSync(path.join(cwd, 'src', 'server.ts'))
 const isProductionRuntime =
-  (process.env.NODE_ENV === 'production' && !isBuildLifecycle) ||
-  fs.existsSync(path.join(cwd, 'dist', 'server.js'))
+  (process.env.NODE_ENV === 'production' && !isBuildLifecycle && !isPrebuildVerifyLifecycle) ||
+  hasDistServer
 
 const requiredFiles = isProductionRuntime ? prodRequiredFiles : devRequiredFiles
 const missing = requiredFiles.filter((file) => !fs.existsSync(path.join(cwd, file)))
