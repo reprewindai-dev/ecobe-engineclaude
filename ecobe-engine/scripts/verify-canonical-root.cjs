@@ -21,8 +21,11 @@ if (normalized.includes(nestedDuplicatePath)) {
 
 const devRequiredFiles = ['src/routes/ci.ts', 'prisma/schema.prisma', 'src/server.ts']
 const prodRequiredFiles = ['dist/server.js', 'prisma/schema.prisma', 'scripts/verify-canonical-root.cjs']
+const lifecycleEvent = process.env.npm_lifecycle_event || ''
+const isBuildLifecycle = lifecycleEvent === 'prebuild' || lifecycleEvent === 'build'
 const isProductionRuntime =
-  process.env.NODE_ENV === 'production' || fs.existsSync(path.join(cwd, 'dist', 'server.js'))
+  (process.env.NODE_ENV === 'production' && !isBuildLifecycle) ||
+  fs.existsSync(path.join(cwd, 'dist', 'server.js'))
 
 const requiredFiles = isProductionRuntime ? prodRequiredFiles : devRequiredFiles
 const missing = requiredFiles.filter((file) => !fs.existsSync(path.join(cwd, file)))
