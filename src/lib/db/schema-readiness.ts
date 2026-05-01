@@ -87,6 +87,10 @@ async function prismaMigrationTableExists() {
 }
 
 export async function assertSchemaReadiness() {
+  if (process.env.SKIP_SCHEMA_READINESS_GATE === 'true') {
+    return;
+  }
+
   const failures: string[] = [];
 
   for (const table of REQUIRED_TABLES) {
