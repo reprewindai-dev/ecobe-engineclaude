@@ -133,15 +133,52 @@ import { internalServiceGuard } from "../middleware/internal-auth";
 const router = Router();
 
 const RUNNER_REGIONS: Record<string, string[]> = {
-  "us-east-1": ["ubuntu-latest", "windows-latest", "macos-latest"],
-  "us-west-2": ["ubuntu-latest", "windows-latest"],
-  "us-central-1": ["ubuntu-latest"],
-  "eu-west-1": ["ubuntu-latest", "windows-latest"],
-  "eu-west-2": ["ubuntu-latest"],
-  "eu-central-1": ["ubuntu-latest"],
+  // ── North America — US ──
+  "us-east-1":      ["ubuntu-latest", "windows-latest", "macos-latest"],
+  "us-east-2":      ["ubuntu-latest", "windows-latest"],
+  "us-west-1":      ["ubuntu-latest", "windows-latest"],
+  "us-west-2":      ["ubuntu-latest", "windows-latest"],
+  "us-central-1":   ["ubuntu-latest"],
+  "us-south-1":     ["ubuntu-latest"],
+  "us-northeast-1": ["ubuntu-latest"],
+  // ── North America — Canada ──
+  "ca-central-1":   ["ubuntu-latest"],
+  "ca-west-1":      ["ubuntu-latest"],
+  "ca-bc-1":        ["ubuntu-latest"],
+  // ── South America ──
+  "sa-east-1":      ["ubuntu-latest"],
+  "sa-south-1":     ["ubuntu-latest"],
+  "sa-west-1":      ["ubuntu-latest"],
+  "sa-north-1":     ["ubuntu-latest"],
+  // ── Europe ──
+  "eu-west-1":      ["ubuntu-latest", "windows-latest"],
+  "eu-west-2":      ["ubuntu-latest", "windows-latest"],
+  "eu-west-3":      ["ubuntu-latest"],
+  "eu-west-4":      ["ubuntu-latest"],
+  "eu-central-1":   ["ubuntu-latest", "windows-latest"],
+  "eu-central-2":   ["ubuntu-latest"],
+  "eu-central-3":   ["ubuntu-latest"],
+  "eu-central-4":   ["ubuntu-latest"],
+  "eu-central-5":   ["ubuntu-latest"],
+  "eu-north-1":     ["ubuntu-latest"],
+  "eu-north-2":     ["ubuntu-latest"],
+  "eu-north-3":     ["ubuntu-latest"],
+  "eu-south-1":     ["ubuntu-latest"],
+  "eu-south-2":     ["ubuntu-latest"],
+  "eu-east-1":      ["ubuntu-latest"],
+  // ── Middle East & Africa ──
+  "me-south-1":     ["ubuntu-latest"],
+  "af-south-1":     ["ubuntu-latest"],
+  // ── Asia Pacific ──
   "ap-southeast-1": ["ubuntu-latest"],
+  "ap-southeast-2": ["ubuntu-latest"],
+  "ap-southeast-3": ["ubuntu-latest"],
+  "ap-southeast-4": ["ubuntu-latest"],
   "ap-northeast-1": ["ubuntu-latest"],
-  "ap-south-1": ["ubuntu-latest"],
+  "ap-northeast-2": ["ubuntu-latest"],
+  "ap-northeast-3": ["ubuntu-latest"],
+  "ap-south-1":     ["ubuntu-latest"],
+  "ap-south-2":     ["ubuntu-latest"],
 };
 
 export const requestSchema = z.object({
