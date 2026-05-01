@@ -10,15 +10,15 @@ export async function ensureReferenceRegions(): Promise<void> {
 
   for (const region of REFERENCE_REGIONS) {
     await prisma.region.upsert({
-      where: { code: region.code },
+      where: { code: region.regionCode },
       update: {
-        name: region.name,
+        name: region.displayName,
         country: region.country,
         enabled: true,
       },
       create: {
-        code: region.code,
-        name: region.name,
+        code: region.regionCode,
+        name: region.displayName,
         country: region.country,
         enabled: true,
       },

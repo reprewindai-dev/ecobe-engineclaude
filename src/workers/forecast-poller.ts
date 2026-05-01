@@ -12,7 +12,7 @@ import {
 } from '../constants/forecasting'
 import { REFERENCE_REGIONS } from '../constants/reference-regions'
 
-const FALLBACK_FORECAST_REGIONS = REFERENCE_REGIONS.map((region) => region.code)
+const FALLBACK_FORECAST_REGIONS = REFERENCE_REGIONS.map((region) => region.regionCode)
 
 async function upsertCarbonSample(region: string, timestamp: Date, intensity: number) {
   await prisma.carbonIntensity.upsert({
