@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import { Router, Request, Response } from 'express'
 import { z } from 'zod'
 
 import { prisma } from '../lib/db'
@@ -46,7 +46,7 @@ router.get('/provenance', (_req, res) => {
   }
 })
 
-router.post('/provenance/verify', internalServiceGuard, (req, res) => {
+router.post('/provenance/verify', internalServiceGuard, (req: Request, res: Response) => {
   try {
     const payload = z
       .object({
@@ -63,7 +63,7 @@ router.post('/provenance/verify', internalServiceGuard, (req, res) => {
   }
 })
 
-router.post('/scenarios/plan', async (req, res) => {
+router.post('/scenarios/plan', async (req: Request, res: Response) => {
   try {
     const payload = z
       .object({
@@ -101,7 +101,7 @@ router.post('/scenarios/plan', async (req, res) => {
   }
 })
 
-router.get('/evidence/:decisionFrameId', async (req, res) => {
+router.get('/evidence/:decisionFrameId', async (req: Request, res: Response) => {
   try {
     const decisionFrameId = z.string().min(1).parse(req.params.decisionFrameId)
     const [decision, evidence, scenarioRuns, telemetry] = await Promise.all([
