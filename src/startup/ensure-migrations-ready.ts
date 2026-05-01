@@ -11,12 +11,12 @@ function resolvePrismaBinary() {
   )
 
   if (existsSync(localBinary)) {
-    return { command: localBinary, args: ['migrate', 'deploy'] }
+    return { command: localBinary, args: ['db', 'push', '--accept-data-loss'] }
   }
 
   return {
     command: process.platform === 'win32' ? 'npx.cmd' : 'npx',
-    args: ['prisma', 'migrate', 'deploy'],
+    args: ['prisma', 'db', 'push', '--accept-data-loss'],
   }
 }
 
