@@ -2,7 +2,7 @@ import crypto from 'crypto'
 import axios from 'axios'
 import { NextResponse } from 'next/server'
 
-const DEFAULT_ENGINE_URL = 'https://ecobe-engineclaude-production.up.railway.app'
+const DEFAULT_ENGINE_URL = 'http://5.78.135.11:8000'
 const FORWARDED_HEADERS = ['accept', 'content-type', 'authorization', 'x-request-id', 'x-ecobe-signature'] as const
 const SIGNED_DECISION_PATHS = new Set(['ci/route', 'ci/authorize', 'ci/carbon-route'])
 
@@ -33,10 +33,10 @@ function getDecisionApiSignatureSecret() {
   )
 }
 
-function signDecisionBody(body: Buffer) {
+function signDecisionBody(body: ArrayBuffer) {
   const secret = getDecisionApiSignatureSecret()
   if (!secret) return null
-  return crypto.createHmac('sha256', secret).update(body).digest('hex')
+  return crypto.createHmac('sha256', secret).update(Buffer.from(body)).digest('hex')
 }
 
 async function proxy(request: Request, ctx: { params: Promise<{ path?: string[] }> }) {
@@ -73,7 +73,7 @@ async function proxy(request: Request, ctx: { params: Promise<{ path?: string[] 
   }
 
   const bodyBuffer =
-    ['GET', 'HEAD'].includes(request.method) ? undefined : Buffer.from(await request.arrayBuffer())
+    ['GET', 'HEAD'].includes(request.method) ? undefined : Buffer.from(await request.arrayBuffer()) as unknown as ArrayBuffer
 
   if (!useInternalKey && bodyBuffer && SIGNED_DECISION_PATHS.has(path.join('/')) && !headers['x-ecobe-signature']) {
     const signature = signDecisionBody(bodyBuffer)

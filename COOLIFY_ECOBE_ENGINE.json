@@ -1,0 +1,40 @@
+{
+  "coolify_url": "http://5.78.135.11:8000",
+  "token": "1|aWbg84afguM4Ma8hKBNKWSgBmWi7HGEhLQGElh1Z9f3fe2a7",
+  "project": {
+    "name": "ecobe-engine",
+    "description": "CO2 Router / ECOBE Engine - Carbon-aware workload routing"
+  },
+  "services": {
+    "postgres": {
+      "uuid": "llwfyzhnft87bz6brddiax1z",
+      "status": "running:healthy",
+      "internal_url": "postgres://byos:WZk0…@llwfyzhnft87bz6brddiax1z:5432/byos_ai"
+    },
+    "redis": {
+      "uuid": "v8vf3lw73fx9lw9xmbq1tvo5",
+      "status": "running:healthy",
+      "internal_url": "redis://default:NE7O3…@v8vf3lw73fx9lw9xmbq1tvo5:6379/0"
+    }
+  },
+  "deployment": {
+    "repo": "https://github.com/reprewindai-dev/ecobe-engineclaude",
+    "branch": "main",
+    "build_pack": "dockerfile",
+    "dockerfile_path": "Dockerfile",
+    "name": "ecobe-engine",
+    "domain": "5.78.135.11",
+    "port": 8080,
+    "healthcheck": "/health"
+  },
+  "environment_variables": {
+    "NODE_ENV": "production",
+    "PORT": "8080",
+    "DATABASE_URL": "${DATABASE_URL}",
+    "DIRECT_DATABASE_URL": "${DIRECT_DATABASE_URL}",
+    "REDIS_URL": "${REDIS_URL}",
+    "ELECTRICITY_MAPS_API_KEY": "${ELECTRICITY_MAPS_API_KEY}",
+    "SECRET_KEY": "${SECRET_KEY}",
+    "CORS_ORIGINS": "https://co2router.tech,https://www.co2router.tech,http://5.78.135.11:8000"
+  }
+}

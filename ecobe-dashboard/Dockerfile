@@ -14,7 +14,7 @@ COPY . .
 # Provide at build time for deployment. Default to localhost for development.
 # ECOBE engine URL — used by next.config.js rewrites at build time
 # Railway env var overrides this default
-ARG ECOBE_API_URL="https://ecobe-engineclaude-production.up.railway.app"
+ARG ECOBE_API_URL="http://5.78.135.11:8000"
 ENV ECOBE_API_URL=${ECOBE_API_URL}
 # Client-side API URL — uses server-side rewrite proxy (relative path)
 ARG NEXT_PUBLIC_ECOBE_API_URL="/api/ecobe"

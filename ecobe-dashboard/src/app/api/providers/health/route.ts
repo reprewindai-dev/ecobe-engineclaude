@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 
 export async function GET() {
   try {
-    const baseUrl = process.env.ECOBE_API_URL || 'https://ecobe-engineclaude-production.up.railway.app'
+    const baseUrl = process.env.ECOBE_API_URL || 'http://5.78.135.11:8000'
     const internalKey = process.env.ECOBE_INTERNAL_API_KEY
 
     const headers: Record<string, string> = {
