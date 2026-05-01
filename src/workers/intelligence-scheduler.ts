@@ -26,6 +26,11 @@ const jobDefinitions: IntelligenceJobDefinition[] = [
     cron: env.INTELLIGENCE_CALIBRATION_CRON,
     path: '/api/v1/intelligence/jobs/model-calibration',
   },
+  {
+    name: 'region-recompute',
+    cron: '0 */6 * * *', // runs every 6 hours
+    path: '/api/v1/intelligence/jobs/region-recompute',
+  },
 ]
 
 const qstashClient = env.QSTASH_TOKEN

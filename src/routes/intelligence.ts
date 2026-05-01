@@ -6,6 +6,7 @@ import { recordExternalWorkloadOutcome, IntelligenceOutcomeError } from '../lib/
 import { getIntelligenceMetrics } from '../lib/intelligence/metrics'
 import { intelligenceJobGuard } from '../middleware/intelligence-job-guard'
 import { runIntelligenceAccuracyJob, runVectorCleanupJob, runModelCalibrationJob } from '../workers/intelligence-jobs'
+import { runRecomputeJob } from '../jobs/recompute-region-baselines-job'
 import { getJobStatuses, recordJobStatus } from '../lib/intelligence/job-status'
 import { getIntegrationMetricsSummary } from '../lib/integration-metrics'
 import { getScheduledIntelligenceJobs } from '../workers/intelligence-scheduler'
@@ -146,6 +147,16 @@ router.post('/jobs/model-calibration', intelligenceJobGuard, async (_req, res) =
   } catch (error: any) {
     console.error('Model calibration job error:', error)
     return res.status(500).json({ success: false, error: { code: 'JOB_FAILED', message: error?.message ?? 'Failed to run model calibration job' } })
+  }
+})
+
+router.post('/jobs/region-recompute', intelligenceJobGuard, async (_req, res) => {
+  try {
+    await executeJob('region-recompute', runRecomputeJob)
+    return res.json({ success: true })
+  } catch (error: any) {
+    console.error('Region recompute job error:', error)
+    return res.status(500).json({ success: false, error: { code: 'JOB_FAILED', message: error?.message ?? 'Failed to run region recompute job' } })
   }
 })
 

@@ -1,40 +1,38 @@
-# Canonical engine deploy wrapper.
-# Build and run only from ecobe-engine/ so root deploys cannot drift from the
-# doctrine-complete engine source of truth.
+# ECOBE Engine - Root deployment
 FROM node:22-alpine AS base
 RUN apk add --no-cache libc6-compat
 
 FROM base AS deps
-WORKDIR /app/ecobe-engine
-COPY ecobe-engine/package.json ./package.json
-COPY ecobe-engine/package-lock.json* ./package-lock.json
+WORKDIR /app
+COPY package.json ./package.json
+COPY package-lock.json* ./package-lock.json
 RUN npm install --legacy-peer-deps
 
 FROM base AS builder
-WORKDIR /app/ecobe-engine
+WORKDIR /app
 ARG BUILDTIME_DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=public"
 ENV DATABASE_URL=${BUILDTIME_DATABASE_URL}
 ENV DIRECT_DATABASE_URL=${BUILDTIME_DATABASE_URL}
-COPY --from=deps /app/ecobe-engine/node_modules ./node_modules
-COPY ecobe-engine/ ./
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
 RUN npx prisma generate
 RUN npm run build
 
 FROM base AS runner
-WORKDIR /app/ecobe-engine
+WORKDIR /app
 ENV NODE_ENV=production
 
 RUN addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 --ingroup nodejs ecobe
 
-COPY --from=builder /app/ecobe-engine/dist ./dist
-COPY --from=builder /app/ecobe-engine/node_modules ./node_modules
-COPY --from=builder /app/ecobe-engine/package.json ./package.json
-COPY --from=builder /app/ecobe-engine/prisma ./prisma
-COPY --from=builder /app/ecobe-engine/prisma.config.ts ./prisma.config.ts
-COPY --from=builder /app/ecobe-engine/scripts ./scripts
-COPY --from=builder /app/ecobe-engine/data ./data
-COPY --from=builder /app/ecobe-engine/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
+COPY --from=builder /app/scripts ./scripts
+COPY --from=builder /app/data ./data
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 
 RUN chown -R ecobe:nodejs /app
 USER ecobe

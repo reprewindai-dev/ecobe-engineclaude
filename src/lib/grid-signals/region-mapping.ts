@@ -8,6 +8,34 @@
  * - us-east-1, us-west-2, eu-west-1, eu-central-1, ap-southeast-1, ap-northeast-1
  */
 
+import { REFERENCE_REGIONS, type RegionCode } from '../../constants/reference-regions'
+
+// ── Built from REFERENCE_REGIONS.cloudRegions at module load ──
+const cloudToRegion: Record<string, RegionCode> = {}
+for (const region of REFERENCE_REGIONS) {
+  for (const cloud of region.cloudRegions) {
+    cloudToRegion[cloud] = region.regionCode
+  }
+}
+
+/**
+ * Map a cloud/edge provider region code to the canonical CO2 Router RegionCode.
+ * Throws if the cloud region is not registered in REFERENCE_REGIONS.
+ */
+export function mapCloudRegionToGridRegion(cloudRegion: string): RegionCode {
+  const code = cloudToRegion[cloudRegion]
+  if (!code) throw new Error(`Unknown cloud region: ${cloudRegion}`)
+  return code
+}
+
+/**
+ * Map a canonical RegionCode to its balancing authority string.
+ * Returns null when no BA is configured (non-US regions without EIA-930 coverage).
+ */
+export function mapGridRegionToBA(regionCode: RegionCode): string | null {
+  return REFERENCE_REGIONS.find(r => r.regionCode === regionCode)?.balancingAuthority ?? null
+}
+
 export interface RegionMapping {
   cloudRegion: string
   balancingAuthority: string | null

@@ -77,6 +77,7 @@ const envSchema = z.object({
   INTELLIGENCE_ACCURACY_CRON: z.string().default("*/30 * * * *"),
   INTELLIGENCE_VECTOR_CLEANUP_CRON: z.string().default("0 3 * * *"),
   INTELLIGENCE_CALIBRATION_CRON: z.string().default("15 * * * *"),
+  REGION_RECOMPUTE_CRON: z.string().default("0 */6 * * *"),
 
   FORECAST_REFRESH_ENABLED: z.string().optional(),
   FORECAST_REFRESH_CRON: z.string().default("*/30 * * * *"),
@@ -317,6 +318,7 @@ export const env = {
   INTELLIGENCE_VECTOR_CLEANUP_CRON:
     parsed.data.INTELLIGENCE_VECTOR_CLEANUP_CRON,
   INTELLIGENCE_CALIBRATION_CRON: parsed.data.INTELLIGENCE_CALIBRATION_CRON,
+  REGION_RECOMPUTE_CRON: parsed.data.REGION_RECOMPUTE_CRON,
   EIA_INGESTION_REGION_STAGGER_MS: parseInt(
     parsed.data.EIA_INGESTION_REGION_STAGGER_MS,
   ),

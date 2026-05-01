@@ -168,6 +168,7 @@ const RUNNER_REGIONS: Record<string, string[]> = {
   "eu-east-1":      ["ubuntu-latest"],
   // ── Middle East & Africa ──
   "me-south-1":     ["ubuntu-latest"],
+  "me-central-1":   ["ubuntu-latest"],
   "af-south-1":     ["ubuntu-latest"],
   // ── Asia Pacific ──
   "ap-southeast-1": ["ubuntu-latest"],
@@ -179,6 +180,24 @@ const RUNNER_REGIONS: Record<string, string[]> = {
   "ap-northeast-3": ["ubuntu-latest"],
   "ap-south-1":     ["ubuntu-latest"],
   "ap-south-2":     ["ubuntu-latest"],
+  // ── Vercel edge region aliases (map to canonical grid regions via REFERENCE_REGIONS) ──
+  "iad1":           ["ubuntu-latest", "windows-latest", "macos-latest"], // → US-MIDA-PJM
+  "pdx1":           ["ubuntu-latest", "windows-latest"],                 // → US-NW-BPAT
+  "sfo1":           ["ubuntu-latest", "windows-latest"],                 // → US-CAL-CISO
+  "cle1":           ["ubuntu-latest"],                                   // → US-MIDW-MISO
+  "yul1":           ["ubuntu-latest"],                                   // → CA-QC
+  "lhr1":           ["ubuntu-latest", "windows-latest"],                 // → EU-GB
+  "cdg1":           ["ubuntu-latest"],                                   // → EU-FR
+  "arn1":           ["ubuntu-latest"],                                   // → EU-SE
+  "fra1":           ["ubuntu-latest", "windows-latest"],                 // → EU-DE
+  "dub1":           ["ubuntu-latest"],                                   // → EU-GB (Ireland routes to GB grid)
+  "sin1":           ["ubuntu-latest"],                                   // → AP-SG
+  "hnd1":           ["ubuntu-latest"],                                   // → AP-JP-TOKYO
+  "kix1":           ["ubuntu-latest"],                                   // → AP-JP-OSAKA
+  "syd1":           ["ubuntu-latest"],                                   // → AP-AU-NSW
+  "gru1":           ["ubuntu-latest"],                                   // → SA-BR-SE
+  "cpt1":           ["ubuntu-latest"],                                   // → AF-ZA
+  "dxb1":           ["ubuntu-latest"],                                   // → ME-AE
 };
 
 export const requestSchema = z.object({
