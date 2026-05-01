@@ -9,7 +9,7 @@ import { createDecision, requestSchema } from './ci'
 
 const router = Router()
 
-router.get('/providers', async (_req, res) => {
+router.get('/providers', async (_req: Request, res: Response) => {
   try {
     const providers = summarizeWaterProviders()
     const metadata = getWaterArtifactMetadata()
@@ -35,7 +35,7 @@ router.get('/providers', async (_req, res) => {
   }
 })
 
-router.get('/provenance', (_req, res) => {
+router.get('/provenance', (_req: Request, res: Response) => {
   try {
     return res.json(verifyWaterDatasetProvenance())
   } catch (error) {
