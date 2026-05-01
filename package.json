@@ -47,6 +47,7 @@
     "@prisma/instrumentation": "^6.19.2",
     "@types/axios": "^0.9.36",
     "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.19",
     "@types/jsonwebtoken": "^9.0.10",
     "@upstash/qstash": "^2.9.0",
     "@upstash/redis": "^1.36.3",
@@ -67,7 +68,6 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@types/cors": "^2.8.19",
     "@types/jest": "^29.5.0",
     "@types/supertest": "^6.0.3",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
