@@ -19,7 +19,7 @@ if (normalized.includes(nestedDuplicatePath)) {
 const devRequiredFiles = ['src/routes/ci.ts', 'prisma/schema.prisma', 'src/server.ts']
 const prodRequiredFiles = ['dist/server.js', 'prisma/schema.prisma', 'scripts/verify-canonical-root.cjs']
 const isProductionRuntime =
-  process.env.NODE_ENV === 'production' || fs.existsSync(path.join(cwd, 'dist', 'server.js'))
+  process.env.NODE_ENV === 'production' && fs.existsSync(path.join(cwd, 'dist', 'server.js'))
 
 const requiredFiles = isProductionRuntime ? prodRequiredFiles : devRequiredFiles
 const missing = requiredFiles.filter((file) => !fs.existsSync(path.join(cwd, file)))
