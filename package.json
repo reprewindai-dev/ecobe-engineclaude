@@ -7,7 +7,7 @@
     "verify:canonical-root": "node scripts/verify-canonical-root.cjs",
     "dev": "tsx watch src/server.ts",
     "prebuild": "npm run verify:canonical-root && node -e \"console.log('ECOBE_ENGINE_URL present:', Boolean(process.env.ECOBE_ENGINE_URL))\"",
-    "build": "tsc && prisma generate",
+    "build": "npx tsc && npx prisma generate",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "start": "npm run verify:canonical-root && node dist/server.js",
     "test": "npm run verify:canonical-root && jest",
