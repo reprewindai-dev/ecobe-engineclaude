@@ -48,6 +48,38 @@ export interface CleanWindow {
   confidence: number
 }
 
+const WATTTIME_REGION_ALIASES: Record<string, string> = {
+  'US-CAL-CISO': 'CAISO_NORTH',
+  'US-TEX-ERCO': 'ERCOT_EASTTX',
+  'US-MIDA-PJM': 'PJM_DOM',
+  'US-MIDW-MISO': 'MISO_WUMS',
+  'US-NW-BPAT': 'BPAT',
+  'US-NE-ISNE': 'ISNE',
+  'US-WEST-1': 'CAISO_NORTH',
+  'US-WEST-2': 'BPAT',
+  'US-EAST-1': 'PJM_DOM',
+  'US-EAST-2': 'PJM_DOM',
+  'US-CENTRAL1': 'MISO_WUMS',
+  'US-CENTRAL-1': 'MISO_WUMS',
+  'US-EAST4': 'PJM_DOM',
+  'US-WEST1': 'BPAT',
+  'EASTUS': 'PJM_DOM',
+  'EASTUS2': 'PJM_DOM',
+  'WESTUS2': 'BPAT',
+  'CENTRALUS': 'MISO_WUMS',
+  'SOUTHCENTRALUS': 'ERCOT_EASTTX',
+  'SFO1': 'CAISO_NORTH',
+  'PDX1': 'BPAT',
+  'IAD1': 'PJM_DOM',
+  'CLE1': 'MISO_WUMS',
+}
+
+export function resolveWattTimeRegion(region: string): string | null {
+  const normalized = region.trim().toUpperCase()
+  if (!normalized) return null
+  return WATTTIME_REGION_ALIASES[normalized] ?? (normalized.includes('_') ? normalized : null)
+}
+
 export class WattTimeClient {
   private baseUrl: string
   private username?: string
@@ -186,13 +218,16 @@ export class WattTimeClient {
   }
 
   async getCurrentMOER(balancingAuthority: string): Promise<WattTimeMOER | null> {
+    const wattTimeRegion = resolveWattTimeRegion(balancingAuthority)
+    if (!wattTimeRegion) return null
+
     try {
       const response = await this.requestWithAuth<{
         data: Array<{ point_time: string; value: number }>
         meta: { region: string; signal_type: string; units: string; data_point_period_seconds: number }
       }>('watttime.getCurrentMOER', `${this.baseUrl}/v3/signal-index`, {
         params: {
-          region: balancingAuthority,
+          region: wattTimeRegion,
           signal_type: 'co2_moer',
         },
       })
@@ -223,17 +258,18 @@ export class WattTimeClient {
     startTime?: Date,
     endTime?: Date
   ): Promise<WattTimeForecast[]> {
+    const wattTimeRegion = resolveWattTimeRegion(balancingAuthority)
+    if (!wattTimeRegion) return []
+
     try {
       const params: any = {
-        region: balancingAuthority,
+        region: wattTimeRegion,
         signal_type: 'co2_moer',
       }
 
-      if (startTime) {
-        params.start = startTime.toISOString()
-      }
       if (endTime) {
-        params.end = endTime.toISOString()
+        const horizonHours = Math.ceil((endTime.getTime() - Date.now()) / (60 * 60 * 1000))
+        params.horizon_hours = Math.max(0, Math.min(72, horizonHours))
       }
 
       const response = await this.requestWithAuth<{
@@ -245,7 +281,7 @@ export class WattTimeClient {
 
       const modelVersion = response.data.meta?.model?.date ?? 'unknown'
       const forecasts = (response.data.data || []).map((item) => ({
-        balancingAuthority: response.data.meta?.region ?? balancingAuthority,
+        balancingAuthority: response.data.meta?.region ?? wattTimeRegion,
         timestamp: item.point_time,
         moer: item.value,
         version: modelVersion,

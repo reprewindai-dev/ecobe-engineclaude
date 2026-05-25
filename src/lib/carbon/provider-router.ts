@@ -1,4 +1,4 @@
-import { wattTime } from '../watttime'
+import { resolveWattTimeRegion, wattTime } from '../watttime'
 import { ember } from '../ember'
 import { gbCarbonIntensity } from '../gb-carbon-intensity'
 import { denmarkCarbon } from '../denmark-carbon'
@@ -338,8 +338,8 @@ export class ProviderRouter {
     try {
       // Map cloud region to WattTime v3 sub-regional name
       // ONLY try US regions — WattTime free plan covers US only (CAISO_NORTH full access)
-      const wattTimeRegion = ProviderRouter.WATTTIME_REGION_MAP[region]
-      if (!wattTimeRegion) return null // No mapping = not a US region, skip entirely
+      const wattTimeRegion = resolveWattTimeRegion(region)
+      if (!wattTimeRegion) return null
 
       // Try current MOER first
       const currentMoer = await wattTime.getCurrentMOER(wattTimeRegion)

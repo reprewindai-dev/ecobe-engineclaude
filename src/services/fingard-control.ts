@@ -15,7 +15,7 @@
  * Rest: Ember → Static
  */
 
-import { wattTime } from '../lib/watttime'
+import { resolveWattTimeRegion, wattTime } from '../lib/watttime'
 import { eia930 } from '../lib/grid-signals/eia-client'
 import { ember } from '../lib/ember'
 import { GridSignalCache } from '../lib/grid-signals/grid-signal-cache'
@@ -146,9 +146,12 @@ export class FingardControlLayer {
   private async queryProvider(provider: string, region: string, timestamp: Date) {
     switch (provider) {
       case 'watttime': {
-        const moer = await wattTime.getCurrentMOER(region)
+        const wattTimeRegion = resolveWattTimeRegion(region)
+        if (!wattTimeRegion) return null
+
+        const moer = await wattTime.getCurrentMOER(wattTimeRegion)
         if (moer) return { carbonIntensity: moer.moer, timestamp: moer.timestamp, isForecast: false }
-        const forecast = await wattTime.getMOERForecast(region)
+        const forecast = await wattTime.getMOERForecast(wattTimeRegion)
         return forecast?.[0] ? { carbonIntensity: forecast[0].moer, timestamp: forecast[0].timestamp, isForecast: true } : null
       }
 
