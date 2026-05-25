@@ -11,7 +11,9 @@ import {
 } from '../constants/forecasting'
 import { REFERENCE_REGIONS } from '../constants/reference-regions'
 
-const FALLBACK_FORECAST_REGIONS = REFERENCE_REGIONS.map((region) => region.regionCode)
+const FALLBACK_FORECAST_REGIONS = REFERENCE_REGIONS
+  .filter((region) => !region.syntheticFlag)
+  .map((region) => region.regionCode)
 
 async function upsertCarbonSample(
   region: string,
@@ -97,7 +99,7 @@ async function recordRefresh(region: string, payload: {
 export async function runForecastRefresh() {
   const runStart = new Date()
   try {
-    const regions = await prisma.region.findMany({ where: { enabled: true }, select: { code: true } })
+    const regions = await prisma.region.findMany({ where: { enabled: true, syntheticFlag: false }, select: { code: true } })
     const regionCodes =
       regions.length > 0
         ? regions.map((region: { code: string }) => region.code)

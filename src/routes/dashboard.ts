@@ -1037,7 +1037,7 @@ router.post('/what-if/intensities', async (req, res) => {
 router.get('/regions', async (_req, res) => {
   try {
     const regions = (await prisma.region.findMany({
-      where: { enabled: true },
+      where: { enabled: true, syntheticFlag: false },
       select: { code: true, name: true, country: true },
       orderBy: { code: 'asc' },
     })) as { code: string; name: string | null; country: string | null }[]
