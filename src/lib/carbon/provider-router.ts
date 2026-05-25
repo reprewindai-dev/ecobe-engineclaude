@@ -3,6 +3,7 @@ import { ember } from '../ember'
 import { gbCarbonIntensity } from '../gb-carbon-intensity'
 import { denmarkCarbon } from '../denmark-carbon'
 import { finlandCarbon } from '../finland-carbon'
+import { canadaCarbon } from '../canada-carbon'
 import { env } from '../../config/env'
 import {
   CachedRoutingSignalRecord,
@@ -34,7 +35,7 @@ export interface ProviderDisagreement {
 
 export interface RoutingSignal {
   carbonIntensity: number
-  source: 'watttime' | 'electricity_maps' | 'ember' | 'gb_carbon_intensity' | 'dk_carbon' | 'fi_carbon' | 'eia930_fuel_mix' | 'fallback'
+  source: 'watttime' | 'electricity_maps' | 'ember' | 'gb_carbon_intensity' | 'dk_carbon' | 'fi_carbon' | 'ca_carbon' | 'eia930_fuel_mix' | 'fallback'
   isForecast: boolean
   confidence: number
   signalMode: 'marginal' | 'average' | 'fallback'
@@ -226,6 +227,35 @@ export class ProviderRouter {
           sourceUsed: 'FI_FINGRID',
           contributingSources: ['fi_carbon'],
           referenceTime,
+          fetchedAt,
+          fallbackUsed: false,
+          disagreementFlag: validation.disagreement.level !== 'none',
+          disagreementPct: validation.disagreement.disagreementPct,
+          validationNotes: validation.validationNotes
+        }
+      }
+    }
+
+    // ── TIER 1e: Canada provincial grids → direct public operator/open-data feeds ──
+    const canadaSignal = await this.getCanadaSignal(region)
+    if (canadaSignal) {
+      const validation = await this.validateWithEmber(canadaSignal, region, timestamp, [canadaSignal])
+      const sourceUsed =
+        canadaSignal.metadata?.zone === 'CA-ON'
+          ? 'ON_IESO_GENERATOR_OUTPUT'
+          : 'QC_HYDRO_QUEBEC_OPEN_DATA'
+
+      return {
+        carbonIntensity: canadaSignal.carbonIntensity,
+        source: 'ca_carbon' as any,
+        isForecast: canadaSignal.isForecast,
+        confidence: validation.adjustedConfidence,
+        signalMode: 'average',
+        accountingMethod: 'average',
+        provenance: {
+          sourceUsed,
+          contributingSources: ['ca_carbon'],
+          referenceTime: canadaSignal.timestamp,
           fetchedAt,
           fallbackUsed: false,
           disagreementFlag: validation.disagreement.level !== 'none',
@@ -488,6 +518,49 @@ export class ProviderRouter {
     return null
   }
 
+  private static CANADA_REGIONS = new Set([
+    'CA-ON',
+    'canadacentral',
+    'CA-QC',
+    'ca-central-1',
+    'ca-west-1',
+    'northamerica-northeast1',
+    'canadaeast',
+  ])
+
+  private async getCanadaSignal(region: string): Promise<ProviderSignal | null> {
+    if (!ProviderRouter.CANADA_REGIONS.has(region)) return null
+
+    try {
+      const data =
+        region === 'CA-ON' || region === 'canadacentral'
+          ? await canadaCarbon.getOntarioIntensity()
+          : await canadaCarbon.getQuebecIntensity()
+
+      if (!data) return null
+
+      return {
+        carbonIntensity: data.carbonIntensity,
+        isForecast: data.isForecast,
+        source: 'ca_carbon' as any,
+        timestamp: data.timestamp,
+        estimatedFlag: true,
+        syntheticFlag: false,
+        confidence: 0.76,
+        metadata: {
+          signalType: data.method,
+          zone: data.zone,
+          fuelBreakdownMw: data.fuelBreakdownMw,
+          sourceUrl: data.sourceUrl,
+          factorMethod: 'IPCC-weighted public generation mix',
+        }
+      }
+    } catch (error) {
+      console.warn(`Canada carbon signal failed for ${region}:`, error)
+      return null
+    }
+  }
+
   // Cloud and canonical regions with direct EIA-930 fuel mix coverage (US only)
   private static EIA930_BA_MAP: Record<string, string> = {
     'US-CAL-CISO': 'CISO',
@@ -603,7 +676,8 @@ export class ProviderRouter {
       // GB Carbon Intensity is authoritative real-time — its deviation from yearly baseline is expected
       const isAuthoritativeRealtime = disagreementSignals.some(s =>
         s.source === 'gb_carbon_intensity' || s.source === 'electricity_maps' ||
-        s.source === 'dk_carbon' || s.source === 'fi_carbon' || s.source === 'eia930_fuel_mix'
+        s.source === 'dk_carbon' || s.source === 'fi_carbon' ||
+        s.source === 'ca_carbon' || s.source === 'eia930_fuel_mix'
       )
 
       if (isWattTimePercentile) {

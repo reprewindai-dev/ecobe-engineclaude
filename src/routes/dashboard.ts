@@ -16,6 +16,8 @@ import { getForecastRefreshSummary, getLastForecastRefreshState } from '../lib/f
 import { getTelemetrySnapshot } from '../lib/observability/telemetry'
 import { getProviderFreshness, getCapacityOverview } from '../lib/routing'
 import { summarizeWaterProviders } from '../lib/water/bundle'
+import { REFERENCE_REGIONS, type GlobalRegionConfig } from '../constants/reference-regions'
+import { env } from '../config/env'
 
 const router = Router()
 
@@ -1034,6 +1036,145 @@ router.post('/what-if/intensities', async (req, res) => {
   }
 })
 
+type RouteCoverageStatus =
+  | 'active'
+  | 'policy_marginal'
+  | 'needs_key'
+  | 'needs_connector'
+  | 'registered_no_current_signal'
+  | 'unsupported'
+
+function configuredProviderFor(region: GlobalRegionConfig): string | null {
+  if (region.country === 'US' && region.eiaRespondent) return 'EIA-930 direct fuel mix'
+  if (region.regionCode === 'EU-GB') return 'GB Carbon Intensity API'
+  if (region.regionCode === 'EU-DK1' || region.regionCode === 'EU-DK2') return 'Energi Data Service'
+  if (region.regionCode === 'EU-FI') return 'Fingrid'
+  if (region.regionCode === 'CA-ON') return 'IESO public generator output'
+  if (region.regionCode === 'CA-QC') return 'Hydro-Quebec open data'
+  return null
+}
+
+function routeCoverageStatus(
+  region: GlobalRegionConfig,
+  latest: { carbonIntensity: number; source: string | null; timestamp: Date; isEstimated: boolean | null } | null
+): { status: RouteCoverageStatus; reason: string; requiredAction: string | null; provider: string | null } {
+  if (region.syntheticFlag) {
+    return {
+      status: 'unsupported',
+      reason: 'Synthetic region is intentionally excluded from live routing.',
+      requiredAction: null,
+      provider: null,
+    }
+  }
+
+  const provider = configuredProviderFor(region)
+  if (latest) {
+    const ageMs = Date.now() - latest.timestamp.getTime()
+    if (ageMs <= 2 * 60 * 60 * 1000) {
+      return {
+        status: 'active',
+        reason: `Current source-backed signal from ${latest.source ?? provider ?? 'provider'}.`,
+        requiredAction: null,
+        provider,
+      }
+    }
+    return {
+      status: 'registered_no_current_signal',
+      reason: `Last source-backed signal is stale: ${Math.round(ageMs / 60000)} minutes old.`,
+      requiredAction: 'Investigate provider freshness or worker cadence.',
+      provider,
+    }
+  }
+
+  if (region.regionCode === 'EU-FI' && !env.FINGRID_API_KEY) {
+    return {
+      status: 'needs_key',
+      reason: 'Fingrid connector exists but FINGRID_API_KEY is not configured.',
+      requiredAction: 'Add FINGRID_API_KEY in Coolify for ecobe-engineclaude.',
+      provider,
+    }
+  }
+
+  if (provider) {
+    return {
+      status: 'registered_no_current_signal',
+      reason: `${provider} connector is configured but no current carbon sample has been stored yet.`,
+      requiredAction: 'Run forecast refresh and check integration metrics for this provider.',
+      provider,
+    }
+  }
+
+  return {
+    status: 'needs_connector',
+    reason: 'No verified live/current public source connector is implemented for this region yet.',
+    requiredAction: 'Verify an official source, implement connector, then activate only after a real sample lands.',
+    provider,
+  }
+}
+
+router.get('/route-coverage', async (_req, res) => {
+  try {
+    const latestByRegion = await Promise.all(
+      REFERENCE_REGIONS
+        .filter((region) => !region.syntheticFlag)
+        .map(async (region) => {
+          const latest = await prisma.carbonIntensity.findFirst({
+            where: {
+              region: region.regionCode,
+              source: { notIn: ['WATTTIME_MOER', 'LKG_WATTTIME_MOER'] },
+            },
+            orderBy: { timestamp: 'desc' },
+            select: { carbonIntensity: true, timestamp: true, source: true, isEstimated: true },
+          })
+          return [region.regionCode, latest] as const
+        })
+    )
+    const latestMap = new Map(latestByRegion)
+
+    const regions = REFERENCE_REGIONS
+      .filter((region) => !region.syntheticFlag)
+      .map((region) => {
+        const latest = latestMap.get(region.regionCode) ?? null
+        const coverage = routeCoverageStatus(region, latest)
+        return {
+          regionCode: region.regionCode,
+          displayName: region.displayName,
+          country: region.country,
+          cloudRegions: region.cloudRegions,
+          status: coverage.status,
+          reason: coverage.reason,
+          requiredAction: coverage.requiredAction,
+          provider: coverage.provider,
+          latestCarbonIntensityGPerKwh: latest?.carbonIntensity ?? null,
+          latestSource: latest?.source ?? null,
+          latestFetchedAt: latest?.timestamp?.toISOString() ?? null,
+          isEstimated: latest?.isEstimated ?? null,
+        }
+      })
+
+    const counts = regions.reduce<Record<RouteCoverageStatus, number>>((acc, region) => {
+      acc[region.status] = (acc[region.status] ?? 0) + 1
+      return acc
+    }, {
+      active: 0,
+      policy_marginal: 0,
+      needs_key: 0,
+      needs_connector: 0,
+      registered_no_current_signal: 0,
+      unsupported: 0,
+    })
+
+    return res.json({
+      generatedAt: new Date().toISOString(),
+      counts,
+      regions,
+    })
+  } catch (error) {
+    console.error('Dashboard route coverage error:', error)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 router.get('/regions', async (_req, res) => {
   try {
     const regions = (await prisma.region.findMany({
@@ -1162,6 +1303,8 @@ router.get('/methodology/providers', async (_req, res) => {
       ['GB Carbon Intensity', 'GB_CARBON'],
       ['DK Carbon', 'DK_CARBON'],
       ['FI Carbon', 'FI_CARBON'],
+      ['Ontario IESO', 'ON_CARBON'],
+      ['Quebec Hydro-Quebec', 'QC_CARBON'],
     ].map(([name, source]) => {
       const metric = bySource.get(source)
       const successRate = metric ? computeIntegrationSuccessRate(metric) : null
