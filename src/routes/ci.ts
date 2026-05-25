@@ -2545,14 +2545,19 @@ async function routeDecisionHandler(req: Request, res: Response) {
       );
     } catch (dbError) {
       console.warn("Failed to persist CI decision:", dbError);
-      if (result.persistable.request.decisionMode === "runtime_authorization") {
+      if (dbError instanceof PglAuditError) {
+        validatedResponse.policyTrace.reasonCodes.push(
+          "PGL_AUDIT_UNAVAILABLE_DECISION_PERSISTED",
+        );
+      } else if (
+        result.persistable.request.decisionMode === "runtime_authorization"
+      ) {
         throw dbError;
+      } else {
+        validatedResponse.policyTrace.reasonCodes.push(
+          "DB_PERSIST_FAILED_LOCAL_RESPONSE_ONLY",
+        );
       }
-      validatedResponse.policyTrace.reasonCodes.push(
-        dbError instanceof PglAuditError
-          ? "PGL_AUDIT_PERSIST_FAILED_LOCAL_RESPONSE_ONLY"
-          : "DB_PERSIST_FAILED_LOCAL_RESPONSE_ONLY",
-      );
     }
 
     logSlowDecision({
@@ -3430,10 +3435,15 @@ router.get("/decisions", async (req, res) => {
     const traceByFrameId = new Map<string, any>(
       traceRows.map((trace: any) => [trace.decisionFrameId, trace]),
     );
-    const pglSummaryByFrameId = await getPglSummaryMapByDecisionFrameIds(
-      prisma,
-      decisionFrameIds,
-    );
+    let pglSummaryByFrameId = new Map<string, any>();
+    try {
+      pglSummaryByFrameId = await getPglSummaryMapByDecisionFrameIds(
+        prisma,
+        decisionFrameIds,
+      );
+    } catch (pglError) {
+      console.warn("PGL summary unavailable for CI decisions:", pglError);
+    }
 
     res.json({
       decisions: decisions.map((decision: any) => ({
