@@ -1,8 +1,12 @@
 import crypto from 'crypto'
 import { startOfMonth } from 'date-fns'
-import type { Organization, OrgUsageCounter, OrgPlanTier } from '@prisma/client'
+import type { Organization, OrgUsageCounter, OrgPlanTier, Prisma } from '@prisma/client'
 
 import { prisma } from './db'
+import {
+  DEFAULT_DOCTRINE_SETTINGS,
+  normalizeDoctrineSettings,
+} from './doctrine/schema'
 
 export type OrganizationErrorCode =
   | 'ORG_NOT_FOUND'
@@ -172,18 +176,54 @@ export async function provisionOrganization(input: {
   const slug = await ensureUniqueSlug(baseSlug)
   const apiKey = generateApiKey()
 
-  return prisma.organization.create({
-    data: {
-      name: input.name,
-      slug,
-      apiKey,
-      billingEmail: input.billingEmail,
-      planTier: input.planTier ?? 'FREE',
-      enforceCreditCoverage: input.enforceCreditCoverage ?? false,
-      monthlyCommandLimit: input.monthlyCommandLimit ?? 1000,
-      featureFlags: input.featureFlags ?? {},
-      proofRetentionDays: input.proofRetentionDays ?? 30,
-    },
+  return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const organization = await tx.organization.create({
+      data: {
+        name: input.name,
+        slug,
+        apiKey,
+        billingEmail: input.billingEmail,
+        planTier: input.planTier ?? 'FREE',
+        enforceCreditCoverage: input.enforceCreditCoverage ?? false,
+        monthlyCommandLimit: input.monthlyCommandLimit ?? 1000,
+        featureFlags: (input.featureFlags ?? {}) as Prisma.InputJsonValue,
+        proofRetentionDays: input.proofRetentionDays ?? 30,
+      },
+    })
+
+    const settings = normalizeDoctrineSettings(DEFAULT_DOCTRINE_SETTINGS)
+    const version = await tx.doctrineVersion.create({
+      data: {
+        orgId: organization.id,
+        versionNumber: 1,
+        status: 'ACTIVE',
+        changeSummary: 'Activate default CO2 Router governance doctrine',
+        justification:
+          'Production bootstrap for deterministic pre-execution governance decisions.',
+        settings: settings as Prisma.InputJsonValue,
+        metadata: {
+          source: 'organization_provisioning',
+          doctrine: 'lowest_defensible_signal',
+        } as Prisma.InputJsonValue,
+      },
+    })
+
+    await tx.doctrineAuditEvent.create({
+      data: {
+        orgId: organization.id,
+        eventType: 'VERSION_ACTIVATED',
+        versionId: version.id,
+        afterJson: {
+          versionNumber: version.versionNumber,
+          settings,
+        } as Prisma.InputJsonValue,
+        metadata: {
+          source: 'organization_provisioning',
+        } as Prisma.InputJsonValue,
+      },
+    })
+
+    return organization
   })
 }
 
