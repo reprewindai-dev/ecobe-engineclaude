@@ -125,6 +125,8 @@ const LIVE_SIGNAL_SOURCES = [
   'GB_CARBON',
   'DK_CARBON',
   'FI_CARBON',
+  'FR_RTE_ECO2MIX',
+  'BE_ELIA_OPEN_DATA',
 ] as const
 
 const isoLatest = (...values: Array<Date | null | undefined>) => {
@@ -1049,6 +1051,8 @@ function configuredProviderFor(region: GlobalRegionConfig): string | null {
   if (region.regionCode === 'EU-GB') return 'GB Carbon Intensity API'
   if (region.regionCode === 'EU-DK1' || region.regionCode === 'EU-DK2') return 'Energi Data Service'
   if (region.regionCode === 'EU-FI') return 'Fingrid'
+  if (region.regionCode === 'EU-FR') return 'RTE eCO2mix / ODRE'
+  if (region.regionCode === 'EU-BE') return 'Elia open data fuel mix'
   if (region.regionCode === 'CA-ON') return 'IESO public generator output'
   if (region.regionCode === 'CA-QC') return 'Hydro-Quebec open data'
   return null

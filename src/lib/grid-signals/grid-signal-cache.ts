@@ -20,6 +20,7 @@ export interface CachedRoutingSignalRecord {
       | 'dk_carbon'
       | 'fi_carbon'
       | 'ca_carbon'
+      | 'eu_carbon'
       | 'eia930_fuel_mix'
       | 'fallback'
     isForecast: boolean

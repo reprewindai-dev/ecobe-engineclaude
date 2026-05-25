@@ -4,6 +4,7 @@ import { gbCarbonIntensity } from '../gb-carbon-intensity'
 import { denmarkCarbon } from '../denmark-carbon'
 import { finlandCarbon } from '../finland-carbon'
 import { canadaCarbon } from '../canada-carbon'
+import { europeCarbon } from '../europe-carbon'
 import { env } from '../../config/env'
 import {
   CachedRoutingSignalRecord,
@@ -35,7 +36,7 @@ export interface ProviderDisagreement {
 
 export interface RoutingSignal {
   carbonIntensity: number
-  source: 'watttime' | 'electricity_maps' | 'ember' | 'gb_carbon_intensity' | 'dk_carbon' | 'fi_carbon' | 'ca_carbon' | 'eia930_fuel_mix' | 'fallback'
+  source: 'watttime' | 'electricity_maps' | 'ember' | 'gb_carbon_intensity' | 'dk_carbon' | 'fi_carbon' | 'ca_carbon' | 'eu_carbon' | 'eia930_fuel_mix' | 'fallback'
   isForecast: boolean
   confidence: number
   signalMode: 'marginal' | 'average' | 'fallback'
@@ -268,6 +269,34 @@ export class ProviderRouter {
     // ── TIER 2: EIA-930 fuel mix — US backbone / predictive telemetry ──
     // Used when WattTime is unavailable. Provides average intensity from
     // real fuel mix data using IPCC emission factors.
+    const europeSignal = await this.getEuropeSignal(region)
+    if (europeSignal) {
+      const validation = await this.validateWithEmber(europeSignal, region, timestamp, [europeSignal])
+      const sourceUsed =
+        europeSignal.metadata?.zone === 'EU-FR'
+          ? 'FR_RTE_ECO2MIX_ODRE'
+          : 'BE_ELIA_OPEN_DATA_FUEL_MIX'
+
+      return {
+        carbonIntensity: europeSignal.carbonIntensity,
+        source: 'eu_carbon' as any,
+        isForecast: europeSignal.isForecast,
+        confidence: validation.adjustedConfidence,
+        signalMode: 'average',
+        accountingMethod: 'average',
+        provenance: {
+          sourceUsed,
+          contributingSources: ['eu_carbon'],
+          referenceTime: europeSignal.timestamp,
+          fetchedAt,
+          fallbackUsed: false,
+          disagreementFlag: validation.disagreement.level !== 'none',
+          disagreementPct: validation.disagreement.disagreementPct,
+          validationNotes: validation.validationNotes
+        }
+      }
+    }
+
     const fuelMixSignal = await this.getEia930FuelMixCI(region)
     if (fuelMixSignal !== null) {
       const primarySignal: ProviderSignal = {
@@ -561,6 +590,51 @@ export class ProviderRouter {
     }
   }
 
+  private static EUROPE_REGIONS = new Set([
+    'EU-FR',
+    'eu-west-3',
+    'europe-west9',
+    'francecentral',
+    'EU-BE',
+    'europe-west1',
+  ])
+
+  private async getEuropeSignal(region: string): Promise<ProviderSignal | null> {
+    if (!ProviderRouter.EUROPE_REGIONS.has(region)) return null
+
+    try {
+      const data =
+        region === 'EU-FR' || region === 'eu-west-3' || region === 'europe-west9' || region === 'francecentral'
+          ? await europeCarbon.getFranceIntensity()
+          : await europeCarbon.getBelgiumIntensity()
+
+      if (!data) return null
+
+      return {
+        carbonIntensity: data.carbonIntensity,
+        isForecast: data.isForecast,
+        source: 'eu_carbon' as any,
+        timestamp: data.timestamp,
+        estimatedFlag: data.method !== 'rte-eco2mix-direct',
+        syntheticFlag: false,
+        confidence: data.method === 'rte-eco2mix-direct' ? 0.86 : 0.72,
+        metadata: {
+          signalType: data.method,
+          zone: data.zone,
+          fuelBreakdownMw: data.fuelBreakdownMw,
+          sourceUrl: data.sourceUrl,
+          factorMethod:
+            data.method === 'rte-eco2mix-direct'
+              ? 'RTE published direct national carbon intensity'
+              : 'IPCC-weighted public generation mix',
+        }
+      }
+    } catch (error) {
+      console.warn(`Europe carbon signal failed for ${region}:`, error)
+      return null
+    }
+  }
+
   // Cloud and canonical regions with direct EIA-930 fuel mix coverage (US only)
   private static EIA930_BA_MAP: Record<string, string> = {
     'US-CAL-CISO': 'CISO',
@@ -677,7 +751,7 @@ export class ProviderRouter {
       const isAuthoritativeRealtime = disagreementSignals.some(s =>
         s.source === 'gb_carbon_intensity' || s.source === 'electricity_maps' ||
         s.source === 'dk_carbon' || s.source === 'fi_carbon' ||
-        s.source === 'ca_carbon' || s.source === 'eia930_fuel_mix'
+        s.source === 'ca_carbon' || s.source === 'eu_carbon' || s.source === 'eia930_fuel_mix'
       )
 
       if (isWattTimePercentile) {
