@@ -1047,13 +1047,16 @@ router.get('/regions', async (_req, res) => {
         const latest = await prisma.carbonIntensity.findFirst({
           where: { region: regionRecord.code },
           orderBy: { timestamp: 'desc' },
-          select: { carbonIntensity: true, timestamp: true },
+          select: { carbonIntensity: true, timestamp: true, source: true, isEstimated: true, metadata: true },
         })
 
         return {
           ...regionRecord,
           carbonIntensityGPerKwh: latest?.carbonIntensity ?? null,
           fetchedAt: latest?.timestamp ?? null,
+          source: latest?.source ?? null,
+          isEstimated: latest?.isEstimated ?? null,
+          metadata: latest?.metadata ?? null,
         }
       })
     )

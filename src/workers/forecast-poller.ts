@@ -1,20 +1,37 @@
 import cron from 'node-cron'
 import { prisma } from '../lib/db'
-import { providerRouter } from '../lib/carbon/provider-router'
+import { providerRouter, type RoutingSignal } from '../lib/carbon/provider-router'
 import { forecastCarbonIntensity } from '../lib/carbon-forecasting'
 import { env } from '../config/env'
 import { redis } from '../lib/redis'
 import { setWorkerStatus } from '../routes/system'
 import {
   DEFAULT_FORECAST_HOURS,
-  DEFAULT_FORECAST_LOOKBACK_HOURS,
   FORECAST_REFRESH_STATE_KEY,
 } from '../constants/forecasting'
 import { REFERENCE_REGIONS } from '../constants/reference-regions'
 
 const FALLBACK_FORECAST_REGIONS = REFERENCE_REGIONS.map((region) => region.regionCode)
 
-async function upsertCarbonSample(region: string, timestamp: Date, intensity: number) {
+async function upsertCarbonSample(
+  region: string,
+  timestamp: Date,
+  intensity: number,
+  signal: RoutingSignal
+) {
+  const source = signal.provenance.sourceUsed || signal.source
+  const metadata = {
+    signalSource: signal.source,
+    sourceUsed: signal.provenance.sourceUsed,
+    contributingSources: signal.provenance.contributingSources,
+    confidence: signal.confidence,
+    signalMode: signal.signalMode,
+    accountingMethod: signal.accountingMethod,
+    fallbackUsed: signal.provenance.fallbackUsed,
+    disagreementPct: signal.provenance.disagreementPct,
+    validationNotes: signal.provenance.validationNotes ?? null,
+  }
+
   await prisma.carbonIntensity.upsert({
     where: {
       region_timestamp: {
@@ -24,13 +41,17 @@ async function upsertCarbonSample(region: string, timestamp: Date, intensity: nu
     },
     update: {
       carbonIntensity: intensity,
-      source: 'PROVIDER_ROUTER',
+      source,
+      isEstimated: signal.isForecast || signal.source === 'ember',
+      metadata,
     },
     create: {
       region,
       timestamp,
       carbonIntensity: intensity,
-      source: 'PROVIDER_ROUTER',
+      source,
+      isEstimated: signal.isForecast || signal.source === 'ember',
+      metadata,
     },
   })
 }
@@ -41,7 +62,7 @@ async function ingestRegionHistory(region: string) {
   try {
     const signal = await providerRouter.getRoutingSignal(region, new Date())
     if (signal && signal.source !== 'fallback') {
-      await upsertCarbonSample(region, new Date(), Math.round(signal.carbonIntensity))
+      await upsertCarbonSample(region, new Date(), Math.round(signal.carbonIntensity), signal)
       ingested = 1
     }
   } catch (err) {

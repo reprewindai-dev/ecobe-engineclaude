@@ -4,16 +4,14 @@ import { gbCarbonIntensity } from '../gb-carbon-intensity'
 import { denmarkCarbon } from '../denmark-carbon'
 import { finlandCarbon } from '../finland-carbon'
 import { env } from '../../config/env'
-import { toRoutingCacheBucket } from '../cache/routing-cache-bucket'
 import {
   CachedRoutingSignalRecord,
   GridSignalCache,
 } from '../grid-signals/grid-signal-cache'
 import { GridSignalAudit } from '../grid-signals/grid-signal-audit'
-import { getRegionMapping } from '../grid-signals/region-mapping'
 import { FuelMixParser } from '../grid-signals/fuel-mix-parser'
 import { eia930 } from '../grid-signals/eia-client'
-import { EmberStructuralProfile, type EmberData, type RegionStructuralProfile } from '../ember/structural-profile'
+import { type EmberData } from '../ember/structural-profile'
 
 
 export interface ProviderSignal {
@@ -382,6 +380,7 @@ export class ProviderRouter {
 
   // Cloud regions that map to Great Britain grid
   private static GB_REGIONS = new Set([
+    'EU-GB',
     'eu-west-2',       // AWS London
     'europe-west2',    // GCP London
     'uksouth',         // Azure UK South
@@ -422,6 +421,8 @@ export class ProviderRouter {
 
   // Cloud regions that map to Denmark grid (DK1 West / DK2 East)
   private static DK_REGIONS: Record<string, 'DK1' | 'DK2'> = {
+    'EU-DK1': 'DK1',
+    'EU-DK2': 'DK2',
     'eu-north-1': 'DK1',      // AWS Stockholm (closest to DK)
     'europe-north1': 'DK1',   // GCP Finland (Nordic)
   }
@@ -456,6 +457,7 @@ export class ProviderRouter {
 
   // Cloud regions that map to Finland grid
   private static FI_REGIONS = new Set([
+    'EU-FI',
     'eu-north-1',       // AWS Stockholm (Nordic, covers FI)
     'europe-north1',    // GCP Finland
   ])
@@ -691,12 +693,25 @@ export class ProviderRouter {
 
   // Map cloud regions to Ember entity codes (country-level)
   private static REGION_TO_EMBER_ENTITY: Record<string, string> = {
+    'US-CAL-CISO': 'USA', 'US-TEX-ERCO': 'USA', 'US-MIDA-PJM': 'USA',
+    'US-MIDW-MISO': 'USA', 'US-NW-BPAT': 'USA', 'US-NE-ISNE': 'USA',
     'us-east-1': 'USA', 'us-east-2': 'USA', 'us-west-1': 'USA', 'us-west-2': 'USA',
     'us-central1': 'USA', 'us-east4': 'USA', 'us-west1': 'USA',
     'eastus': 'USA', 'eastus2': 'USA', 'westus2': 'USA', 'centralus': 'USA', 'southcentralus': 'USA',
+    'CA-QC': 'CAN', 'CA-ON': 'CAN', 'CA-BC': 'CAN',
+    'EU-GB': 'GBR', 'EU-FR': 'FRA', 'EU-DE': 'DEU', 'EU-SE': 'SWE',
+    'EU-NO': 'NOR', 'EU-FI': 'FIN', 'EU-DK1': 'DNK', 'EU-DK2': 'DNK',
+    'EU-NL': 'NLD', 'EU-BE': 'BEL', 'EU-ES': 'ESP', 'EU-PT': 'PRT',
+    'EU-IT': 'ITA', 'EU-PL': 'POL', 'EU-CH': 'CHE', 'EU-AT': 'AUT',
     'eu-west-1': 'IRL', 'eu-west-2': 'GBR', 'eu-central-1': 'DEU',
     'europe-west1': 'BEL',
+    'AP-SG': 'SGP', 'AP-JP-TOKYO': 'JPN', 'AP-JP-OSAKA': 'JPN',
+    'AP-AU-NSW': 'AUS', 'AP-AU-VIC': 'AUS', 'AP-AU-QLD': 'AUS',
+    'AP-AU-SA': 'AUS', 'AP-IN-SOUTH': 'IND', 'AP-IN-WEST': 'IND',
+    'AP-KR': 'KOR', 'AP-TW': 'TWN',
     'ap-southeast-1': 'SGP', 'ap-northeast-1': 'JPN', 'ap-south-1': 'IND',
+    'SA-BR-SE': 'BRA', 'SA-BR-S': 'BRA', 'SA-CL-SEN': 'CHL', 'SA-CO': 'COL',
+    'AF-ZA': 'ZAF', 'ME-AE': 'ARE',
   }
 
   /**
