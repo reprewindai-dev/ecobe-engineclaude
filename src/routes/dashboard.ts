@@ -1073,6 +1073,15 @@ function routeCoverageStatus(
 
   const provider = configuredProviderFor(region)
   if (latest) {
+    if ((latest.source ?? '').startsWith('LKG_')) {
+      return {
+        status: 'registered_no_current_signal',
+        reason: `Last-known-good source exists (${latest.source}), but no fresh live sample is available.`,
+        requiredAction: 'Refresh the provider and promote only a current source-backed sample.',
+        provider,
+      }
+    }
+
     const ageMs = Date.now() - latest.timestamp.getTime()
     if (ageMs <= 2 * 60 * 60 * 1000) {
       return {
