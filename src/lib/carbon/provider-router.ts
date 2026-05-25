@@ -340,22 +340,18 @@ export class ProviderRouter {
       const wattTimeRegion = resolveWattTimeRegion(region)
       if (!wattTimeRegion) return null
 
-      // Try current MOER first
+      // Touch the current index for provider health only. WattTime v3 signal-index
+      // is a percentile, not gCO2/kWh, so it cannot become a route carbon sample.
       const currentMoer = await wattTime.getCurrentMOER(wattTimeRegion)
       if (currentMoer) {
-        return {
-          carbonIntensity: currentMoer.moer,
-          isForecast: false,
-          source: 'watttime',
-          timestamp: currentMoer.timestamp,
-          estimatedFlag: false,
-          syntheticFlag: false,
-          confidence: 0.9,
-          metadata: { signalType: 'current_moer' }
-        }
+        console.debug(`WattTime signal-index for ${region}/${wattTimeRegion}: ${currentMoer.moerPercent}`)
       }
 
-      // Fall back to MOER forecast for future timestamps
+      if (timestamp.getTime() <= Date.now() + 5 * 60 * 1000) {
+        return null
+      }
+
+      // Use MOER forecast values after conversion to gCO2/kWh.
       const forecastMoer = await wattTime.getMOERForecast(wattTimeRegion, timestamp)
       if (forecastMoer.length > 0) {
         const forecast = forecastMoer[0]

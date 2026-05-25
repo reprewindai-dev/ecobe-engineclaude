@@ -5,6 +5,7 @@ import { wattTimeResilience } from './resilience'
 
 let token: string | null = null
 let tokenExpiresAt: number | null = null
+const LBS_PER_MWH_TO_G_PER_KWH = 0.45359237
 
 interface WattTimeAuthResponse {
   token: string
@@ -237,11 +238,11 @@ export class WattTimeClient {
         return null
       }
 
-      // v3 signal-index returns percentile (0-100), not raw lbs/MWh
-      // We normalize: percentile maps to approximate MOER for routing comparisons
+      // v3 signal-index returns percentile (0-100), not raw gCO2/kWh.
+      // Provider routing must not persist this value as carbon intensity.
       const result: WattTimeMOER = {
         balancingAuthority: response.data.meta.region,
-        moer: dataPoint.value, // percentile 0-100 (lower = cleaner)
+        moer: dataPoint.value,
         moerPercent: dataPoint.value,
         timestamp: dataPoint.point_time,
         frequency: `${response.data.meta.data_point_period_seconds}s`,
@@ -283,7 +284,7 @@ export class WattTimeClient {
       const forecasts = (response.data.data || []).map((item) => ({
         balancingAuthority: response.data.meta?.region ?? wattTimeRegion,
         timestamp: item.point_time,
-        moer: item.value,
+        moer: item.value * LBS_PER_MWH_TO_G_PER_KWH,
         version: modelVersion,
       }))
       return forecasts
