@@ -1045,7 +1045,10 @@ router.get('/regions', async (_req, res) => {
     const enriched = await Promise.all(
       regions.map(async (regionRecord: { code: string; name: string | null; country: string | null }) => {
         const latest = await prisma.carbonIntensity.findFirst({
-          where: { region: regionRecord.code },
+          where: {
+            region: regionRecord.code,
+            source: { notIn: ['WATTTIME_MOER', 'LKG_WATTTIME_MOER'] },
+          },
           orderBy: { timestamp: 'desc' },
           select: { carbonIntensity: true, timestamp: true, source: true, isEstimated: true, metadata: true },
         })

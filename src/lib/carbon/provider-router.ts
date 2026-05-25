@@ -101,12 +101,15 @@ export class ProviderRouter {
     }
 
     const lastKnownGood = await GridSignalCache.getLastKnownGoodRoutingSignal(region)
+    const lastKnownGoodSource = lastKnownGood?.signal.provenance.sourceUsed ?? ''
+    const lastKnownGoodUsable = Boolean(lastKnownGood && !lastKnownGoodSource.includes('WATTTIME'))
     const ageSec =
       this.computeSignalStalenessSec(lastKnownGood?.signal, timestamp) ??
       (lastKnownGood?.fetchedAt
         ? Math.max(0, Math.round((timestamp.getTime() - new Date(lastKnownGood.fetchedAt).getTime()) / 1000))
         : lastKnownGood?.stalenessSec ?? null)
     if (
+      lastKnownGoodUsable &&
       lastKnownGood &&
       (ageSec ?? ProviderRouter.LAST_KNOWN_GOOD_MAX_AGE_SEC + 1) <=
         ProviderRouter.LAST_KNOWN_GOOD_MAX_AGE_SEC
