@@ -4,7 +4,6 @@ import { fingard } from '../services/fingard-control'
 import { GridSignalCache } from './grid-signals/grid-signal-cache'
 import { GridSignalAudit } from './grid-signals/grid-signal-audit'
 import { wattTime } from './watttime'
-import { electricityMaps } from './electricity-maps'
 import { randomUUID } from 'crypto'
 import { classifyJob, recordLedgerEntry, storeProviderSnapshot } from './routing'
 import { generateLease, retryAsync } from './governance'
@@ -95,15 +94,13 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
         }
       } catch (error) {
         console.error(`Failed to get routing signal for ${region}:`, error)
-        // Fallback to electricity maps
         const cached = await redis.get(`carbon:${region}`)
         let carbonIntensity: number
 
         if (cached) {
           carbonIntensity = parseInt(cached)
         } else {
-          const data = await electricityMaps.getCarbonIntensity(region)
-          carbonIntensity = data?.carbonIntensity ?? 400
+          carbonIntensity = 400
 
           // Cache for 15 minutes
           await redis.setex(`carbon:${region}`, 900, carbonIntensity.toString())
@@ -114,7 +111,7 @@ export async function routeGreen(request: RoutingRequest): Promise<RoutingResult
               region,
               carbonIntensity,
               timestamp: new Date(),
-              source: 'ELECTRICITY_MAPS',
+              source: 'STATIC_FALLBACK',
             },
           }).catch(() => {}) // Ignore duplicates
         }

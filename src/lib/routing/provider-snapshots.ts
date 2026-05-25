@@ -2,7 +2,7 @@
  * Provider Snapshot Storage — Routing Spec v1
  *
  * Persists provider signal values at decision time for full audit trail.
- * Stores WattTime, Electricity Maps, Ember, and EIA-930 snapshots.
+ * Stores WattTime, Ember, EIA-930, and regional grid snapshots.
  */
 
 import { prisma } from '../db'
@@ -84,7 +84,6 @@ export async function getLatestSnapshots(zone: string, providers?: string[]) {
 
 const PROVIDER_FRESHNESS_THRESHOLDS_SEC: Record<string, number> = {
   WATTTIME_MOER: 600,
-  ELECTRICITY_MAPS: 600,
   EMBER_STRUCTURAL_BASELINE: 86400,
   EIA_930: 1800,
   GRIDSTATUS: 1800,
@@ -114,8 +113,6 @@ export function canonicalizeProviderIdentity(provider: string): string {
     case 'watttime':
     case 'watttime_moer':
       return 'WATTTIME_MOER'
-    case 'electricity_maps':
-      return 'ELECTRICITY_MAPS'
     case 'ember':
     case 'ember_structural':
     case 'ember_structural_baseline':

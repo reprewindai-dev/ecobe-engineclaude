@@ -117,7 +117,6 @@ const rate = (numerator: number, denominator: number): number => {
 }
 
 const LIVE_SIGNAL_SOURCES = [
-  'ELECTRICITY_MAPS',
   'WATTTIME',
   'GRIDSTATUS',
   'EIA_930',
@@ -1152,7 +1151,6 @@ router.get('/methodology/providers', async (_req, res) => {
     )
 
     const providers = [
-      ['Electricity Maps', 'ELECTRICITY_MAPS'],
       ['WattTime', 'WATTTIME'],
       ['GridStatus EIA-930', 'GRIDSTATUS'],
       ['Ember', 'EMBER'],
@@ -1198,15 +1196,6 @@ router.get('/methodology/providers', async (_req, res) => {
         coverage: 'North America (balancing authorities)',
         confidence: 0.9,
         doctrinePosition: 'SECONDARY - marginal signal never used alone',
-      },
-      {
-        name: 'Electricity Maps',
-        role: 'primary_live_signal',
-        signalType: 'Flow-traced carbon intensity',
-        refreshRate: 'every 15-60 minutes',
-        coverage: 'Global (200+ zones)',
-        confidence: 0.7,
-        doctrinePosition: 'PRIMARY - authoritative realtime intensity',
       },
       {
         name: 'Ember',

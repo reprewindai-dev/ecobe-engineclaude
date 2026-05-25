@@ -1,6 +1,6 @@
 {
   "coolify_url": "http://5.78.135.11:8000",
-  "token": "1|aWbg84afguM4Ma8hKBNKWSgBmWi7HGEhLQGElh1Z9f3fe2a7",
+  "token": "${COOLIFY_API_TOKEN}",
   "project": {
     "name": "ecobe-engine",
     "description": "CO2 Router / ECOBE Engine - Carbon-aware workload routing"
@@ -48,8 +48,6 @@
 
     "WATTTIME_USERNAME": "${WATTTIME_USERNAME}",
     "WATTTIME_PASSWORD": "${WATTTIME_PASSWORD}",
-    "ELECTRICITY_MAPS_API_KEY": "${ELECTRICITY_MAPS_API_KEY}",
-    "ELECTRICITY_MAPS_BASE_URL": "https://api.electricitymap.org",
     "EMBER_API_KEY": "${EMBER_API_KEY}",
     "EMBER_BASE_URL": "https://api.ember-climate.org",
     "EIA_API_KEY": "${EIA_API_KEY}",
