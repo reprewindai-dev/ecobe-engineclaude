@@ -117,6 +117,7 @@ const rate = (numerator: number, denominator: number): number => {
 }
 
 const LIVE_SIGNAL_SOURCES = [
+  'ELECTRICITY_MAPS',
   'WATTTIME',
   'GRIDSTATUS',
   'EIA_930',
@@ -1151,6 +1152,7 @@ router.get('/methodology/providers', async (_req, res) => {
     )
 
     const providers = [
+      ['Electricity Maps', 'ELECTRICITY_MAPS'],
       ['WattTime', 'WATTTIME'],
       ['GridStatus EIA-930', 'GRIDSTATUS'],
       ['Ember', 'EMBER'],

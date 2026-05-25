@@ -3,6 +3,7 @@ import { ember } from '../ember'
 import { gbCarbonIntensity } from '../gb-carbon-intensity'
 import { denmarkCarbon } from '../denmark-carbon'
 import { finlandCarbon } from '../finland-carbon'
+import { electricityMaps } from '../electricity-maps'
 import { env } from '../../config/env'
 import { toRoutingCacheBucket } from '../cache/routing-cache-bucket'
 import {
@@ -224,6 +225,30 @@ export class ProviderRouter {
         provenance: {
           sourceUsed: 'FI_FINGRID',
           contributingSources: ['fi_carbon'],
+          referenceTime,
+          fetchedAt,
+          fallbackUsed: false,
+          disagreementFlag: validation.disagreement.level !== 'none',
+          disagreementPct: validation.disagreement.disagreementPct,
+          validationNotes: validation.validationNotes
+        }
+      }
+    }
+
+    const electricityMapsSignal = await this.getElectricityMapsSignal(region)
+    if (electricityMapsSignal) {
+      const validation = await this.validateWithEmber(electricityMapsSignal, region, timestamp, [electricityMapsSignal])
+
+      return {
+        carbonIntensity: electricityMapsSignal.carbonIntensity,
+        source: 'electricity_maps',
+        isForecast: electricityMapsSignal.isForecast,
+        confidence: validation.adjustedConfidence,
+        signalMode: 'average',
+        accountingMethod: 'flow-traced',
+        provenance: {
+          sourceUsed: 'ELECTRICITY_MAPS',
+          contributingSources: ['electricity_maps'],
           referenceTime,
           fetchedAt,
           fallbackUsed: false,
@@ -484,6 +509,32 @@ export class ProviderRouter {
       console.warn(`Finland carbon signal failed for ${region}:`, error)
     }
     return null
+  }
+
+  private async getElectricityMapsSignal(region: string): Promise<ProviderSignal | null> {
+    try {
+      const data = await electricityMaps.getCarbonIntensity(region)
+      if (!data) return null
+
+      return {
+        carbonIntensity: data.carbonIntensity,
+        isForecast: false,
+        source: 'electricity_maps',
+        timestamp: data.datetime,
+        estimatedFlag: false,
+        syntheticFlag: false,
+        confidence: 0.85,
+        metadata: {
+          signalType: 'flow_traced_live_average',
+          fossilFuelPercentage: data.fossilFuelPercentage ?? null,
+          renewablePercentage: data.renewablePercentage ?? null,
+          zone: data.zone,
+        },
+      }
+    } catch (error) {
+      console.warn(`Electricity Maps signal failed for ${region}:`, error)
+      return null
+    }
   }
 
   // Cloud regions with GridStatus EIA-930 fuel mix coverage (US only)

@@ -18,6 +18,7 @@
 import { wattTime } from '../lib/watttime'
 import { eia930 } from '../lib/grid-signals/eia-client'
 import { ember } from '../lib/ember'
+import { electricityMaps } from '../lib/electricity-maps'
 import { GridSignalCache } from '../lib/grid-signals/grid-signal-cache'
 import { GridSignalAudit } from '../lib/grid-signals/grid-signal-audit'
 import { gbGridSource } from '../lib/regional/gb-grid-source'
@@ -124,20 +125,20 @@ export class FingardControlLayer {
   private getProviderHierarchy(region: string): string[] {
     // US regions
     if (region.startsWith('US-')) {
-      return ['watttime', 'eia930', 'ember', 'static']
+      return ['watttime', 'electricity-maps', 'eia930', 'ember', 'static']
     }
     
     // EU regions
     if (['GB', 'DK', 'FI'].includes(region)) {
-      return [`${region.toLowerCase()}-grid`, 'ember', 'static']
+      return [`${region.toLowerCase()}-grid`, 'electricity-maps', 'ember', 'static']
     }
     
     if (['FR', 'DE', 'IT', 'ES', 'NL', 'BE', 'AT', 'CH', 'SE', 'NO', 'PL', 'CZ'].includes(region)) {
-      return ['ember', 'static']
+      return ['electricity-maps', 'ember', 'static']
     }
     
     // Rest of world
-    return ['ember', 'static']
+    return ['electricity-maps', 'ember', 'static']
   }
 
   /**
@@ -157,6 +158,22 @@ export class FingardControlLayer {
         const balance = await eia930.getBalance(region)
         const latest = balance?.[0]
         return latest ? { carbonIntensity: latest.value ?? 0, timestamp: latest.period ?? new Date().toISOString(), isForecast: false } : null
+      }
+
+      case 'electricity-maps': {
+        const data = await electricityMaps.getCarbonIntensity(region)
+        return data
+          ? {
+              carbonIntensity: data.carbonIntensity,
+              timestamp: data.datetime,
+              isForecast: false,
+              metadata: {
+                zone: data.zone,
+                fossilFuelPercentage: data.fossilFuelPercentage ?? null,
+                renewablePercentage: data.renewablePercentage ?? null,
+              },
+            }
+          : null
       }
 
       case 'gb-grid':
@@ -184,7 +201,7 @@ export class FingardControlLayer {
   private normalizeSignal(rawSignal: any, provider: string, region: string, timestamp: Date): NormalizedSignal {
     const now = new Date()
     const age = now.getTime() - new Date(rawSignal.timestamp).getTime()
-    const staleThresholds: Record<string, number> = { watttime: 600000, eia930: 1800000, ember: 86400000, 'gb-grid': 300000, 'dk-grid': 300000, 'fi-grid': 300000, static: 0 }
+    const staleThresholds: Record<string, number> = { watttime: 600000, 'electricity-maps': 3600000, eia930: 1800000, ember: 86400000, 'gb-grid': 300000, 'dk-grid': 300000, 'fi-grid': 300000, static: 0 }
     const threshold = staleThresholds[provider] || 600000
     const isStale = age > threshold
 
@@ -223,6 +240,7 @@ export class FingardControlLayer {
     // Provider-specific base confidence
     switch (provider) {
       case 'watttime': base = 0.95; break
+      case 'electricity-maps': base = 0.90; break
       case 'eia930': base = 0.85; break
       case 'gb-grid': case 'dk-grid': case 'fi-grid': base = 0.90; break
       case 'ember': base = 0.70; break // Validation only
@@ -244,7 +262,7 @@ export class FingardControlLayer {
   private getTrustLevel(provider: string, isStale: boolean): 'high' | 'medium' | 'low' {
     if (provider === 'static') return 'low'
     if (isStale) return 'medium'
-    if (['watttime', 'gb-grid', 'dk-grid', 'fi-grid'].includes(provider)) return 'high'
+    if (['watttime', 'electricity-maps', 'gb-grid', 'dk-grid', 'fi-grid'].includes(provider)) return 'high'
     return 'medium'
   }
 
