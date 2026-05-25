@@ -86,7 +86,6 @@ const PROVIDER_FRESHNESS_THRESHOLDS_SEC: Record<string, number> = {
   WATTTIME_MOER: 600,
   EMBER_STRUCTURAL_BASELINE: 86400,
   EIA_930: 1800,
-  GRIDSTATUS: 1800,
   GB_CARBON: 1800,
   DK_CARBON: 1800,
   FI_CARBON: 1800,
@@ -94,7 +93,6 @@ const PROVIDER_FRESHNESS_THRESHOLDS_SEC: Record<string, number> = {
 
 const INTEGRATION_SOURCE_TO_PROVIDER: Record<string, string> = {
   WATTTIME: 'WATTTIME_MOER',
-  GRIDSTATUS: 'GRIDSTATUS',
   EIA_930: 'EIA_930',
   EMBER: 'EMBER_STRUCTURAL_BASELINE',
   GB_CARBON: 'GB_CARBON',
@@ -120,8 +118,6 @@ export function canonicalizeProviderIdentity(provider: string): string {
     case 'eia930':
     case 'eia_930':
       return 'EIA_930'
-    case 'gridstatus':
-      return 'GRIDSTATUS'
     case 'gb_carbon':
       return 'GB_CARBON'
     case 'dk_carbon':

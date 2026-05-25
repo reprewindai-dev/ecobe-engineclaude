@@ -27,9 +27,9 @@ const PROVIDERS: ProviderConfig[] = [
     enabled: Boolean(env.WATTTIME_USERNAME && env.WATTTIME_PASSWORD),
   },
   {
-    name: 'GridStatus EIA-930',
-    source: 'GRIDSTATUS',
-    enabled: Boolean(env.GRIDSTATUS_API_KEY || env.EIA_API_KEY),
+    name: 'EIA-930 Direct',
+    source: 'EIA_930',
+    enabled: Boolean(env.EIA_API_KEY),
   },
   {
     name: 'Ember',

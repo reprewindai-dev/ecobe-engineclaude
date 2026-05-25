@@ -118,7 +118,6 @@ const rate = (numerator: number, denominator: number): number => {
 
 const LIVE_SIGNAL_SOURCES = [
   'WATTTIME',
-  'GRIDSTATUS',
   'EIA_930',
   'EMBER',
   'GB_CARBON',
@@ -1152,7 +1151,7 @@ router.get('/methodology/providers', async (_req, res) => {
 
     const providers = [
       ['WattTime', 'WATTTIME'],
-      ['GridStatus EIA-930', 'GRIDSTATUS'],
+      ['EIA-930 Direct', 'EIA_930'],
       ['Ember', 'EMBER'],
       ['GB Carbon Intensity', 'GB_CARBON'],
       ['DK Carbon', 'DK_CARBON'],

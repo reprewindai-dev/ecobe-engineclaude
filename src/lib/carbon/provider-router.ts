@@ -12,7 +12,7 @@ import {
 import { GridSignalAudit } from '../grid-signals/grid-signal-audit'
 import { getRegionMapping } from '../grid-signals/region-mapping'
 import { FuelMixParser } from '../grid-signals/fuel-mix-parser'
-import { gridStatus } from '../grid-signals/gridstatus-client'
+import { eia930 } from '../grid-signals/eia-client'
 import { EmberStructuralProfile, type EmberData, type RegionStructuralProfile } from '../ember/structural-profile'
 
 
@@ -36,7 +36,7 @@ export interface ProviderDisagreement {
 
 export interface RoutingSignal {
   carbonIntensity: number
-  source: 'watttime' | 'electricity_maps' | 'ember' | 'gb_carbon_intensity' | 'dk_carbon' | 'fi_carbon' | 'gridstatus_fuel_mix' | 'fallback'
+  source: 'watttime' | 'electricity_maps' | 'ember' | 'gb_carbon_intensity' | 'dk_carbon' | 'fi_carbon' | 'eia930_fuel_mix' | 'fallback'
   isForecast: boolean
   confidence: number
   signalMode: 'marginal' | 'average' | 'fallback'
@@ -237,23 +237,24 @@ export class ProviderRouter {
     // ── TIER 2: EIA-930 fuel mix — US backbone / predictive telemetry ──
     // Used when WattTime is unavailable. Provides average intensity from
     // real fuel mix data using IPCC emission factors.
-    const fuelMixCI = await this.getGridStatusFuelMixCI(region)
-    if (fuelMixCI !== null) {
+    const fuelMixSignal = await this.getEia930FuelMixCI(region)
+    if (fuelMixSignal !== null) {
       const primarySignal: ProviderSignal = {
-        carbonIntensity: fuelMixCI,
+        carbonIntensity: fuelMixSignal.carbonIntensity,
         isForecast: false,
-        source: 'gridstatus_fuel_mix',
-        timestamp: new Date().toISOString(),
+        source: 'eia930_fuel_mix',
+        timestamp: fuelMixSignal.period,
         estimatedFlag: false,
         syntheticFlag: false,
         confidence: 0.7,
+        metadata: fuelMixSignal.metadata,
       }
 
       const validation = await this.validateWithEmber(primarySignal, region, timestamp, [primarySignal])
 
       return {
-        carbonIntensity: fuelMixCI,
-        source: 'gridstatus_fuel_mix',
+        carbonIntensity: fuelMixSignal.carbonIntensity,
+        source: 'eia930_fuel_mix',
         isForecast: false,
         confidence: validation.adjustedConfidence,
         signalMode: 'average',
@@ -266,7 +267,7 @@ export class ProviderRouter {
           fallbackUsed: false,
           disagreementFlag: validation.disagreement.level !== 'none',
           disagreementPct: validation.disagreement.disagreementPct,
-          validationNotes: `EIA-930 fuel mix: ${fuelMixCI.toFixed(0)} gCO2/kWh (WattTime unavailable)` + (validation.validationNotes ? `; ${validation.validationNotes}` : '')
+          validationNotes: `EIA-930 direct fuel mix: ${fuelMixSignal.carbonIntensity.toFixed(0)} gCO2/kWh (WattTime unavailable)` + (validation.validationNotes ? `; ${validation.validationNotes}` : '')
         }
       }
     }
@@ -486,8 +487,14 @@ export class ProviderRouter {
     return null
   }
 
-  // Cloud regions with GridStatus EIA-930 fuel mix coverage (US only)
-  private static GRIDSTATUS_BA_MAP: Record<string, string> = {
+  // Cloud and canonical regions with direct EIA-930 fuel mix coverage (US only)
+  private static EIA930_BA_MAP: Record<string, string> = {
+    'US-CAL-CISO': 'CISO',
+    'US-TEX-ERCO': 'ERCO',
+    'US-MIDA-PJM': 'PJM',
+    'US-MIDW-MISO': 'MISO',
+    'US-NW-BPAT': 'BPAT',
+    'US-NE-ISNE': 'ISNE',
     'us-east-1': 'PJM', 'us-east-2': 'PJM',
     'us-west-1': 'CISO', 'us-west-2': 'BPAT',
     'us-central1': 'MISO',
@@ -498,39 +505,48 @@ export class ProviderRouter {
   }
 
   // Cache fuel-mix CI for 15 minutes (matches ingestion cadence)
-  private fuelMixCICache = new Map<string, { ci: number; expiry: number }>()
+  private fuelMixCICache = new Map<string, { result: { carbonIntensity: number; period: string; metadata: Record<string, unknown> }; expiry: number }>()
 
   /**
-   * Get carbon intensity derived from real GridStatus EIA-930 fuel mix data
+   * Get carbon intensity derived from real EIA-930 fuel type data.
    * Returns gCO2/kWh computed from actual hourly generation by fuel type
    */
-  private async getGridStatusFuelMixCI(region: string): Promise<number | null> {
-    const ba = ProviderRouter.GRIDSTATUS_BA_MAP[region]
+  private async getEia930FuelMixCI(region: string): Promise<{ carbonIntensity: number; period: string; metadata: Record<string, unknown> } | null> {
+    const ba = ProviderRouter.EIA930_BA_MAP[region]
     if (!ba) return null
 
     // Check cache
     const cached = this.fuelMixCICache.get(ba)
-    if (cached && cached.expiry > Date.now()) return cached.ci
+    if (cached && cached.expiry > Date.now()) return cached.result
 
     try {
-      if (!gridStatus.isAvailable) return null
-
       const now = new Date()
       const start = new Date(now.getTime() - 6 * 60 * 60 * 1000) // Last 6 hours
-      const fuelMix = await gridStatus.getFuelMix(ba, start, now)
+      const fuelMix = await eia930.getFuelTypeData(ba, start, now)
 
       if (fuelMix.length === 0) return null
 
       // Use most recent data point — FuelMixParser computes weighted avg from IPCC factors
-      const mostRecent = fuelMix[fuelMix.length - 1]
-      const ci = FuelMixParser.estimateCarbonIntensity(mostRecent)
-      if (ci === null || !Number.isFinite(ci)) return null
+      const computed = FuelMixParser.estimateCarbonIntensityFromEiaFuelTypeData(fuelMix)
+      if (!computed || !Number.isFinite(computed.carbonIntensity)) return null
+
+      const result = {
+        carbonIntensity: computed.carbonIntensity,
+        period: computed.period,
+        metadata: {
+          respondent: computed.respondent,
+          balancingAuthority: ba,
+          fuelBreakdownMwh: computed.fuelBreakdownMwh,
+          sourceDataset: 'EIA electricity/rto/fuel-type-data',
+          method: 'IPCC weighted fuel mix',
+        },
+      }
 
       // Cache for 15 minutes
-      this.fuelMixCICache.set(ba, { ci, expiry: Date.now() + 15 * 60 * 1000 })
-      return ci
+      this.fuelMixCICache.set(ba, { result, expiry: Date.now() + 15 * 60 * 1000 })
+      return result
     } catch (error) {
-      console.warn(`GridStatus fuel-mix CI failed for ${region}/${ba}:`, error)
+      console.warn(`EIA-930 fuel-mix CI failed for ${region}/${ba}:`, error)
       return null
     }
   }
@@ -586,7 +602,7 @@ export class ProviderRouter {
       // GB Carbon Intensity is authoritative real-time — its deviation from yearly baseline is expected
       const isAuthoritativeRealtime = disagreementSignals.some(s =>
         s.source === 'gb_carbon_intensity' || s.source === 'electricity_maps' ||
-        s.source === 'dk_carbon' || s.source === 'fi_carbon' || s.source === 'gridstatus_fuel_mix'
+        s.source === 'dk_carbon' || s.source === 'fi_carbon' || s.source === 'eia930_fuel_mix'
       )
 
       if (isWattTimePercentile) {

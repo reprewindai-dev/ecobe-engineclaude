@@ -35,7 +35,7 @@ const envSchema = z.object({
   EIA_BASE_URL: z.string().default("https://api.eia.gov"),
   WATTTIME_API_KEY: z.string().optional(),
 
-  // GridStatus.io (curated EIA-930 data with real fuel mix)
+  // Legacy GridStatus key. CO2 Router production routing uses direct EIA-930 math.
   GRIDSTATUS_API_KEY: z.string().optional(),
 
   // Finland Fingrid (optional regional provider)
