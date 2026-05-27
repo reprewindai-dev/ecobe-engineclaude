@@ -1053,6 +1053,12 @@ function configuredProviderFor(region: GlobalRegionConfig): string | null {
   if (region.regionCode === 'EU-FI') return 'Fingrid'
   if (region.regionCode === 'EU-FR') return 'RTE eCO2mix / ODRE'
   if (region.regionCode === 'EU-BE') return 'Elia open data fuel mix'
+  if (region.regionCode === 'EU-DE') return 'SMARD / Bundesnetzagentur fuel mix'
+  if (region.regionCode === 'EU-AT') return 'SMARD / APG fuel mix'
+  if (region.regionCode === 'EU-ES') return 'Red Electrica REData generation mix'
+  if (['EU-SE', 'EU-NO', 'EU-NL', 'EU-PT', 'EU-IT', 'EU-PL', 'EU-CH'].includes(region.regionCode)) {
+    return 'ENTSO-E Transparency Platform generation mix'
+  }
   if (region.regionCode === 'CA-ON') return 'IESO public generator output'
   if (region.regionCode === 'CA-QC') return 'Hydro-Quebec open data'
   return null
@@ -1104,6 +1110,18 @@ function routeCoverageStatus(
       status: 'needs_key',
       reason: 'Fingrid connector exists but FINGRID_API_KEY is not configured.',
       requiredAction: 'Add FINGRID_API_KEY in Coolify for ecobe-engineclaude.',
+      provider,
+    }
+  }
+
+  if (
+    ['EU-SE', 'EU-NO', 'EU-NL', 'EU-PT', 'EU-IT', 'EU-PL', 'EU-CH'].includes(region.regionCode) &&
+    !env.ENTSOE_API_TOKEN
+  ) {
+    return {
+      status: 'needs_key',
+      reason: 'ENTSO-E connector exists but ENTSOE_API_TOKEN is not configured.',
+      requiredAction: 'Add ENTSOE_API_TOKEN in Coolify for ecobe-engineclaude, then run forecast refresh.',
       provider,
     }
   }

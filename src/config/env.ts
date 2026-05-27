@@ -41,6 +41,9 @@ const envSchema = z.object({
   // Finland Fingrid (optional regional provider)
   FINGRID_API_KEY: z.string().optional(),
 
+  // ENTSO-E Transparency Platform (optional official EU provider)
+  ENTSOE_API_TOKEN: z.string().optional(),
+
   // Grid Signal Cache
   GRID_SIGNAL_CACHE_TTL: z.string().default("900"),
   GRID_FEATURE_CACHE_TTL: z.string().default("3600"),

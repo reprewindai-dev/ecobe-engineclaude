@@ -5,6 +5,7 @@ import { denmarkCarbon } from '../denmark-carbon'
 import { finlandCarbon } from '../finland-carbon'
 import { canadaCarbon } from '../canada-carbon'
 import { europeCarbon } from '../europe-carbon'
+import { euOpenCarbon, type EuOpenCarbonZone } from '../eu-open-carbon'
 import { env } from '../../config/env'
 import {
   CachedRoutingSignalRecord,
@@ -36,7 +37,7 @@ export interface ProviderDisagreement {
 
 export interface RoutingSignal {
   carbonIntensity: number
-  source: 'watttime' | 'electricity_maps' | 'ember' | 'gb_carbon_intensity' | 'dk_carbon' | 'fi_carbon' | 'ca_carbon' | 'eu_carbon' | 'eia930_fuel_mix' | 'fallback'
+  source: 'watttime' | 'electricity_maps' | 'ember' | 'gb_carbon_intensity' | 'dk_carbon' | 'fi_carbon' | 'ca_carbon' | 'eu_carbon' | 'eu_open_carbon' | 'eia930_fuel_mix' | 'fallback'
   isForecast: boolean
   confidence: number
   signalMode: 'marginal' | 'average' | 'fallback'
@@ -293,6 +294,40 @@ export class ProviderRouter {
           disagreementFlag: validation.disagreement.level !== 'none',
           disagreementPct: validation.disagreement.disagreementPct,
           validationNotes: validation.validationNotes
+        }
+      }
+    }
+
+    const euOpenSignal = await this.getEuOpenSignal(region)
+    if (euOpenSignal) {
+      const validation = await this.validateWithEmber(euOpenSignal, region, timestamp, [euOpenSignal])
+      const sourceUsed =
+        euOpenSignal.metadata?.zone === 'EU-DE'
+          ? 'DE_SMARD_GENERATION_MIX_IPCC'
+          : euOpenSignal.metadata?.zone === 'EU-AT'
+            ? 'AT_SMARD_GENERATION_MIX_IPCC'
+            : euOpenSignal.metadata?.zone === 'EU-ES'
+              ? 'ES_REE_DAILY_GENERATION_MIX_IPCC'
+              : 'ENTSOE_GENERATION_MIX_IPCC'
+
+      return {
+        carbonIntensity: euOpenSignal.carbonIntensity,
+        source: 'eu_open_carbon' as any,
+        isForecast: euOpenSignal.isForecast,
+        confidence: validation.adjustedConfidence,
+        signalMode: 'average',
+        accountingMethod: 'average',
+        provenance: {
+          sourceUsed,
+          contributingSources: ['eu_open_carbon'],
+          referenceTime: euOpenSignal.timestamp,
+          fetchedAt,
+          fallbackUsed: false,
+          disagreementFlag: validation.disagreement.level !== 'none',
+          disagreementPct: validation.disagreement.disagreementPct,
+          validationNotes: validation.validationNotes
+            ? `${euOpenSignal.metadata?.sourceFreshness ?? 'source'} official generation mix; ${validation.validationNotes}`
+            : `${euOpenSignal.metadata?.sourceFreshness ?? 'source'} official generation mix`,
         }
       }
     }
@@ -635,6 +670,74 @@ export class ProviderRouter {
     }
   }
 
+  private static EU_OPEN_REGIONS = new Set([
+    'EU-DE',
+    'eu-central-1',
+    'EU-AT',
+    'EU-ES',
+    'EU-SE',
+    'EU-NO',
+    'EU-NL',
+    'EU-PT',
+    'EU-IT',
+    'EU-PL',
+    'EU-CH',
+  ])
+
+  private static EU_OPEN_REGION_MAP: Record<string, EuOpenCarbonZone> = {
+    'EU-DE': 'EU-DE',
+    'eu-central-1': 'EU-DE',
+    'EU-AT': 'EU-AT',
+    'EU-ES': 'EU-ES',
+    'EU-SE': 'EU-SE',
+    'EU-NO': 'EU-NO',
+    'EU-NL': 'EU-NL',
+    'EU-PT': 'EU-PT',
+    'EU-IT': 'EU-IT',
+    'EU-PL': 'EU-PL',
+    'EU-CH': 'EU-CH',
+  }
+
+  private async getEuOpenSignal(region: string): Promise<ProviderSignal | null> {
+    if (!ProviderRouter.EU_OPEN_REGIONS.has(region)) return null
+    const zone = ProviderRouter.EU_OPEN_REGION_MAP[region]
+    if (!zone) return null
+
+    try {
+      const data =
+        zone === 'EU-DE'
+          ? await euOpenCarbon.getGermanyIntensity()
+          : zone === 'EU-AT'
+            ? await euOpenCarbon.getAustriaIntensity()
+            : zone === 'EU-ES'
+              ? await euOpenCarbon.getSpainIntensity()
+              : await euOpenCarbon.getEntsoeIntensity(zone)
+
+      if (!data) return null
+
+      return {
+        carbonIntensity: data.carbonIntensity,
+        isForecast: data.isForecast,
+        source: 'eu_open_carbon' as any,
+        timestamp: data.timestamp,
+        estimatedFlag: data.method !== 'smard-fuel-mix-ipcc' && data.method !== 'entsoe-generation-mix-ipcc',
+        syntheticFlag: false,
+        confidence: data.sourceFreshness === 'hourly' ? 0.76 : 0.66,
+        metadata: {
+          signalType: data.method,
+          zone: data.zone,
+          fuelBreakdownMw: data.fuelBreakdownMw,
+          sourceUrl: data.sourceUrl,
+          sourceFreshness: data.sourceFreshness,
+          factorMethod: 'IPCC-weighted official generation mix',
+        }
+      }
+    } catch (error) {
+      console.warn(`EU open-data carbon signal failed for ${region}:`, error)
+      return null
+    }
+  }
+
   // Cloud and canonical regions with direct EIA-930 fuel mix coverage (US only)
   private static EIA930_BA_MAP: Record<string, string> = {
     'US-CAL-CISO': 'CISO',
@@ -751,7 +854,8 @@ export class ProviderRouter {
       const isAuthoritativeRealtime = disagreementSignals.some(s =>
         s.source === 'gb_carbon_intensity' || s.source === 'electricity_maps' ||
         s.source === 'dk_carbon' || s.source === 'fi_carbon' ||
-        s.source === 'ca_carbon' || s.source === 'eu_carbon' || s.source === 'eia930_fuel_mix'
+        s.source === 'ca_carbon' || s.source === 'eu_carbon' ||
+        s.source === 'eu_open_carbon' || s.source === 'eia930_fuel_mix'
       )
 
       if (isWattTimePercentile) {
