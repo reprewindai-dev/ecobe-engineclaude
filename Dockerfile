@@ -4,6 +4,7 @@ RUN apk add --no-cache libc6-compat
 
 FROM base AS deps
 WORKDIR /app
+ENV NODE_ENV=development
 COPY package.json ./package.json
 COPY package-lock.json* ./package-lock.json
 RUN npm install --legacy-peer-deps
@@ -11,11 +12,15 @@ RUN npm install --legacy-peer-deps
 FROM base AS builder
 WORKDIR /app
 ARG BUILDTIME_DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder?schema=public"
+ENV NODE_ENV=development
 ENV DATABASE_URL=${BUILDTIME_DATABASE_URL}
 ENV DIRECT_DATABASE_URL=${BUILDTIME_DATABASE_URL}
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
+
+FROM builder AS prod-deps
+RUN npm prune --omit=dev --legacy-peer-deps && npm cache clean --force
 
 FROM base AS runner
 WORKDIR /app
@@ -24,16 +29,15 @@ ENV NODE_ENV=production
 RUN addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 --ingroup nodejs ecobe
 
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
-COPY --from=builder /app/scripts ./scripts
-COPY --from=builder /app/data ./data
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --chown=ecobe:nodejs --from=builder /app/dist ./dist
+COPY --chown=ecobe:nodejs --from=prod-deps /app/node_modules ./node_modules
+COPY --chown=ecobe:nodejs --from=builder /app/package.json ./package.json
+COPY --chown=ecobe:nodejs --from=builder /app/prisma ./prisma
+COPY --chown=ecobe:nodejs --from=builder /app/prisma.config.ts ./prisma.config.ts
+COPY --chown=ecobe:nodejs --from=builder /app/scripts ./scripts
+COPY --chown=ecobe:nodejs --from=builder /app/data ./data
+COPY --chown=ecobe:nodejs --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 
-RUN chown -R ecobe:nodejs /app
 USER ecobe
 
 EXPOSE 8080
