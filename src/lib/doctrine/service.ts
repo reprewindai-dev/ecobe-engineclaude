@@ -8,6 +8,7 @@ import { prisma } from "../db";
 import { redis } from "../redis";
 import { env } from "../../config/env";
 import {
+  DEFAULT_DOCTRINE_SETTINGS,
   doctrineVersionLabel,
   normalizeDoctrineSettings,
   type DoctrineProposalPayload,
@@ -177,6 +178,62 @@ export async function requireActiveDoctrine(orgId: string): Promise<ActiveDoctri
     );
   }
   return active;
+}
+
+export async function ensureActiveDoctrineForOrg(
+  orgId: string,
+  source = "default_org_bootstrap",
+) {
+  const existing = await prisma.doctrineVersion.findFirst({
+    where: { orgId, status: "ACTIVE" },
+    select: { id: true },
+  });
+  if (existing) return;
+
+  const settings = normalizeDoctrineSettings(DEFAULT_DOCTRINE_SETTINGS);
+
+  try {
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const version = await tx.doctrineVersion.create({
+        data: {
+          orgId,
+          versionNumber: 1,
+          status: "ACTIVE",
+          changeSummary: "Activate default CO2 Router governance doctrine",
+          justification:
+            "Production bootstrap for brokered pre-execution governance decisions.",
+          settings: settings as Prisma.InputJsonValue,
+          metadata: {
+            source,
+            doctrine: "lowest_defensible_signal",
+          } as Prisma.InputJsonValue,
+        },
+      });
+
+      await tx.doctrineAuditEvent.create({
+        data: {
+          orgId,
+          eventType: "VERSION_ACTIVATED",
+          versionId: version.id,
+          afterJson: {
+            versionNumber: version.versionNumber,
+            settings,
+          } as Prisma.InputJsonValue,
+          metadata: {
+            source,
+          } as Prisma.InputJsonValue,
+        },
+      });
+    });
+  } catch (error: any) {
+    const becameActive = await prisma.doctrineVersion.findFirst({
+      where: { orgId, status: "ACTIVE" },
+      select: { id: true },
+    });
+    if (!becameActive) throw error;
+  }
+
+  await invalidateDoctrineCache(orgId);
 }
 
 function pickClient(tx?: Prisma.TransactionClient) {
@@ -700,9 +757,16 @@ let defaultOrgCache: { value: string | null; expiresAt: number } | null = null;
 
 export async function resolveFallbackOrgId() {
   if (env.DOCTRINE_DEFAULT_ORG_ID) {
+    await ensureActiveDoctrineForOrg(
+      env.DOCTRINE_DEFAULT_ORG_ID,
+      "configured_default_org_bootstrap",
+    );
     return env.DOCTRINE_DEFAULT_ORG_ID;
   }
   if (defaultOrgCache && defaultOrgCache.expiresAt > Date.now()) {
+    if (defaultOrgCache.value) {
+      await ensureActiveDoctrineForOrg(defaultOrgCache.value);
+    }
     return defaultOrgCache.value;
   }
   const org = await prisma.organization.findFirst({
@@ -710,6 +774,9 @@ export async function resolveFallbackOrgId() {
     select: { id: true },
   });
   const value = org?.id ?? null;
+  if (value) {
+    await ensureActiveDoctrineForOrg(value);
+  }
   defaultOrgCache = {
     value,
     expiresAt: Date.now() + 60_000,
