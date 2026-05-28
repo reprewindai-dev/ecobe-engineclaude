@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import type {
   DoctrineAuditEvent,
   DoctrineProposal,
@@ -194,6 +195,22 @@ export async function ensureActiveDoctrineForOrg(
 
   try {
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.organization.upsert({
+        where: { id: orgId },
+        update: {},
+        create: {
+          id: orgId,
+          name: "CO2 Router Default Organization",
+          slug: `co2-router-${orgId}`.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 80),
+          apiKey: `doctrine-bootstrap-${randomUUID()}`,
+          billingEmail: null,
+          metadata: {
+            source,
+            purpose: "brokered_default_doctrine",
+          } as Prisma.InputJsonValue,
+        },
+      });
+
       const version = await tx.doctrineVersion.create({
         data: {
           orgId,
