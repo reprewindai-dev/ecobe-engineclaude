@@ -71,9 +71,11 @@ export default function LandingPage() {
         </section>
       ) : null}
 
-      <HeroMotionSurface liveDecision={heroDecision} />
+      <div id="hero">
+        <HeroMotionSurface liveDecision={heroDecision} />
+      </div>
 
-      <section className="grid gap-3 lg:grid-cols-3">
+      <section id="signals" className="grid gap-3 lg:grid-cols-3">
         {liveStrip.length > 0
           ? liveStrip.map((decision) => (
               <div
@@ -151,7 +153,9 @@ export default function LandingPage() {
         <DecisionFlowDiagram />
       </section>
 
-      <DecisionExampleCard decision={featuredDecision} proofContext={proofContext} />
+      <div id="proof">
+        <DecisionExampleCard decision={featuredDecision} proofContext={proofContext} />
+      </div>
 
       <CategoryDifferenceSection />
 
@@ -159,7 +163,9 @@ export default function LandingPage() {
       <SignalDoctrineSection providers={providers} />
       <PricingOrControlSection />
       <FinalCTASection />
-      <LiveSystemSection />
+      <div id="live-system">
+        <LiveSystemSection />
+      </div>
     </div>
   )
 }
