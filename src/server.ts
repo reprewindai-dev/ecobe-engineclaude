@@ -87,6 +87,30 @@ function isInternalRequest(req: IncomingMessage) {
   return extractInternalToken(req) === env.ECOBE_INTERNAL_API_KEY
 }
 
+function extractBrokerId(req: IncomingMessage) {
+  const brokerId = req.headers['x-ecobe-broker-id']
+  if (typeof brokerId === 'string' && brokerId.trim()) {
+    return brokerId.trim()
+  }
+
+  return null
+}
+
+function isLoopbackRequest(req: IncomingMessage) {
+  const remoteAddress = req.socket.remoteAddress ?? ''
+  return (
+    remoteAddress === '127.0.0.1' ||
+    remoteAddress === '::1' ||
+    remoteAddress === '::ffff:127.0.0.1'
+  )
+}
+
+function hasTrustedBrokerIdentity(req: IncomingMessage) {
+  if (!env.ECOBE_ENFORCE_BROKER_ID) return true
+  if (isLoopbackRequest(req)) return true
+  return extractBrokerId(req) === env.ECOBE_TRUSTED_BROKER_ID
+}
+
 const engineRequestListener: RequestListener = (req, res) => {
   const pathname = requestPath(req)
 
@@ -103,6 +127,14 @@ const engineRequestListener: RequestListener = (req, res) => {
     writeJson(res, 401, {
       error: 'Unauthorized',
       code: 'UNAUTHORIZED_INTERNAL_CALL',
+    })
+    return
+  }
+
+  if (isProtectedEnginePath(pathname) && !hasTrustedBrokerIdentity(req)) {
+    writeJson(res, 403, {
+      error: 'Caller is not an approved broker',
+      code: 'UNSUPPORTED_CALLER',
     })
     return
   }
@@ -215,6 +247,10 @@ function startBackgroundWorkers() {
 
 async function start() {
   try {
+    if (env.NODE_ENV === 'production' && !env.ECOBE_INTERNAL_API_KEY) {
+      throw new Error('ECOBE_INTERNAL_API_KEY is required in production')
+    }
+
     let waterArtifacts = validateWaterArtifacts()
     if (!waterArtifacts.healthy) {
       console.error('Water artifact health check failed at startup:', waterArtifacts)
@@ -262,6 +298,8 @@ async function start() {
       console.log(`  Public liveness: http://localhost:${env.PORT}/health`)
       console.log(`  Broker-authenticated health: http://localhost:${env.PORT}/api/v1/health`)
       console.log(`  Broker-authenticated routing API: http://localhost:${env.PORT}/api/v1/routing-decisions`)
+      console.log(`  Trusted broker id: ${env.ECOBE_TRUSTED_BROKER_ID}`)
+      console.log(`  Broker id enforcement: ${env.ECOBE_ENFORCE_BROKER_ID ? 'enabled' : 'disabled'}`)
 
       startBackgroundWorkers()
     })
