@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
+import { getEngineBaseUrl } from '@/lib/control-surface/engine'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
   try {
-    const baseUrl = process.env.ECOBE_API_URL || 'http://5.78.135.11:8000'
+    const baseUrl = getEngineBaseUrl()
     const internalKey = process.env.ECOBE_INTERNAL_API_KEY
 
     const headers: Record<string, string> = {
@@ -17,7 +18,7 @@ export async function GET() {
       headers['x-api-key'] = internalKey
     }
 
-    const response = await fetch(`${baseUrl}/api/v1/methodology/providers`, {
+    const response = await fetch(`${baseUrl}/api/v1/dashboard/methodology/providers`, {
       headers,
       cache: 'no-store',
     })

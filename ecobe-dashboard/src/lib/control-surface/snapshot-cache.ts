@@ -10,6 +10,18 @@ type CacheEntry<T> = {
 
 const snapshotCache = new Map<string, CacheEntry<unknown>>()
 
+export function invalidateCachedSnapshot(key: string) {
+  snapshotCache.delete(key)
+}
+
+export function invalidateCachedSnapshotPrefix(prefix: string) {
+  for (const key of Array.from(snapshotCache.keys())) {
+    if (key.startsWith(prefix)) {
+      snapshotCache.delete(key)
+    }
+  }
+}
+
 export async function getCachedSnapshot<T>(
   key: string,
   ttlMs: number,
@@ -50,6 +62,17 @@ export async function getCachedSnapshot<T>(
       cacheStatus: current?.value !== undefined ? 'refresh' : 'miss',
     }
   } catch (error) {
+    if (current?.value !== undefined) {
+      snapshotCache.set(key, {
+        value: current.value,
+        expiresAt: Date.now() + Math.max(1000, Math.floor(ttlMs / 4)),
+      })
+      return {
+        value: current.value,
+        cacheStatus: 'refresh',
+      }
+    }
+
     snapshotCache.delete(key)
     throw error
   }
