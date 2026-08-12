@@ -5,6 +5,8 @@
  * Stores WattTime, Ember, EIA-930, and regional grid snapshots.
  */
 
+import { Prisma } from '@prisma/client'
+
 import { prisma } from '../db'
 
 export interface ProviderSignalSnapshot {
@@ -43,14 +45,14 @@ export async function storeProviderSnapshot(snapshot: ProviderSignalSnapshot): P
         observedAt: snapshot.observedAt,
         freshnessSec: snapshot.freshnessSec ?? null,
         confidence: snapshot.confidence ?? null,
-        metadata: snapshot.metadata ?? {},
+        metadata: (snapshot.metadata ?? {}) as Prisma.InputJsonValue,
       },
       update: {
         signalValue: snapshot.signalValue,
         forecastForTs: snapshot.forecastForTs ?? null,
         freshnessSec: snapshot.freshnessSec ?? null,
         confidence: snapshot.confidence ?? null,
-        metadata: snapshot.metadata ?? {},
+        metadata: (snapshot.metadata ?? {}) as Prisma.InputJsonValue,
       },
     })
   } catch (error) {

@@ -118,12 +118,7 @@ router.get('/evidence/:decisionFrameId', async (req: Request, res: Response) => 
         orderBy: { createdAt: 'desc' },
       }),
       prisma.facilityWaterTelemetry.findMany({
-        where: {
-          OR: [
-            { telemetryRef: { contains: decisionFrameId } },
-            { facilityId: { not: null } },
-          ],
-        },
+        where: { telemetryRef: { contains: decisionFrameId } },
         orderBy: { createdAt: 'desc' },
         take: 10,
       }),

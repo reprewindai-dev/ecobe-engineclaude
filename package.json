@@ -23,7 +23,7 @@
     "db:setup": "npm run prisma:migrate:deploy && npm run prisma:seed",
     "format": "prettier --write \"src/**/*.ts\"",
     "lint": "eslint src --ext .ts",
-    "type-check": "npm run verify:canonical-root && tsc --noEmit"
+    "type-check": "npm run verify:canonical-root && prisma generate && tsc --noEmit"
   },
   "keywords": [
     "carbon",
@@ -42,9 +42,6 @@
     "@types/node": "^20.19.37",
     "prisma": "^6.19.3",
     "typescript": "^5.3.0",
-    "@prisma/extension-accelerate": "^3.0.1",
-    "@prisma/extension-optimize": "^2.0.1",
-    "@prisma/instrumentation": "^6.19.2",
     "@types/axios": "^0.9.36",
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.19",

@@ -189,6 +189,7 @@ router.get('/dekes/metrics', async (req, res) => {
 
     const hourlyMap = new Map<string, { count: number; co2: number }>()
     for (const w of workloads) {
+      if (!w.scheduledTime) continue
       const hour = w.scheduledTime.toISOString().split(':')[0] + ':00'
       const existing = hourlyMap.get(hour) || { count: 0, co2: 0 }
       existing.count++
@@ -216,6 +217,7 @@ router.get('/dekes/metrics', async (req, res) => {
     let avgResponseTimeMs = 0
     if (completedWorkloads.length > 0) {
       const totalMs = completedWorkloads.reduce((sum: number, w: any) => {
+        if (!w.scheduledTime) return sum
         const duration = w.completedAt.getTime() - w.scheduledTime.getTime()
         return sum + Math.max(0, duration)
       }, 0)

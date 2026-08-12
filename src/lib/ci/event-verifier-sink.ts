@@ -1,4 +1,6 @@
 import { env } from '../../config/env'
+import { Prisma } from '@prisma/client'
+
 import { prisma } from '../db'
 
 const SELF_VERIFIER_SINK_NAME = 'CO2 Router Decision Event Self Verifier'
@@ -109,7 +111,7 @@ export async function ensureDecisionEventVerifierSink() {
         authToken: config.authToken,
         signingSecret: config.signingSecret,
         status: 'ACTIVE',
-        metadata: config.metadata,
+        metadata: config.metadata as Prisma.InputJsonValue,
       },
     })
 
@@ -127,7 +129,7 @@ export async function ensureDecisionEventVerifierSink() {
       authToken: config.authToken,
       signingSecret: config.signingSecret,
       status: 'ACTIVE',
-      metadata: config.metadata,
+      metadata: config.metadata as Prisma.InputJsonValue,
     },
   })
 

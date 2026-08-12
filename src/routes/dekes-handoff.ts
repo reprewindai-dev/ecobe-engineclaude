@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client'
 import { Router } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/db'
@@ -342,7 +343,7 @@ router.post('/demos', requireApiKey, async (req, res) => {
         contactEmail: data.contactEmail,
         workloadSummary: data.workloadSummary ?? null,
         priority: data.priority ?? 'medium',
-        metadata: data.metadata ?? {},
+        metadata: (data.metadata ?? {}) as Prisma.InputJsonValue,
         status: 'SCHEDULED',
       },
     })
