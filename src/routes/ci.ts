@@ -99,7 +99,16 @@ import {
 } from "../lib/pgl/service";
 import { evaluateExternalPolicyHook } from "../lib/policy/external-hook";
 import { evaluateSekedPolicyAdapter } from "../lib/policy/seked-policy-adapter";
-import { persistExportBatch } from "../lib/proof/export-chain";
+import {
+  persistExportBatch,
+  readExportBatch,
+} from "../lib/proof/export-chain";
+import {
+  buildMerkleTree,
+  generateProofFromTree,
+  verifyMerkleProof,
+  type MerkleProof,
+} from "../lib/proof/merkle";
 import { env } from "../config/env";
 import { trackRecentRoutingRegions } from "../lib/cache-warmer";
 import {
@@ -3890,8 +3899,17 @@ router.post("/exports/proof", internalServiceGuard, async (req, res) => {
       })(),
     };
 
+    const tree = buildMerkleTree(
+      payload.decisions.length > 0 ? payload.decisions : [{ empty: true }],
+    );
+
     const batchId = `ci-proof-${new Date().toISOString().replace(/[:.]/g, "-")}`;
-    const chain = persistExportBatch(batchId, payload);
+    const chain = persistExportBatch(batchId, payload, {
+      version: tree.version,
+      algorithm: tree.algorithm,
+      root: tree.root,
+      leafCount: tree.leafCount,
+    });
     recordTelemetryMetric(telemetryMetricNames.proofExportCount, "counter", 1, {
       exported_records: decisions.length,
     });
@@ -3903,11 +3921,116 @@ router.post("/exports/proof", internalServiceGuard, async (req, res) => {
       chainPosition: chain.chainPosition,
       exportedRecords: decisions.length,
       batchPath: chain.batchPath,
+      merkleRoot: chain.merkleRoot,
+      merkleAlgorithm: tree.algorithm,
+      merkleVersion: tree.version,
+      merkleLeafCount: tree.leafCount,
       createdAt: new Date().toISOString(),
     });
   } catch (error) {
     return res.status(500).json({
       error: "Failed to export proof batch",
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
+router.get(
+  "/exports/proof/:batchId/merkle/:decisionFrameId",
+  internalServiceGuard,
+  (req, res) => {
+    try {
+      const envelope = readExportBatch(req.params.batchId);
+      if (!envelope) {
+        return res.status(404).json({ error: "Export batch not found" });
+      }
+
+      const decisions =
+        (envelope.payload as { decisions?: Array<Record<string, unknown>> })
+          ?.decisions ?? [];
+      const leafIndex = decisions.findIndex(
+        (decision) => decision.decisionFrameId === req.params.decisionFrameId,
+      );
+
+      if (leafIndex < 0) {
+        return res.status(404).json({
+          error: "Decision not found in export batch",
+          batchId: envelope.batchId,
+          decisionFrameId: req.params.decisionFrameId,
+        });
+      }
+
+      const proof = generateProofFromTree(
+        buildMerkleTree(decisions),
+        leafIndex,
+      );
+
+      return res.json({
+        batchId: envelope.batchId,
+        batchHash: envelope.batchHash,
+        decisionFrameId: req.params.decisionFrameId,
+        record: decisions[leafIndex],
+        proof,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        error: "Failed to generate Merkle proof",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  },
+);
+
+router.post("/exports/proof/verify", (req, res) => {
+  try {
+    const body = z
+      .object({
+        batchId: z.string().min(1).optional(),
+        expectedRoot: z
+          .string()
+          .regex(/^[0-9a-f]{64}$/)
+          .optional(),
+        proof: z.object({
+          version: z.string(),
+          algorithm: z.string(),
+          root: z.string().regex(/^[0-9a-f]{64}$/),
+          leafHash: z.string().regex(/^[0-9a-f]{64}$/),
+          leafIndex: z.number().int().nonnegative(),
+          leafCount: z.number().int().positive(),
+          path: z.array(
+            z.object({
+              hash: z.string().regex(/^[0-9a-f]{64}$/),
+              position: z.enum(["left", "right"]),
+            }),
+          ),
+        }),
+      })
+      .parse(req.body ?? {});
+
+    const anchoredRoot = body.batchId
+      ? (readExportBatch(body.batchId)?.merkle?.root ?? null)
+      : null;
+
+    if (body.batchId && !anchoredRoot) {
+      return res.status(404).json({
+        error: "Export batch not found or has no anchored Merkle root",
+        batchId: body.batchId,
+      });
+    }
+
+    const expectedRoot = body.expectedRoot ?? anchoredRoot ?? undefined;
+    const verified = verifyMerkleProof(body.proof as MerkleProof, expectedRoot);
+
+    return res.json({
+      verified,
+      batchId: body.batchId ?? null,
+      anchoredRoot,
+      expectedRoot: expectedRoot ?? null,
+      verifiedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    return res.status(400).json({
+      error: "Failed to verify Merkle proof",
       message: error instanceof Error ? error.message : "Unknown error",
     });
   }
