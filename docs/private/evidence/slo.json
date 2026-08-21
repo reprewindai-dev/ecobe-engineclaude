@@ -1,0 +1,56 @@
+{
+  "samples": 250,
+  "sampleSource": "memory",
+  "selection": "memory_window",
+  "window": {
+    "startedAt": null,
+    "endedAt": null,
+    "activeWindowMinutes": null
+  },
+  "p50": {
+    "totalMs": 43,
+    "computeMs": 29
+  },
+  "p95": {
+    "totalMs": 56,
+    "computeMs": 39
+  },
+  "p99": {
+    "totalMs": 65,
+    "computeMs": 48
+  },
+  "current": {
+    "totalMs": 59,
+    "computeMs": 44
+  },
+  "budget": {
+    "totalP95Ms": 100,
+    "computeP95Ms": 50
+  },
+  "withinBudget": {
+    "total": true,
+    "compute": true
+  },
+  "budgetMs": {
+    "totalP95": 100,
+    "computeP95": 50
+  },
+  "currentMs": {
+    "total": {
+      "p50": 43,
+      "p95": 56,
+      "p99": 65,
+      "current": 59
+    },
+    "compute": {
+      "p50": 29,
+      "p95": 39,
+      "p99": 48,
+      "current": 44
+    }
+  },
+  "counts": {
+    "totalSamples": 250,
+    "computeSamples": 250
+  }
+}

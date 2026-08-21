@@ -1,0 +1,18 @@
+{
+  "decisionFrameId": "9e663658-ce6a-4bd5-a81e-c481eeffdee8",
+  "sequenceNumber": 3693,
+  "traceHash": "319db5cdb6821eb8f262dc3008831497b6f02379e7db62227152b1230251674a",
+  "previousTraceHash": "6266b17ee6237cb9ffa29ceb086e51250e644f148b47554efe6c52b81d74a524",
+  "inputSignalHash": "6c2c101524aec80481ce37967bef3d22babb63fab0a4abd92c807883c332ded0",
+  "traceAvailable": true,
+  "governanceSource": "SEKED_INTERNAL_V1",
+  "action": "run_now",
+  "reasonCode": "ALLOW",
+  "selectedRegion": "us-west-2",
+  "operatingMode": "NORMAL",
+  "proofHash": "c6aec8e8faf8f7a49054376adfcfbb8338c8175191e7f72dba3229cb8bfa62b5",
+  "totalMs": 58,
+  "computeMs": 44,
+  "cacheHit": true,
+  "createdAt": "2026-03-31T00:23:05.608Z"
+}
