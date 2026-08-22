@@ -1,31 +1,29 @@
 'use client'
 
-import Link from 'next/link'
-
 export function PricingOrControlSection() {
   const plans = [
     {
-      name: 'CI',
-      price: '$99',
+      name: 'Operator',
+      price: 'From $7,500',
       cadence: '/month',
-      pitch: 'Start with preflight decisions and proof in the pipeline.',
-      features: ['GitHub Actions wedge', 'Five binding actions', 'Replay-ready evidence'],
+      pitch: 'One production control point with canonical decision storage, operator proof, and a real enforcement wedge.',
+      features: ['Decision API v1', 'One production enforcement path', 'Replay-ready evidence'],
       highlight: false,
     },
     {
-      name: 'Control Surface',
-      price: '$499',
+      name: 'Governance',
+      price: 'From $18,000',
       cadence: '/month',
-      pitch: 'Add live control visibility, MSS posture, and investor-grade proof surfaces.',
-      features: ['Control Surface', 'Proof panels', 'Signal doctrine visibility'],
+      pitch: 'Multi-team governance with deeper runtime control, proof exports, and regulated workload posture.',
+      features: ['Policy governance controls', 'Proof export and replay visibility', 'Kubernetes, queue, and webhook coverage'],
       highlight: true,
     },
     {
-      name: 'Enterprise',
+      name: 'Assurance',
       price: 'Custom',
       cadence: '',
-      pitch: 'Full control-plane rollout with policy adapters and workload enforcement.',
-      features: ['Kubernetes wedge', 'Signed events', 'Integration support'],
+      pitch: 'Assurance-driven deployment for enterprises that need governed evidence workflows and controlled trust boundaries.',
+      features: ['Controlled assurance workflows', 'Signed chain delivery design', 'Architecture review for internal control teams'],
       highlight: false,
     },
   ]
@@ -35,11 +33,11 @@ export function PricingOrControlSection() {
       <div className="max-w-3xl">
         <div className="text-[11px] uppercase tracking-[0.28em] text-emerald-300">Start with control</div>
         <h2 className="mt-3 text-3xl font-black tracking-[-0.04em] text-white sm:text-4xl">
-          Expand from CI wedge to execution authority.
+          Price the control plane like infrastructure.
         </h2>
         <p className="mt-4 text-sm leading-7 text-slate-300 sm:text-base">
-          The first sale is not a dashboard. It is an enforcement path. The public surface should
-          make that obvious.
+          CO2 Router is sold around decisioning, enforcement scope, proof, and governance depth.
+          The commercial surface should read like execution authority, not a generic software seat plan.
         </p>
       </div>
       <div className="mt-8 grid gap-4 lg:grid-cols-3">
@@ -71,24 +69,24 @@ export function PricingOrControlSection() {
         ))}
       </div>
       <div className="mt-8 flex flex-wrap gap-3">
-        <Link
-          href="/console"
+        <a
+          href="#live-system"
           className="rounded-2xl bg-gradient-to-r from-emerald-300 via-cyan-300 to-sky-400 px-5 py-3 text-sm font-bold uppercase tracking-[0.18em] text-slate-950"
         >
           Open the Control Surface
-        </Link>
-        <Link
-          href="/methodology"
+        </a>
+        <a
+          href="#proof"
           className="rounded-2xl border border-white/12 bg-white/[0.04] px-5 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-white"
         >
           View methodology
-        </Link>
-        <Link
-          href="/contact"
+        </a>
+        <a
+          href="#hero"
           className="rounded-2xl border border-white/12 bg-white/[0.04] px-5 py-3 text-sm font-semibold uppercase tracking-[0.18em] text-white"
         >
           Contact sales
-        </Link>
+        </a>
       </div>
     </section>
   )

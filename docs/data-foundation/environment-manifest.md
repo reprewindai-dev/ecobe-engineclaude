@@ -36,7 +36,6 @@
 | `EIA_API_KEY` | EIA-930 access | yes |
 | `EMBER_API_KEY` | Ember access | yes |
 | `FINGRID_API_KEY` | Finland provider access | yes |
-| `ELECTRICITY_MAPS_API_KEY` | Electricity Maps access | yes |
 
 ## Engine caches, workers, and schedulers
 | Variable | Purpose | Default |

@@ -2,8 +2,10 @@
  * Provider Snapshot Storage — Routing Spec v1
  *
  * Persists provider signal values at decision time for full audit trail.
- * Stores WattTime, Electricity Maps, Ember, and EIA-930 snapshots.
+ * Stores WattTime, Ember, EIA-930, and regional grid snapshots.
  */
+
+import { Prisma } from '@prisma/client'
 
 import { prisma } from '../db'
 
@@ -43,14 +45,14 @@ export async function storeProviderSnapshot(snapshot: ProviderSignalSnapshot): P
         observedAt: snapshot.observedAt,
         freshnessSec: snapshot.freshnessSec ?? null,
         confidence: snapshot.confidence ?? null,
-        metadata: snapshot.metadata ?? {},
+        metadata: (snapshot.metadata ?? {}) as Prisma.InputJsonValue,
       },
       update: {
         signalValue: snapshot.signalValue,
         forecastForTs: snapshot.forecastForTs ?? null,
         freshnessSec: snapshot.freshnessSec ?? null,
         confidence: snapshot.confidence ?? null,
-        metadata: snapshot.metadata ?? {},
+        metadata: (snapshot.metadata ?? {}) as Prisma.InputJsonValue,
       },
     })
   } catch (error) {
@@ -84,10 +86,8 @@ export async function getLatestSnapshots(zone: string, providers?: string[]) {
 
 const PROVIDER_FRESHNESS_THRESHOLDS_SEC: Record<string, number> = {
   WATTTIME_MOER: 600,
-  ELECTRICITY_MAPS: 600,
   EMBER_STRUCTURAL_BASELINE: 86400,
   EIA_930: 1800,
-  GRIDSTATUS: 1800,
   GB_CARBON: 1800,
   DK_CARBON: 1800,
   FI_CARBON: 1800,
@@ -95,7 +95,6 @@ const PROVIDER_FRESHNESS_THRESHOLDS_SEC: Record<string, number> = {
 
 const INTEGRATION_SOURCE_TO_PROVIDER: Record<string, string> = {
   WATTTIME: 'WATTTIME_MOER',
-  GRIDSTATUS: 'GRIDSTATUS',
   EIA_930: 'EIA_930',
   EMBER: 'EMBER_STRUCTURAL_BASELINE',
   GB_CARBON: 'GB_CARBON',
@@ -114,8 +113,6 @@ export function canonicalizeProviderIdentity(provider: string): string {
     case 'watttime':
     case 'watttime_moer':
       return 'WATTTIME_MOER'
-    case 'electricity_maps':
-      return 'ELECTRICITY_MAPS'
     case 'ember':
     case 'ember_structural':
     case 'ember_structural_baseline':
@@ -123,8 +120,6 @@ export function canonicalizeProviderIdentity(provider: string): string {
     case 'eia930':
     case 'eia_930':
       return 'EIA_930'
-    case 'gridstatus':
-      return 'GRIDSTATUS'
     case 'gb_carbon':
       return 'GB_CARBON'
     case 'dk_carbon':

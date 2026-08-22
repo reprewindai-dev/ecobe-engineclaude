@@ -1,0 +1,77 @@
+name: Auto PR
+
+on:
+  push:
+    branches:
+      - 'codex/**'
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to open a PR for'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: auto-pr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  open-pr:
+    name: Open or reuse PR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open pull request if missing
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const branch = context.eventName === 'workflow_dispatch'
+              ? core.getInput('branch')
+              : context.ref.replace('refs/heads/', '');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const head = `${owner}:${branch}`;
+
+            const existing = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: 'open',
+              base: 'main',
+              head,
+              per_page: 100,
+            });
+
+            if (existing.length > 0) {
+              core.notice(`Open PR already exists: #${existing[0].number}`);
+              return;
+            }
+
+            const title = branch
+              .replace(/^codex\//, '')
+              .replace(/[-_]+/g, ' ')
+              .replace(/\b\w/g, (m) => m.toUpperCase());
+
+            const body = [
+              'Automated PR created from a `codex/*` branch.',
+              '',
+              `Branch: \`${branch}\``,
+              `Commit: \`${context.sha}\``,
+              '',
+              'This workflow keeps protected `main` intact and opens the PR automatically.',
+            ].join('\n');
+
+            const pull = await github.rest.pulls.create({
+              owner,
+              repo,
+              title: title || branch,
+              head: branch,
+              base: 'main',
+              body,
+              maintainer_can_modify: true,
+            });
+
+            core.notice(`Created PR #${pull.data.number}`);

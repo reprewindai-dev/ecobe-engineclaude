@@ -2,11 +2,18 @@ import { ProviderRouter } from '../lib/carbon/provider-router'
 
 // Mock external providers — WattTime is Tier 1 (locked doctrine)
 jest.mock('../lib/watttime', () => ({
+  resolveWattTimeRegion: jest.fn((region: string) => region.startsWith('us-') ? 'PJM_DC' : null),
   wattTime: {
     getCurrentMOER: jest.fn(),
     getMOERForecast: jest.fn(),
     getPredictedCleanWindows: jest.fn(),
   }
+}))
+
+jest.mock('../lib/grid-signals/eia-client', () => ({
+  eia930: {
+    getFuelTypeData: jest.fn().mockResolvedValue([]),
+  },
 }))
 
 jest.mock('../lib/ember', () => ({
@@ -75,21 +82,24 @@ describe('ProviderRouter', () => {
   })
 
   describe('getRoutingSignal — tier order (WattTime Tier 1)', () => {
-    it('should use WattTime MOER as primary signal for US regions', async () => {
+    it('should use a valid WattTime MOER forecast as the primary US routing signal', async () => {
       const { wattTime } = require('../lib/watttime')
 
       wattTime.getCurrentMOER.mockResolvedValue({
-        moer: 320,
+        moerPercent: 61,
         timestamp: new Date().toISOString(),
         balancingAuthority: 'PJM',
       })
+      wattTime.getMOERForecast.mockResolvedValue([
+        { moer: 320, timestamp: new Date(Date.now() + 60 * 60 * 1000).toISOString() }
+      ])
 
-      const signal = await router.getRoutingSignal('us-east-1', new Date())
+      const signal = await router.getRoutingSignal('us-east-1', new Date(Date.now() + 60 * 60 * 1000))
 
       expect(signal.source).toBe('watttime')
       expect(signal.carbonIntensity).toBe(320)
       expect(signal.provenance.fallbackUsed).toBe(false)
-      expect(signal.confidence).toBeGreaterThan(0.7)
+      expect(signal.confidence).toBeGreaterThanOrEqual(0.7)
     })
 
     it('should use WattTime MOER forecast when current is unavailable', async () => {
@@ -100,7 +110,7 @@ describe('ProviderRouter', () => {
         { moer: 280, timestamp: new Date().toISOString() }
       ])
 
-      const signal = await router.getRoutingSignal('us-east-1', new Date())
+      const signal = await router.getRoutingSignal('us-east-1', new Date(Date.now() + 60 * 60 * 1000))
 
       expect(signal.isForecast).toBe(true)
       expect(signal.carbonIntensity).toBe(280)
@@ -357,14 +367,14 @@ describe('ProviderRouter', () => {
       GridSignalCache.getLastKnownGoodRoutingSignal.mockResolvedValue({
         signal: {
           carbonIntensity: 180,
-          source: 'watttime',
+          source: 'eia930_fuel_mix',
           isForecast: false,
           confidence: 0.9,
           signalMode: 'marginal',
           accountingMethod: 'marginal',
           provenance: {
-            sourceUsed: 'WATTTIME_MOER',
-            contributingSources: ['watttime'],
+            sourceUsed: 'EIA_930_FUEL_MIX',
+            contributingSources: ['eia930'],
             referenceTime: new Date().toISOString(),
             fetchedAt: new Date().toISOString(),
             fallbackUsed: false,

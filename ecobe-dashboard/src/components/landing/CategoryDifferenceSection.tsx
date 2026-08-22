@@ -63,12 +63,12 @@ export function CategoryDifferenceSection() {
               </div>
               <h3 className="mt-2 text-2xl font-bold text-white">Investor comparison block</h3>
             </div>
-            <Link
-              href="/methodology"
-              className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-200 transition hover:border-cyan-300/40 hover:text-cyan-200"
-            >
-              Full methodology
-            </Link>
+          <Link
+            href="#proof"
+            className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-200 transition hover:border-cyan-300/40 hover:text-cyan-200"
+          >
+            Full methodology
+          </Link>
           </div>
 
           <div className="mt-5 overflow-x-auto">

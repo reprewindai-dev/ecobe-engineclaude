@@ -278,20 +278,7 @@ export default function Home() {
                   whiteSpace: 'pre-wrap',
                   color: '#E7F1FF',
                   fontFamily: '"JetBrains Mono", "IBM Plex Mono", monospace',
-                }}>{codeSample}
-
-{
-  "success": true,
-  "decision": {
-    "selectedRegion": "eu-north-1",
-    "estimatedEmissionsKgCo2e": 38.4,
-    "estimatedSavingsKgCo2e": 8.1,
-    "confidence": 0.86
-  },
-  "intelligence": {
-    "similarWorkloads": [...]
-  }
-}</pre>
+                }}>{codeSample}</pre>
               </div>
             </div>
             <div style={{ display: 'grid', gap: '22px' }}>

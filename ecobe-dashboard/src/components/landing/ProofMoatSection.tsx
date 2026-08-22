@@ -2,18 +2,17 @@
 
 import { motion } from 'framer-motion'
 
-import type { ReplayBundle } from '@/types/control-surface'
-
 export function ProofMoatSection({
-  replay,
+  proofContext,
 }: {
-  replay: ReplayBundle | null
+  proofContext: {
+    proofRef: string | null
+    governance: string
+    traceRef: string | null
+    replay: string
+    provenance: string
+  }
 }) {
-  const proof = replay?.persisted?.proofRecord ?? replay?.replay.proofRecord
-  const traceReasons = (replay?.persisted?.policyTrace?.reasonCodes ??
-    replay?.replay.policyTrace?.reasonCodes ??
-    []) as string[]
-
   return (
     <section className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
       <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-6 sm:p-8">
@@ -37,7 +36,7 @@ export function ProofMoatSection({
         <div className="flex items-center justify-between">
           <div className="text-[11px] uppercase tracking-[0.28em] text-cyan-300">Proof chain</div>
           <div className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] text-slate-300">
-            {replay?.deterministicMatch ? 'replay verified' : 'live proof sample'}
+            {proofContext.replay}
           </div>
         </div>
         <div className="mt-6 flex items-center gap-3 overflow-x-auto pb-2">
@@ -58,26 +57,17 @@ export function ProofMoatSection({
           <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
             <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">proof record</div>
             <div className="mt-3 space-y-2 text-sm text-slate-300">
-              <div>job_id: {proof?.job_id ?? 'unavailable'}</div>
-              <div>selected_region: {proof?.selected_region ?? 'unavailable'}</div>
-              <div>proof_hash: {proof?.proof_hash?.slice(0, 18) ?? 'unavailable'}</div>
-              <div>confidence: {proof?.confidence_score?.toFixed(2) ?? '0.00'}</div>
+              <div>proof_ref: {proofContext.proofRef ?? 'unavailable'}</div>
+              <div>trace_ref: {proofContext.traceRef ?? 'unavailable'}</div>
+              <div>governance: {proofContext.governance}</div>
+              <div>provenance: {proofContext.provenance}</div>
             </div>
           </div>
           <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
             <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">policy trace</div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {traceReasons.slice(0, 4).map((reason) => (
-                <span
-                  key={reason}
-                  className="rounded-full border border-white/8 bg-white/[0.03] px-2.5 py-1 text-[11px] text-slate-300"
-                >
-                  {reason}
-                </span>
-              ))}
-            </div>
+            <div className="mt-3 text-sm leading-7 text-slate-300">{proofContext.governance}</div>
             <div className="mt-3 text-xs text-slate-400">
-              replay {replay?.deterministicMatch ? 'deterministic match' : 'available on frame'}
+              replay {proofContext.replay}
             </div>
           </div>
         </div>

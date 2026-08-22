@@ -75,6 +75,11 @@ import {
   requireActiveDoctrine,
   resolveFallbackOrgId,
 } from "../lib/doctrine/service";
+import {
+  DEFAULT_DOCTRINE_SETTINGS,
+  normalizeDoctrineSettings,
+  type DoctrineSettings,
+} from "../lib/doctrine/schema";
 import { loadRegionReliabilityMultipliers } from "../lib/learning/region-reliability";
 import { hashCanonicalJson } from "../lib/pgl/canonical";
 import {
@@ -94,7 +99,16 @@ import {
 } from "../lib/pgl/service";
 import { evaluateExternalPolicyHook } from "../lib/policy/external-hook";
 import { evaluateSekedPolicyAdapter } from "../lib/policy/seked-policy-adapter";
-import { persistExportBatch } from "../lib/proof/export-chain";
+import {
+  persistExportBatch,
+  readExportBatch,
+} from "../lib/proof/export-chain";
+import {
+  buildMerkleTree,
+  generateProofFromTree,
+  verifyMerkleProof,
+  type MerkleProof,
+} from "../lib/proof/merkle";
 import { env } from "../config/env";
 import { trackRecentRoutingRegions } from "../lib/cache-warmer";
 import {
@@ -123,21 +137,76 @@ import type {
 } from "../lib/water/types";
 import type { ExternalPolicyHookResult } from "../lib/policy/external-hook";
 import type { SekedPolicyAdapterResult } from "../lib/policy/seked-policy-adapter";
-import type { DoctrineSettings } from "../lib/doctrine/schema";
 import { internalServiceGuard } from "../middleware/internal-auth";
 
 const router = Router();
 
 const RUNNER_REGIONS: Record<string, string[]> = {
-  "us-east-1": ["ubuntu-latest", "windows-latest", "macos-latest"],
-  "us-west-2": ["ubuntu-latest", "windows-latest"],
-  "us-central-1": ["ubuntu-latest"],
-  "eu-west-1": ["ubuntu-latest", "windows-latest"],
-  "eu-west-2": ["ubuntu-latest"],
-  "eu-central-1": ["ubuntu-latest"],
+  // ── North America — US ──
+  "us-east-1":      ["ubuntu-latest", "windows-latest", "macos-latest"],
+  "us-east-2":      ["ubuntu-latest", "windows-latest"],
+  "us-west-1":      ["ubuntu-latest", "windows-latest"],
+  "us-west-2":      ["ubuntu-latest", "windows-latest"],
+  "us-central-1":   ["ubuntu-latest"],
+  "us-south-1":     ["ubuntu-latest"],
+  "us-northeast-1": ["ubuntu-latest"],
+  // ── North America — Canada ──
+  "ca-central-1":   ["ubuntu-latest"],
+  "ca-west-1":      ["ubuntu-latest"],
+  "ca-bc-1":        ["ubuntu-latest"],
+  // ── South America ──
+  "sa-east-1":      ["ubuntu-latest"],
+  "sa-south-1":     ["ubuntu-latest"],
+  "sa-west-1":      ["ubuntu-latest"],
+  "sa-north-1":     ["ubuntu-latest"],
+  // ── Europe ──
+  "eu-west-1":      ["ubuntu-latest", "windows-latest"],
+  "eu-west-2":      ["ubuntu-latest", "windows-latest"],
+  "eu-west-3":      ["ubuntu-latest"],
+  "eu-west-4":      ["ubuntu-latest"],
+  "eu-central-1":   ["ubuntu-latest", "windows-latest"],
+  "eu-central-2":   ["ubuntu-latest"],
+  "eu-central-3":   ["ubuntu-latest"],
+  "eu-central-4":   ["ubuntu-latest"],
+  "eu-central-5":   ["ubuntu-latest"],
+  "eu-north-1":     ["ubuntu-latest"],
+  "eu-north-2":     ["ubuntu-latest"],
+  "eu-north-3":     ["ubuntu-latest"],
+  "eu-south-1":     ["ubuntu-latest"],
+  "eu-south-2":     ["ubuntu-latest"],
+  "eu-east-1":      ["ubuntu-latest"],
+  // ── Middle East & Africa ──
+  "me-south-1":     ["ubuntu-latest"],
+  "me-central-1":   ["ubuntu-latest"],
+  "af-south-1":     ["ubuntu-latest"],
+  // ── Asia Pacific ──
   "ap-southeast-1": ["ubuntu-latest"],
+  "ap-southeast-2": ["ubuntu-latest"],
+  "ap-southeast-3": ["ubuntu-latest"],
+  "ap-southeast-4": ["ubuntu-latest"],
   "ap-northeast-1": ["ubuntu-latest"],
-  "ap-south-1": ["ubuntu-latest"],
+  "ap-northeast-2": ["ubuntu-latest"],
+  "ap-northeast-3": ["ubuntu-latest"],
+  "ap-south-1":     ["ubuntu-latest"],
+  "ap-south-2":     ["ubuntu-latest"],
+  // ── Vercel edge region aliases (map to canonical grid regions via REFERENCE_REGIONS) ──
+  "iad1":           ["ubuntu-latest", "windows-latest", "macos-latest"], // → US-MIDA-PJM
+  "pdx1":           ["ubuntu-latest", "windows-latest"],                 // → US-NW-BPAT
+  "sfo1":           ["ubuntu-latest", "windows-latest"],                 // → US-CAL-CISO
+  "cle1":           ["ubuntu-latest"],                                   // → US-MIDW-MISO
+  "yul1":           ["ubuntu-latest"],                                   // → CA-QC
+  "lhr1":           ["ubuntu-latest", "windows-latest"],                 // → EU-GB
+  "cdg1":           ["ubuntu-latest"],                                   // → EU-FR
+  "arn1":           ["ubuntu-latest"],                                   // → EU-SE
+  "fra1":           ["ubuntu-latest", "windows-latest"],                 // → EU-DE
+  "dub1":           ["ubuntu-latest"],                                   // → EU-GB (Ireland routes to GB grid)
+  "sin1":           ["ubuntu-latest"],                                   // → AP-SG
+  "hnd1":           ["ubuntu-latest"],                                   // → AP-JP-TOKYO
+  "kix1":           ["ubuntu-latest"],                                   // → AP-JP-OSAKA
+  "syd1":           ["ubuntu-latest"],                                   // → AP-AU-NSW
+  "gru1":           ["ubuntu-latest"],                                   // → SA-BR-SE
+  "cpt1":           ["ubuntu-latest"],                                   // → AF-ZA
+  "dxb1":           ["ubuntu-latest"],                                   // → ME-AE
 };
 
 export const requestSchema = z.object({
@@ -303,6 +372,19 @@ function applyDoctrineToRequest(
       allowDelay,
       maxDelayMinutes,
     },
+  };
+}
+
+function buildFallbackDoctrineContext(): ActiveDoctrineContext {
+  return {
+    orgId: "fallback-org",
+    versionId: "fallback-doctrine",
+    versionNumber: 1,
+    version: DECISION_DOCTRINE_VERSION,
+    status: "active",
+    settings: normalizeDoctrineSettings(DEFAULT_DOCTRINE_SETTINGS),
+    activatedAt: new Date(0).toISOString(),
+    sourceProposalId: null,
   };
 }
 
@@ -1076,16 +1158,11 @@ export async function createDecision(
     decisionMode: data.decisionMode ?? "runtime_authorization",
     timestamp: timestampIso,
   });
-  if (!executionContext.doctrine) {
-    throw new DoctrineServiceError(
-      "Doctrine context was not provided for decision authorization.",
-      "DOCTRINE_CONTEXT_MISSING",
-      503,
-    );
-  }
+  const doctrineContext =
+    executionContext.doctrine ?? buildFallbackDoctrineContext();
   const doctrineProfile = applyDoctrineToRequest(
     parsedRequest,
-    executionContext.doctrine,
+    doctrineContext,
   );
   const normalizedRequest = doctrineProfile.effectiveRequest;
   const artifactSnapshotStarted = Date.now();
@@ -2477,14 +2554,19 @@ async function routeDecisionHandler(req: Request, res: Response) {
       );
     } catch (dbError) {
       console.warn("Failed to persist CI decision:", dbError);
-      if (result.persistable.request.decisionMode === "runtime_authorization") {
+      if (dbError instanceof PglAuditError) {
+        validatedResponse.policyTrace.reasonCodes.push(
+          "PGL_AUDIT_UNAVAILABLE_DECISION_PERSISTED",
+        );
+      } else if (
+        result.persistable.request.decisionMode === "runtime_authorization"
+      ) {
         throw dbError;
+      } else {
+        validatedResponse.policyTrace.reasonCodes.push(
+          "DB_PERSIST_FAILED_LOCAL_RESPONSE_ONLY",
+        );
       }
-      validatedResponse.policyTrace.reasonCodes.push(
-        dbError instanceof PglAuditError
-          ? "PGL_AUDIT_PERSIST_FAILED_LOCAL_RESPONSE_ONLY"
-          : "DB_PERSIST_FAILED_LOCAL_RESPONSE_ONLY",
-      );
     }
 
     logSlowDecision({
@@ -3362,10 +3444,15 @@ router.get("/decisions", async (req, res) => {
     const traceByFrameId = new Map<string, any>(
       traceRows.map((trace: any) => [trace.decisionFrameId, trace]),
     );
-    const pglSummaryByFrameId = await getPglSummaryMapByDecisionFrameIds(
-      prisma,
-      decisionFrameIds,
-    );
+    let pglSummaryByFrameId = new Map<string, any>();
+    try {
+      pglSummaryByFrameId = await getPglSummaryMapByDecisionFrameIds(
+        prisma,
+        decisionFrameIds,
+      );
+    } catch (pglError) {
+      console.warn("PGL summary unavailable for CI decisions:", pglError);
+    }
 
     res.json({
       decisions: decisions.map((decision: any) => ({
@@ -3812,8 +3899,17 @@ router.post("/exports/proof", internalServiceGuard, async (req, res) => {
       })(),
     };
 
+    const tree = buildMerkleTree(
+      payload.decisions.length > 0 ? payload.decisions : [{ empty: true }],
+    );
+
     const batchId = `ci-proof-${new Date().toISOString().replace(/[:.]/g, "-")}`;
-    const chain = persistExportBatch(batchId, payload);
+    const chain = persistExportBatch(batchId, payload, {
+      version: tree.version,
+      algorithm: tree.algorithm,
+      root: tree.root,
+      leafCount: tree.leafCount,
+    });
     recordTelemetryMetric(telemetryMetricNames.proofExportCount, "counter", 1, {
       exported_records: decisions.length,
     });
@@ -3825,11 +3921,116 @@ router.post("/exports/proof", internalServiceGuard, async (req, res) => {
       chainPosition: chain.chainPosition,
       exportedRecords: decisions.length,
       batchPath: chain.batchPath,
+      merkleRoot: chain.merkleRoot,
+      merkleAlgorithm: tree.algorithm,
+      merkleVersion: tree.version,
+      merkleLeafCount: tree.leafCount,
       createdAt: new Date().toISOString(),
     });
   } catch (error) {
     return res.status(500).json({
       error: "Failed to export proof batch",
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
+router.get(
+  "/exports/proof/:batchId/merkle/:decisionFrameId",
+  internalServiceGuard,
+  (req, res) => {
+    try {
+      const envelope = readExportBatch(req.params.batchId);
+      if (!envelope) {
+        return res.status(404).json({ error: "Export batch not found" });
+      }
+
+      const decisions =
+        (envelope.payload as { decisions?: Array<Record<string, unknown>> })
+          ?.decisions ?? [];
+      const leafIndex = decisions.findIndex(
+        (decision) => decision.decisionFrameId === req.params.decisionFrameId,
+      );
+
+      if (leafIndex < 0) {
+        return res.status(404).json({
+          error: "Decision not found in export batch",
+          batchId: envelope.batchId,
+          decisionFrameId: req.params.decisionFrameId,
+        });
+      }
+
+      const proof = generateProofFromTree(
+        buildMerkleTree(decisions),
+        leafIndex,
+      );
+
+      return res.json({
+        batchId: envelope.batchId,
+        batchHash: envelope.batchHash,
+        decisionFrameId: req.params.decisionFrameId,
+        record: decisions[leafIndex],
+        proof,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        error: "Failed to generate Merkle proof",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  },
+);
+
+router.post("/exports/proof/verify", (req, res) => {
+  try {
+    const body = z
+      .object({
+        batchId: z.string().min(1).optional(),
+        expectedRoot: z
+          .string()
+          .regex(/^[0-9a-f]{64}$/)
+          .optional(),
+        proof: z.object({
+          version: z.string(),
+          algorithm: z.string(),
+          root: z.string().regex(/^[0-9a-f]{64}$/),
+          leafHash: z.string().regex(/^[0-9a-f]{64}$/),
+          leafIndex: z.number().int().nonnegative(),
+          leafCount: z.number().int().positive(),
+          path: z.array(
+            z.object({
+              hash: z.string().regex(/^[0-9a-f]{64}$/),
+              position: z.enum(["left", "right"]),
+            }),
+          ),
+        }),
+      })
+      .parse(req.body ?? {});
+
+    const anchoredRoot = body.batchId
+      ? (readExportBatch(body.batchId)?.merkle?.root ?? null)
+      : null;
+
+    if (body.batchId && !anchoredRoot) {
+      return res.status(404).json({
+        error: "Export batch not found or has no anchored Merkle root",
+        batchId: body.batchId,
+      });
+    }
+
+    const expectedRoot = body.expectedRoot ?? anchoredRoot ?? undefined;
+    const verified = verifyMerkleProof(body.proof as MerkleProof, expectedRoot);
+
+    return res.json({
+      verified,
+      batchId: body.batchId ?? null,
+      anchoredRoot,
+      expectedRoot: expectedRoot ?? null,
+      verifiedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    return res.status(400).json({
+      error: "Failed to verify Merkle proof",
       message: error instanceof Error ? error.message : "Unknown error",
     });
   }

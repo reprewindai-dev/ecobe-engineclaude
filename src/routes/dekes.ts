@@ -137,6 +137,7 @@ router.get('/analytics', requireApiKey, async (req, res) => {
     // Calculate CO2 by day
     const dailyMap = new Map<string, number>()
     for (const w of workloads) {
+      if (!w.scheduledTime) continue
       const day = w.scheduledTime.toISOString().split('T')[0]
       dailyMap.set(day, (dailyMap.get(day) ?? 0) + (w.actualCO2 ?? 0))
     }

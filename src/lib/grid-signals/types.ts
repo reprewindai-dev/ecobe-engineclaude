@@ -52,6 +52,16 @@ export interface EIASubregionData {
   'value-units': string
 }
 
+export interface EIAFuelTypeData {
+  period: string
+  respondent: string
+  'respondent-name': string
+  fueltype: string
+  'type-name': string
+  value: number
+  'value-units': string
+}
+
 /**
  * GridStatus.io fuel mix hourly data — real per-fuel-type generation in MW
  * Replaces heuristic subregion name matching with measured fuel breakdown

@@ -10,78 +10,42 @@ import { SignalDoctrineSection } from '@/components/landing/SignalDoctrineSectio
 import { PricingOrControlSection } from '@/components/landing/PricingOrControlSection'
 import { FinalCTASection } from '@/components/landing/FinalCTASection'
 import { LiveSystemSection } from '@/components/landing/LiveSystemSection'
-import { FALLBACK_OVERVIEW } from '@/lib/control-surface/fallbacks'
-import { useControlSurfaceOverview } from '@/lib/hooks/control-surface'
+import { FALLBACK_LANDING_SNAPSHOT } from '@/lib/control-surface/fallbacks'
+import { useLandingSnapshot } from '@/lib/hooks/control-surface'
 
 export default function LandingPage() {
-  const overviewQuery = useControlSurfaceOverview()
-  const overview = overviewQuery.data
-
-  const decisions = overview?.decisions ?? []
-  const providers = overview?.providers ?? FALLBACK_OVERVIEW.providers
-  const replay = overview?.replay ?? FALLBACK_OVERVIEW.replay
-  const actionDistribution = overview?.actionDistribution ?? FALLBACK_OVERVIEW.actionDistribution
-  const liveStrip = [...decisions]
-    .sort(
-      (a, b) =>
-        b.carbonReductionPct + b.waterImpactDeltaLiters - (a.carbonReductionPct + a.waterImpactDeltaLiters)
-    )
-    .slice(0, 3)
-  const heroDecision =
-    overview?.featuredDecision &&
-    'decisionFrameId' in overview.featuredDecision &&
-    !('decision' in overview.featuredDecision)
-      ? overview.featuredDecision
-      : decisions[0] ?? null
-  const featuredDecision =
-    overview?.featuredDecision && 'decision' in overview.featuredDecision
-      ? overview.featuredDecision
-      : overview?.liveDecision ?? null
-  const waterProviders = providers.filter((provider) => provider.providerType === 'water')
-  const verifiedWaterDatasets = waterProviders.filter(
-    (provider) => provider.provenanceStatus === 'verified'
-  ).length
-  const proofContext = {
-    proofRef: featuredDecision?.proofHash ?? null,
-    governance:
-      featuredDecision && 'policyTrace' in featuredDecision
-        ? featuredDecision.policyTrace.profile ??
-          featuredDecision.policyTrace.policyVersion ??
-          'SAIQ policy trace attached'
-        : 'SAIQ policy trace attaches with the live decision frame.',
-    traceRef: replay?.decisionFrameId ?? featuredDecision?.decisionFrameId ?? null,
-    replay:
-      replay == null
-        ? 'live proof sample'
-        : replay.deterministicMatch
-          ? 'deterministic match'
-          : 'replay available',
-    provenance:
-      waterProviders.length > 0
-        ? `${verifiedWaterDatasets}/${waterProviders.length} datasets verified`
-        : 'verified datasets will attach with live provenance',
-  }
+  const landingQuery = useLandingSnapshot()
+  const landing = landingQuery.data ?? FALLBACK_LANDING_SNAPSHOT
+  const overview = landing.overview
+  const liveStatus = landing.liveStatus
 
   return (
     <div className="space-y-8 pb-8">
-      {overviewQuery.error ? (
+      {landingQuery.error ? (
         <section className="rounded-[24px] border border-amber-300/20 bg-amber-300/10 px-5 py-4 text-sm text-amber-100">
           Live control data is temporarily unavailable. The public surface stays resolved while the
           live decision and proof chain reconnect.
         </section>
       ) : null}
 
-      <HeroMotionSurface liveDecision={heroDecision} />
+      <div id="hero">
+        <HeroMotionSurface liveDecision={overview.featuredDecision} />
+      </div>
 
-      <section className="grid gap-3 lg:grid-cols-3">
-        {liveStrip.length > 0
-          ? liveStrip.map((decision) => (
+      <section id="signals" className="grid gap-3 lg:grid-cols-3">
+        {overview.liveStrip.length > 0
+          ? overview.liveStrip.map((decision) => (
               <div
                 key={decision.decisionFrameId}
                 className="rounded-[24px] border border-white/8 bg-white/[0.03] p-4"
               >
-                <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                  live decision
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
+                    live decision
+                  </div>
+                  <div className="rounded-full border border-emerald-400/20 bg-emerald-400/8 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-emerald-200">
+                    live {liveStatus.lastUpdatedLabel}
+                  </div>
                 </div>
                 <div className="mt-2 text-lg font-semibold text-white">
                   {decision.workloadLabel ?? 'Current execution frame'}
@@ -143,7 +107,50 @@ export default function LandingPage() {
           </p>
         </div>
         <div className="mt-8">
-          <ActionStrip distribution={actionDistribution} />
+          <ActionStrip distribution={overview.actionDistribution} />
+        </div>
+      </section>
+
+      <section className="rounded-[32px] border border-white/10 bg-white/[0.03] p-6 sm:p-8">
+        <div className="max-w-3xl">
+          <div className="text-[11px] uppercase tracking-[0.28em] text-emerald-300">Real scenarios</div>
+          <h2 className="mt-3 text-3xl font-black tracking-[-0.04em] text-white sm:text-4xl">
+            Make buyers see themselves in the control plane immediately.
+          </h2>
+          <p className="mt-4 text-sm leading-7 text-slate-300 sm:text-base">
+            CO2 Router becomes harder to dismiss when the public surface shows the exact moments where
+            teams run blind today: a release pipeline in the wrong window, a batch queue in the wrong
+            region, or an audit question with no proof attached.
+          </p>
+        </div>
+        <div className="mt-8 grid gap-4 lg:grid-cols-2">
+          {[
+            {
+              title: 'Heavy CI run during a carbon spike',
+              detail:
+                'A release pipeline reaches a high-emissions window under a tight latency envelope. CO2 Router evaluates policy, water, latency, and carbon first, then reroutes or delays before the run burns budget and trust.',
+            },
+            {
+              title: 'Kubernetes batch in a constrained region',
+              detail:
+                'Batch work is ready to launch, but the region posture is poor. CO2 Router keeps interactive traffic flowing while delaying or rerouting the batch workload under the current policy envelope.',
+            },
+            {
+              title: 'Water-sensitive approval boundary',
+              detail:
+                'A region looks acceptable on carbon alone, but water guardrails are tighter. The engine blocks or defers because water constraints outrank pure carbon optimization in the doctrine order.',
+            },
+            {
+              title: 'Audit replay after a region decision',
+              detail:
+                'A reviewer asks why a workload ran where it did. CO2 Router replays the decision frame, exposing trace, replay, proof, and governance metadata instead of forcing the team to reconstruct the answer from logs.',
+            },
+          ].map((scenario) => (
+            <div key={scenario.title} className="rounded-[24px] border border-white/8 bg-slate-950/55 p-5">
+              <div className="text-lg font-semibold text-white">{scenario.title}</div>
+              <div className="mt-3 text-sm leading-7 text-slate-300">{scenario.detail}</div>
+            </div>
+          ))}
         </div>
       </section>
 
@@ -151,15 +158,19 @@ export default function LandingPage() {
         <DecisionFlowDiagram />
       </section>
 
-      <DecisionExampleCard decision={featuredDecision} proofContext={proofContext} />
+      <div id="proof">
+        <DecisionExampleCard decision={overview.featuredDecision} proofContext={overview.proofContext} />
+      </div>
 
       <CategoryDifferenceSection />
 
-      <ProofMoatSection replay={replay} />
-      <SignalDoctrineSection providers={providers} />
+      <ProofMoatSection proofContext={overview.proofContext} />
+      <SignalDoctrineSection providers={overview.providers} />
       <PricingOrControlSection />
       <FinalCTASection />
-      <LiveSystemSection />
+      <div id="live-system">
+        <LiveSystemSection snapshot={landing.liveSystem} liveStatus={liveStatus} />
+      </div>
     </div>
   )
 }

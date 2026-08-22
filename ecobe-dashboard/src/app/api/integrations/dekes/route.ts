@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 const ECOBE_ENGINE_URL =
   process.env.ECOBE_API_URL ||
   process.env.CO2ROUTER_API_URL ||
-  'http://localhost:3000'
+  'http://5.78.135.11:8000'
 
 const ECOBE_ENGINE_API_KEY =
   process.env.DEKES_API_KEY ||

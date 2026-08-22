@@ -38,6 +38,7 @@ import internalPolicyRoutes from './routes/internal-policy'
 import doctrineRoutes from './routes/doctrine'
 import { recordTelemetryMetric, telemetryMetricNames } from './lib/observability/telemetry'
 import { validateWaterArtifacts } from './lib/water/bundle'
+import { brokerSurfaceGuard } from './middleware/internal-auth'
 
 function rawBodySaver(_req: express.Request, _res: express.Response, buf: Buffer) {
   if (buf?.length) {
@@ -66,13 +67,17 @@ function attachHealthRoutes(app: express.Express) {
         engine: 'online',
         router: true,
         fingrid: Boolean(env.FINGRID_API_KEY),
+        entsoe: Boolean(env.ENTSOE_API_TOKEN),
         providers: {
           watttime: Boolean(env.WATTTIME_USERNAME && env.WATTTIME_PASSWORD),
-          gridstatus: Boolean(env.GRIDSTATUS_API_KEY || env.EIA_API_KEY),
+          eia930: Boolean(env.EIA_API_KEY),
           ember: Boolean(env.EMBER_API_KEY),
           gbCarbon: true,
           dkCarbon: true,
           fiCarbon: Boolean(env.FINGRID_API_KEY),
+          smardCarbon: true,
+          reeCarbon: true,
+          entsoeCarbon: Boolean(env.ENTSOE_API_TOKEN),
           static: true
         },
         timestamp: new Date().toISOString(),
@@ -93,6 +98,7 @@ function attachHealthRoutes(app: express.Express) {
 
   app.get('/health', healthHandler)
   app.get('/api/v1/health', healthHandler)
+  app.get('/api/v1/internal/health', brokerSurfaceGuard, healthHandler)
 }
 
 function attachUiRoute(app: express.Express) {

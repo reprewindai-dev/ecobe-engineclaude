@@ -91,4 +91,8 @@ export const dashboardTelemetryMetricNames = {
   routeErrorCount: 'co2router.dashboard.route.error.count',
   simulationEngineDurationMs: 'co2router.dashboard.simulation.engine.duration.ms',
   simulationSerializeDurationMs: 'co2router.dashboard.simulation.serialize.duration.ms',
+  mirrorGenerationMs: 'co2router.dashboard.mirror.generation.ms',
+  providerRefreshAgeSec: 'co2router.dashboard.mirror.provider.refresh.age.sec',
+  replayGenerationMs: 'co2router.dashboard.replay.generation.ms',
+  laneBackpressureCount: 'co2router.dashboard.lane.backpressure.count',
 } as const

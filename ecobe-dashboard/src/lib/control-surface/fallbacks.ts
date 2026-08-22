@@ -1,6 +1,7 @@
 import type {
   CommandCenterSnapshot,
   ControlSurfaceOverview,
+  LandingSnapshot,
   LiveSystemSnapshot,
 } from '@/types/control-surface'
 
@@ -60,6 +61,14 @@ export const FALLBACK_LIVE_SYSTEM_SNAPSHOT: LiveSystemSnapshot = {
 export const FALLBACK_COMMAND_CENTER_SNAPSHOT: CommandCenterSnapshot = {
   generatedAt: 'Shell ready',
   selectedDecisionFrameId: null,
+  projection: {
+    dataStatus: 'broken',
+    projectionLagSec: null,
+    latestProjectionAt: null,
+    latestCanonicalAt: null,
+    quality: { suspectCount: 0, invalidCount: 0 },
+    outbox: null,
+  },
   header: {
     systemActive: null,
     systemStatus: 'shell-ready',
@@ -117,4 +126,28 @@ export const FALLBACK_OVERVIEW: Pick<
   actionDistribution: [],
   providers: [],
   replay: null,
+}
+
+export const FALLBACK_LANDING_SNAPSHOT: LandingSnapshot = {
+  generatedAt: 'Shell ready',
+  liveStatus: {
+    visible: true,
+    generatedAt: 'Shell ready',
+    lastUpdatedLabel: 'reconnecting',
+    detail: 'Landing snapshot is reconnecting. The public shell stays stable while fresh live excerpts attach.',
+  },
+  overview: {
+    actionDistribution: [],
+    providers: [],
+    featuredDecision: null,
+    liveStrip: [],
+    proofContext: {
+      proofRef: null,
+      governance: 'Policy-first control posture',
+      traceRef: null,
+      replay: 'public live mirror',
+      provenance: 'Verified provider posture reattaches when the landing snapshot refreshes.',
+    },
+  },
+  liveSystem: FALLBACK_LIVE_SYSTEM_SNAPSHOT,
 }

@@ -807,17 +807,21 @@ model DekesLeadCandidate {
   @@index([orgId])
   @@index([domain])
 }
-
-// ============================================================================
 // REGION METADATA
 // ============================================================================
 
 model Region {
   id        String   @id @default(cuid())
 
-  code      String   @unique  // "US-CAL-CISO", "FR", etc.
-  name      String            // "California", "France"
+  code      String   @unique  // Canonical grid zone code e.g. "US-CAL-CISO", "EU-GB"
+  name      String            // Display name e.g. "US California (CAISO)"
   country   String
+
+  // Balancing authority / grid operator code
+  balancingAuthority String?
+
+  // Cloud provider region aliases that map to this grid zone
+  cloudRegions      String[] @default([])
 
   // Characteristics
   typicalLatencyMs  Int?
@@ -825,8 +829,23 @@ model Region {
   availableHardware String[] @default([])
 
   // Grid mix
-  renewableCapacity Float?   // %
-  avgCarbonIntensity Int?    // gCO2eq/kWh
+  renewableCapacity  Float?   // % of installed capacity that is low-carbon
+  avgCarbonIntensity Int?     // gCO2eq/kWh baseline
+
+  // Water
+  waterStressIndex   Float?   // 0-1, where 1 = extreme stress (Aqueduct/Open-Meteo)
+
+  // Data quality flags
+  estimatedFlag      Boolean  @default(false)  // true if values derived heuristically
+  syntheticFlag      Boolean  @default(false)  // true if no direct provider data yet
+
+  // Recompute metadata — updated by recompute-region-baselines job
+  sampleWindowDays    Int?      // window used for last recomputation (days)
+  carbonSampleCount   Int?      // GridSignalSnapshot / CIDecision samples used
+  latencySampleCount  Int?      // CarbonCommandOutcome samples used
+  lastRecomputedAt    DateTime? // timestamp of last successful recompute
+  recomputeConfidence String?   // HIGH | MEDIUM | LOW
+  recomputeNotes      String?
 
   // Availability
   enabled   Boolean  @default(true)
@@ -837,11 +856,33 @@ model Region {
   updatedAt DateTime @updatedAt
 
   @@index([enabled])
+  @@index([code])
 }
 
-// ============================================================================
-// ANALYTICS
-// ============================================================================
+model RegionMetricRollup {
+  id                 String   @id @default(cuid())
+
+  regionCode         String
+  windowStart        DateTime
+  windowEnd          DateTime
+
+  avgCarbonIntensity Float?
+  p50LatencyMs       Float?
+  p75LatencyMs       Float?
+  renewableCapacity  Float?
+  waterStressIndex   Float?
+
+  carbonSampleCount  Int      @default(0)
+  latencySampleCount Int      @default(0)
+
+  estimatedFlag      Boolean  @default(false)
+  syntheticFlag      Boolean  @default(false)
+
+  createdAt          DateTime @default(now())
+
+  @@unique([regionCode, windowStart, windowEnd])
+  @@index([regionCode, windowEnd])
+}
 
 model DailyMetrics {
   id        String   @id @default(cuid())

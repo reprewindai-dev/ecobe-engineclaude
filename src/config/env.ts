@@ -35,11 +35,14 @@ const envSchema = z.object({
   EIA_BASE_URL: z.string().default("https://api.eia.gov"),
   WATTTIME_API_KEY: z.string().optional(),
 
-  // GridStatus.io (curated EIA-930 data with real fuel mix)
+  // Legacy GridStatus key. CO2 Router production routing uses direct EIA-930 math.
   GRIDSTATUS_API_KEY: z.string().optional(),
 
   // Finland Fingrid (optional regional provider)
   FINGRID_API_KEY: z.string().optional(),
+
+  // ENTSO-E Transparency Platform (optional official EU provider)
+  ENTSOE_API_TOKEN: z.string().optional(),
 
   // Grid Signal Cache
   GRID_SIGNAL_CACHE_TTL: z.string().default("900"),
@@ -52,23 +55,35 @@ const envSchema = z.object({
   // Intelligence / vectors
   UPSTASH_VECTOR_REST_URL: z.string().optional(),
   UPSTASH_VECTOR_REST_TOKEN: z.string().optional(),
+  UPSTASH_SEARCH_REST_TOKEN: z.string().optional(),
   UPSTASH_VECTOR_INDEX_NAME: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
-  OPTIMIZE_API_KEY: z.string().optional(),
 
   // Intelligence jobs / scheduling
   QSTASH_TOKEN: z.string().optional(),
   QSTASH_BASE_URL: z.string().optional(),
+  QSTASH_URL: z.string().optional(),
+  QSTASH_REGION: z.string().optional(),
+  EU_CENTRAL_1_QSTASH_URL: z.string().optional(),
+  EU_CENTRAL_1_QSTASH_TOKEN: z.string().optional(),
+  EU_CENTRAL_1_QSTASH_CURRENT_SIGNING_KEY: z.string().optional(),
+  EU_CENTRAL_1_QSTASH_NEXT_SIGNING_KEY: z.string().optional(),
+  US_EAST_1_QSTASH_URL: z.string().optional(),
+  US_EAST_1_QSTASH_TOKEN: z.string().optional(),
+  US_EAST_1_QSTASH_CURRENT_SIGNING_KEY: z.string().optional(),
+  US_EAST_1_QSTASH_NEXT_SIGNING_KEY: z.string().optional(),
   INTELLIGENCE_JOB_TOKEN: z.string().optional(),
   QSTASH_CURRENT_SIGNING_KEY: z.string().optional(),
   QSTASH_NEXT_SIGNING_KEY: z.string().optional(),
   INTELLIGENCE_ACCURACY_CRON: z.string().default("*/30 * * * *"),
   INTELLIGENCE_VECTOR_CLEANUP_CRON: z.string().default("0 3 * * *"),
   INTELLIGENCE_CALIBRATION_CRON: z.string().default("15 * * * *"),
+  REGION_RECOMPUTE_CRON: z.string().default("0 */6 * * *"),
 
   FORECAST_REFRESH_ENABLED: z.string().optional(),
   FORECAST_REFRESH_CRON: z.string().default("*/30 * * * *"),
+  EIA_INGESTION_REGION_STAGGER_MS: z.string().default("1500"),
 
   // Autonomy loops
   LEARNING_LOOP_ENABLED: z.string().optional(),
@@ -131,6 +146,8 @@ const envSchema = z.object({
 
   // Internal service auth (used by internal-auth middleware and admin routes)
   ECOBE_INTERNAL_API_KEY: z.string().optional(),
+  ECOBE_TRUSTED_BROKER_ID: z.string().default("ecobe-mvp"),
+  ECOBE_ENFORCE_BROKER_ID: z.string().optional(),
 
   // External integrations
   ECOBE_ENGINE_URL: z.string().optional(),
@@ -187,6 +204,10 @@ export const env = {
     parsed.data.ENGINE_BACKGROUND_WORKERS_ENABLED !== undefined
       ? parsed.data.ENGINE_BACKGROUND_WORKERS_ENABLED === "true"
       : false,
+  ECOBE_ENFORCE_BROKER_ID:
+    parsed.data.ECOBE_ENFORCE_BROKER_ID !== undefined
+      ? parsed.data.ECOBE_ENFORCE_BROKER_ID === "true"
+      : parsed.data.NODE_ENV === "production",
   FORECAST_REFRESH_ENABLED:
     parsed.data.FORECAST_REFRESH_ENABLED !== undefined
       ? parsed.data.FORECAST_REFRESH_ENABLED === "true"
@@ -305,8 +326,36 @@ export const env = {
   INTELLIGENCE_VECTOR_CLEANUP_CRON:
     parsed.data.INTELLIGENCE_VECTOR_CLEANUP_CRON,
   INTELLIGENCE_CALIBRATION_CRON: parsed.data.INTELLIGENCE_CALIBRATION_CRON,
+  REGION_RECOMPUTE_CRON: parsed.data.REGION_RECOMPUTE_CRON,
+  EIA_INGESTION_REGION_STAGGER_MS: parseInt(
+    parsed.data.EIA_INGESTION_REGION_STAGGER_MS,
+  ),
   DOCTRINE_DEFAULT_ORG_ID: parsed.data.DOCTRINE_DEFAULT_ORG_ID,
   DOCTRINE_CACHE_TTL_SEC: parseInt(parsed.data.DOCTRINE_CACHE_TTL_SEC),
+  QSTASH_BASE_URL:
+    parsed.data.QSTASH_BASE_URL ??
+    parsed.data.QSTASH_URL ??
+    (parsed.data.QSTASH_REGION?.startsWith("eu")
+      ? parsed.data.EU_CENTRAL_1_QSTASH_URL
+      : parsed.data.US_EAST_1_QSTASH_URL) ??
+    parsed.data.EU_CENTRAL_1_QSTASH_URL ??
+    parsed.data.US_EAST_1_QSTASH_URL ??
+    "https://qstash.upstash.io",
+  QSTASH_TOKEN:
+    parsed.data.QSTASH_TOKEN ??
+    parsed.data.EU_CENTRAL_1_QSTASH_TOKEN ??
+    parsed.data.US_EAST_1_QSTASH_TOKEN,
+  QSTASH_CURRENT_SIGNING_KEY:
+    parsed.data.QSTASH_CURRENT_SIGNING_KEY ??
+    parsed.data.EU_CENTRAL_1_QSTASH_CURRENT_SIGNING_KEY ??
+    parsed.data.US_EAST_1_QSTASH_CURRENT_SIGNING_KEY,
+  QSTASH_NEXT_SIGNING_KEY:
+    parsed.data.QSTASH_NEXT_SIGNING_KEY ??
+    parsed.data.EU_CENTRAL_1_QSTASH_NEXT_SIGNING_KEY ??
+    parsed.data.US_EAST_1_QSTASH_NEXT_SIGNING_KEY,
+  UPSTASH_VECTOR_REST_TOKEN:
+    parsed.data.UPSTASH_VECTOR_REST_TOKEN ??
+    parsed.data.UPSTASH_SEARCH_REST_TOKEN,
 };
 
 export type Env = typeof env;

@@ -1,0 +1,19 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  ECOBE_API_URL = "http://5.78.135.11:8000"
+  NEXT_PUBLIC_ECOBE_API_URL = "http://5.78.135.11:8000"
+  NODE_VERSION = "20"
+
+[[redirects]]
+  from = "/api/*"
+  to = "http://5.78.135.11:8000/api/v1/:splat"
+  status = 200
+
+[context.production.environment]
+  ECOBE_API_URL = "http://5.78.135.11:8000"
+
+[context.deploy-preview.environment]
+  ECOBE_API_URL = "http://5.78.135.11:8000"

@@ -2,7 +2,7 @@ import axios from 'axios'
 import { env } from '../../config/env'
 import { recordIntegrationFailure, recordIntegrationSuccess } from '../integration-metrics'
 import { eiaResilience } from '../resilience'
-import { EIABalanceData, EIAInterchangeData, EIASubregionData } from './types'
+import { EIABalanceData, EIAFuelTypeData, EIAInterchangeData, EIASubregionData } from './types'
 
 export class EIA930Client {
   private baseUrl: string
@@ -165,6 +165,52 @@ export class EIA930Client {
     } catch (error: any) {
       console.error(`Failed to fetch EIA-930 subregion for ${balancingAuthority}:`, error.message)
       await this.logFailure(error.message ?? 'Failed to fetch subregion data')
+      return []
+    }
+  }
+
+  async getFuelTypeData(
+    balancingAuthority: string,
+    startTime?: Date,
+    endTime?: Date
+  ): Promise<EIAFuelTypeData[]> {
+    if (!this.apiKey) {
+      await this.logFailure('Missing EIA API key')
+      return []
+    }
+
+    try {
+      const params: any = {
+        api_key: this.apiKey,
+        frequency: 'hourly',
+        data: ['value'],
+        facets: {
+          respondent: [balancingAuthority],
+        },
+        sort: [{ column: 'period', direction: 'desc' }],
+        offset: 0,
+        length: 5000,
+      }
+
+      if (startTime) {
+        params.start = startTime.toISOString().slice(0, 10)
+      }
+      if (endTime) {
+        params.end = endTime.toISOString().slice(0, 10)
+      }
+
+      const response = await eiaResilience.execute('getFuelTypeData', () =>
+        axios.get<{ response: { data: EIAFuelTypeData[] } }>(
+          `${this.baseUrl}/v2/electricity/rto/fuel-type-data/data/`,
+          { params, timeout: 12000 }
+        )
+      )
+
+      await this.logSuccess()
+      return response.data.response.data || []
+    } catch (error: any) {
+      console.error(`Failed to fetch EIA-930 fuel type data for ${balancingAuthority}:`, error.message)
+      await this.logFailure(error.message ?? 'Failed to fetch fuel type data')
       return []
     }
   }

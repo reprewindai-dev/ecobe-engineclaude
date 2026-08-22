@@ -7,6 +7,7 @@ high-level and does not disclose proprietary implementation details.
 
 - `whitepaper-source-pack.md` - public facts and positioning inputs
 - `data-collection-register.md` - what data the system collects and why
+- `api-catalog.md` - public API and brokered engine catalog for marketplace use
 - `disclosure-policy.md` - public vs confidential boundaries
 - `evidence-pack.md` - first publication-safe proof bundle and allowed claims
 

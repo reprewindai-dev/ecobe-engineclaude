@@ -2,13 +2,13 @@ import 'dotenv/config'
 import { defineConfig } from '@prisma/config'
 
 /**
- * Prisma Config — Accelerate-aware
+ * Prisma Config — direct PostgreSQL
  *
- * Runtime:    DATABASE_URL (prisma://accelerate...) → connection pooling + cache
- * Migrations: DIRECT_DATABASE_URL (postgresql://...) → direct Neon connection
+ * Runtime:    DATABASE_URL (postgresql://...)
+ * Migrations: DIRECT_DATABASE_URL (postgresql://...)
  *
  * If DIRECT_DATABASE_URL is not set, falls back to DATABASE_URL
- * (which works fine when DATABASE_URL is a direct postgres:// string).
+ * so free-tier and self-hosted PostgreSQL deployments use the same contract.
  */
 export default defineConfig({
   datasource: {

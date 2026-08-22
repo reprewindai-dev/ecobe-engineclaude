@@ -2,7 +2,7 @@ import axios from 'axios'
 import { recordIntegrationFailure, recordIntegrationSuccess } from './integration-metrics'
 
 /**
- * Finland Carbon Intensity — Fingrid Open Data
+ * Finland Carbon Intensity - Fingrid Open Data
  *
  * Source: https://data.fingrid.fi/api
  * Coverage: Finland (national)
@@ -11,23 +11,39 @@ import { recordIntegrationFailure, recordIntegrationSuccess } from './integratio
  * Cost: $0
  *
  * Dataset IDs:
- *   265 = Emission factor of electricity consumed in Finland (gCO2/kWh) — includes imports/exports
- *   266 = Emission factor of electricity produced in Finland (gCO2/kWh) — production only
+ *   265 = Emission factor of electricity consumed in Finland (gCO2/kWh)
+ *   266 = Emission factor of electricity produced in Finland (gCO2/kWh)
  */
 
 export interface FICarbonData {
   zone: 'FI'
-  carbonIntensity: number  // gCO2/kWh
+  carbonIntensity: number
   timestamp: string
   isForecast: boolean
   method: 'consumed' | 'produced'
 }
 
-const BASE_URL = 'https://data.fingrid.fi/api'
+type FingridTimeseriesRow = {
+  datasetId?: number
+  startTime?: string
+  endTime?: string
+  value?: number | string
+}
 
-// Dataset 265 = consumed (includes imports), 266 = produced
+const BASE_URL = 'https://data.fingrid.fi/api'
 const CONSUMED_DATASET_ID = 265
 const PRODUCED_DATASET_ID = 266
+const MAX_STALENESS_MS = 30 * 60 * 1000
+
+function numeric(value: unknown): number | null {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function isFreshEnough(timestamp: string): boolean {
+  const parsed = new Date(timestamp).getTime()
+  return Number.isFinite(parsed) && Date.now() - parsed <= MAX_STALENESS_MS
+}
 
 export class FinlandCarbonClient {
   private apiKey?: string
@@ -45,12 +61,73 @@ export class FinlandCarbonClient {
   }
 
   get isAvailable(): boolean {
-    return !!this.apiKey
+    return Boolean(this.apiKey)
   }
 
-  /**
-   * Get current emission factor (consumed in Finland — includes imports/exports)
-   */
+  private headers() {
+    return { 'x-api-key': this.apiKey as string }
+  }
+
+  private normalizeRow(
+    row: FingridTimeseriesRow | null | undefined,
+    method: 'consumed' | 'produced'
+  ): FICarbonData | null {
+    const timestamp = String(row?.startTime ?? row?.endTime ?? '')
+    const carbonIntensity = numeric(row?.value)
+
+    if (!timestamp || carbonIntensity == null || carbonIntensity <= 0) return null
+    if (!isFreshEnough(timestamp)) return null
+
+    return {
+      zone: 'FI',
+      carbonIntensity: Math.round(carbonIntensity),
+      timestamp,
+      isForecast: false,
+      method,
+    }
+  }
+
+  private async getLatestDatasetValue(
+    datasetId: number,
+    method: 'consumed' | 'produced'
+  ): Promise<FICarbonData | null> {
+    const response = await axios.get<FingridTimeseriesRow>(
+      `${BASE_URL}/datasets/${datasetId}/data/latest`,
+      {
+        headers: this.headers(),
+        timeout: 10000,
+      }
+    )
+
+    return this.normalizeRow(response.data, method)
+  }
+
+  private async getWindowedDatasetValue(
+    datasetId: number,
+    method: 'consumed' | 'produced'
+  ): Promise<FICarbonData | null> {
+    const now = new Date()
+    const start = new Date(now.getTime() - 60 * 60 * 1000)
+
+    const response = await axios.get<{ data?: FingridTimeseriesRow[] }>(
+      `${BASE_URL}/datasets/${datasetId}/data`,
+      {
+        params: {
+          startTime: start.toISOString(),
+          endTime: now.toISOString(),
+          format: 'json',
+          pageSize: 1,
+          sortBy: 'startTime',
+          sortOrder: 'desc',
+        },
+        headers: this.headers(),
+        timeout: 10000,
+      }
+    )
+
+    return this.normalizeRow(response.data?.data?.[0], method)
+  }
+
   async getCurrentIntensity(): Promise<FICarbonData | null> {
     if (!this.apiKey) {
       await this.logFailure('Missing FINGRID_API_KEY')
@@ -58,37 +135,17 @@ export class FinlandCarbonClient {
     }
 
     try {
-      const now = new Date()
-      const start = new Date(now.getTime() - 15 * 60 * 1000) // Last 15 minutes
+      const latest =
+        (await this.getLatestDatasetValue(CONSUMED_DATASET_ID, 'consumed')) ??
+        (await this.getWindowedDatasetValue(CONSUMED_DATASET_ID, 'consumed'))
 
-      const response = await axios.get<{ data: any[] }>(`${BASE_URL}/datasets/${CONSUMED_DATASET_ID}/data`, {
-        params: {
-          startTime: start.toISOString(),
-          endTime: now.toISOString(),
-          format: 'json',
-          pageSize: 1,
-          sortBy: 'startTime',
-          sortOrder: 'desc',
-        },
-        headers: {
-          'x-api-key': this.apiKey,
-        },
-        timeout: 10000,
-      })
-
-      const records = response.data?.data || []
-      if (records.length === 0) return null
-
-      const latest = records[0]
-      await this.logSuccess()
-
-      return {
-        zone: 'FI',
-        carbonIntensity: latest.value, // gCO2/kWh
-        timestamp: latest.startTime,
-        isForecast: false,
-        method: 'consumed',
+      if (!latest) {
+        await this.logFailure('Fingrid consumed emission factor returned no fresh current value')
+        return null
       }
+
+      await this.logSuccess()
+      return latest
     } catch (error: any) {
       console.error('Finland CO2 intensity fetch failed:', error.message)
       await this.logFailure(error.message)
@@ -96,44 +153,21 @@ export class FinlandCarbonClient {
     }
   }
 
-  /**
-   * Get production-based emission factor
-   */
   async getProductionIntensity(): Promise<FICarbonData | null> {
     if (!this.apiKey) return null
 
     try {
-      const now = new Date()
-      const start = new Date(now.getTime() - 15 * 60 * 1000)
+      const latest =
+        (await this.getLatestDatasetValue(PRODUCED_DATASET_ID, 'produced')) ??
+        (await this.getWindowedDatasetValue(PRODUCED_DATASET_ID, 'produced'))
 
-      const response = await axios.get<{ data: any[] }>(`${BASE_URL}/datasets/${PRODUCED_DATASET_ID}/data`, {
-        params: {
-          startTime: start.toISOString(),
-          endTime: now.toISOString(),
-          format: 'json',
-          pageSize: 1,
-          sortBy: 'startTime',
-          sortOrder: 'desc',
-        },
-        headers: {
-          'x-api-key': this.apiKey,
-        },
-        timeout: 10000,
-      })
-
-      const records = response.data?.data || []
-      if (records.length === 0) return null
-
-      const latest = records[0]
-      await this.logSuccess()
-
-      return {
-        zone: 'FI',
-        carbonIntensity: latest.value,
-        timestamp: latest.startTime,
-        isForecast: false,
-        method: 'produced',
+      if (!latest) {
+        await this.logFailure('Fingrid produced emission factor returned no fresh current value')
+        return null
       }
+
+      await this.logSuccess()
+      return latest
     } catch (error: any) {
       console.error('Finland CO2 production intensity fetch failed:', error.message)
       await this.logFailure(error.message)

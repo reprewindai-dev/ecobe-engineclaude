@@ -1,6 +1,4 @@
 import { PrismaClient } from '@prisma/client'
-import { withAccelerate } from '@prisma/extension-accelerate'
-import { withOptimize } from '@prisma/extension-optimize'
 import { env } from '../config/env'
 
 /**
@@ -29,14 +27,12 @@ function ensureNeonPoolerParams(url: string): string {
 }
 
 /**
- * Prisma Client Factory — Accelerate + Optimize
+ * Prisma Client Factory.
  *
- * Extension chain order matters (Prisma docs):
- *   1. Optimize (query monitoring / insights)  — applied first
- *   2. Accelerate (connection pooling + cache)  — applied last (takes precedence)
- *
- * Runtime queries flow through Accelerate's global pool via prisma:// URL.
- * Migrations / introspection use DIRECT_DATABASE_URL via prisma.config.ts.
+ * The engine uses the configured PostgreSQL connection directly. Paid Prisma
+ * extensions are intentionally excluded so the canonical runtime has no
+ * hidden metering dependency and remains compatible with free PostgreSQL
+ * providers and self-hosted deployments.
  */
 const createPrismaClient = () => {
   const dbUrl = ensureNeonPoolerParams(env.DATABASE_URL)
@@ -50,25 +46,7 @@ const createPrismaClient = () => {
     },
   })
 
-  // Build the extension chain: Optimize → Accelerate
-  // Both are optional — the engine boots cleanly without either.
-  let client: any = baseClient
-
-  // 1. Optimize (query monitoring) — only when API key is present
-  if (env.OPTIMIZE_API_KEY) {
-    client = client.$extends(
-      withOptimize({
-        apiKey: env.OPTIMIZE_API_KEY,
-      })
-    )
-  }
-
-  // 2. Accelerate (connection pooling + global cache) — only when using prisma:// or prisma+postgres:// URL
-  if (env.DATABASE_URL.startsWith('prisma://') || env.DATABASE_URL.startsWith('prisma+postgres://')) {
-    client = client.$extends(withAccelerate())
-  }
-
-  return client
+  return baseClient
 }
 
 type PrismaClientWithExtensions = ReturnType<typeof createPrismaClient>

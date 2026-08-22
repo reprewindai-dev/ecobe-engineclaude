@@ -10,7 +10,7 @@
  * Sources: IPCC 2014 median lifecycle estimates
  */
 
-import { GridStatusFuelMixData, GridSignalSnapshot } from './types'
+import { EIAFuelTypeData, GridSignalSnapshot, GridStatusFuelMixData } from './types'
 
 // ── Emission factors (gCO2/kWh) for fallback carbon intensity estimation ──
 const EMISSION_FACTORS: Record<string, number> = {
@@ -25,6 +25,19 @@ const EMISSION_FACTORS: Record<string, number> = {
   battery_storage: 0,        // Storage dispatch, not generation
   pumped_storage: 0,         // Storage dispatch, not generation
   other: 300,                // Conservative estimate for unknown fuels
+}
+
+const EIA_FUEL_TYPE_TO_FACTOR_KEY: Record<string, string> = {
+  COL: 'coal',
+  NG: 'natural_gas',
+  OIL: 'petroleum',
+  NUC: 'nuclear',
+  WAT: 'hydro',
+  WND: 'wind',
+  SUN: 'solar',
+  GEO: 'geothermal',
+  OTH: 'other',
+  UNK: 'other',
 }
 
 // Renewable fuel types
@@ -170,6 +183,50 @@ export class FuelMixParser {
     }
 
     return weightedEmissions / totalMw
+  }
+
+  static estimateCarbonIntensityFromEiaFuelTypeData(records: EIAFuelTypeData[]): {
+    carbonIntensity: number
+    period: string
+    respondent: string
+    fuelBreakdownMwh: Record<string, number>
+  } | null {
+    const recordsByPeriod = new Map<string, EIAFuelTypeData[]>()
+
+    for (const record of records) {
+      const value = Number(record.value)
+      if (!record.period || !Number.isFinite(value) || value <= 0) continue
+      const periodRecords = recordsByPeriod.get(record.period) ?? []
+      periodRecords.push(record)
+      recordsByPeriod.set(record.period, periodRecords)
+    }
+
+    const latestPeriod = Array.from(recordsByPeriod.keys()).sort().at(-1)
+    if (!latestPeriod) return null
+
+    const latestRecords = recordsByPeriod.get(latestPeriod) ?? []
+    const fuelBreakdownMwh: Record<string, number> = {}
+    let totalMwh = 0
+    let weightedEmissions = 0
+
+    for (const record of latestRecords) {
+      const factorKey = EIA_FUEL_TYPE_TO_FACTOR_KEY[record.fueltype] ?? 'other'
+      const value = Number(record.value)
+      if (!Number.isFinite(value) || value <= 0) continue
+
+      fuelBreakdownMwh[factorKey] = (fuelBreakdownMwh[factorKey] ?? 0) + value
+      totalMwh += value
+      weightedEmissions += value * (EMISSION_FACTORS[factorKey] ?? EMISSION_FACTORS.other)
+    }
+
+    if (totalMwh <= 0) return null
+
+    return {
+      carbonIntensity: weightedEmissions / totalMwh,
+      period: latestPeriod,
+      respondent: latestRecords[0]?.respondent ?? 'unknown',
+      fuelBreakdownMwh,
+    }
   }
 
   /**
