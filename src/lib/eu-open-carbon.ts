@@ -98,11 +98,11 @@ const ENTSOE_DOMAINS: Record<string, string> = {
   "EU-AT": "10YAT-APG------L",
 };
 
-export function getEntsoeZones(): string[] {
-  return Object.keys(ENTSOE_DOMAINS);
+export function getEntsoeZones(): EuOpenCarbonZone[] {
+  return Object.keys(ENTSOE_DOMAINS) as EuOpenCarbonZone[];
 }
 
-export function getEntsoeDomain(zone: string): string | undefined {
+export function getEntsoeDomain(zone: EuOpenCarbonZone): string | undefined {
   return ENTSOE_DOMAINS[zone];
 }
 

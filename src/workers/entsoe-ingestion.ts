@@ -130,9 +130,7 @@ export class EntsoeIngestionWorker {
             skippedCount++
             console.warn(`ENTSO-E ingestion skipped ${zone}: no domain configured`)
           } else {
-            const data = await euOpenCarbon.getEntsoeIntensity(zone as Parameters<
-              typeof euOpenCarbon.getEntsoeIntensity
-            >[0])
+            const data = await euOpenCarbon.getEntsoeIntensity(zone)
 
             if (!data) {
               skippedCount++
