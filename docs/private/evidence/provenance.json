@@ -1,0 +1,81 @@
+{
+  "bundleSchemaVersion": "water_bundle_v2",
+  "manifestSchemaVersion": "water_bundle_v2",
+  "checkedAt": "2026-03-31T00:23:04.088Z",
+  "datasets": [
+    {
+      "name": "aqueduct",
+      "datasetVersion": "aqueduct_2_1",
+      "sourceUrl": "https://www.wri.org/data/aqueduct-global-maps-21-data",
+      "downloadedAt": "2026-03-28T00:00:00.000Z",
+      "manifestHash": "91f22cf2ed2b39cc912743cdcd458c18902c874e9e469fccc9e3ec67a79d00ed",
+      "computedHash": "91f22cf2ed2b39cc912743cdcd458c18902c874e9e469fccc9e3ec67a79d00ed",
+      "discoveredSourcePath": "/app/ecobe-engine/data/source/water/aqueduct-source.html",
+      "verificationStatus": "verified",
+      "hashMatchesManifest": true,
+      "candidateDirectories": [
+        "/app/ecobe-engine/data/source/water",
+        "/app/ecobe-engine/data/sources/water",
+        "/app/ecobe-engine/data/raw/water",
+        "/app/ecobe-engine/data/water"
+      ]
+    },
+    {
+      "name": "aware",
+      "datasetVersion": "aware_2_0",
+      "sourceUrl": "https://wulca-waterlca.org/aware/",
+      "downloadedAt": "2026-03-28T00:00:00.000Z",
+      "manifestHash": "94649ec3760b475e3980eba45e0731f52968d819264129525be24ea9f30f1aa4",
+      "computedHash": "94649ec3760b475e3980eba45e0731f52968d819264129525be24ea9f30f1aa4",
+      "discoveredSourcePath": "/app/ecobe-engine/data/source/water/aware-source.html",
+      "verificationStatus": "verified",
+      "hashMatchesManifest": true,
+      "candidateDirectories": [
+        "/app/ecobe-engine/data/source/water",
+        "/app/ecobe-engine/data/sources/water",
+        "/app/ecobe-engine/data/raw/water",
+        "/app/ecobe-engine/data/water"
+      ]
+    },
+    {
+      "name": "wwf",
+      "datasetVersion": "wwf_water_risk_filter_v1",
+      "sourceUrl": "https://riskfilter.org/water/explore/countryprofiles",
+      "downloadedAt": "2026-03-28T00:00:00.000Z",
+      "manifestHash": "d86256f989a44f5761dfd0b31ad77bd9407ce6e0a25a17d1f912130ab0b82ba9",
+      "computedHash": "d86256f989a44f5761dfd0b31ad77bd9407ce6e0a25a17d1f912130ab0b82ba9",
+      "discoveredSourcePath": "/app/ecobe-engine/data/source/water/wwf-source.html",
+      "verificationStatus": "verified",
+      "hashMatchesManifest": true,
+      "candidateDirectories": [
+        "/app/ecobe-engine/data/source/water",
+        "/app/ecobe-engine/data/sources/water",
+        "/app/ecobe-engine/data/raw/water",
+        "/app/ecobe-engine/data/water"
+      ]
+    },
+    {
+      "name": "nrel",
+      "datasetVersion": "nrel_water_factors_v1",
+      "sourceUrl": "https://data.nrel.gov/",
+      "downloadedAt": "2026-03-28T00:00:00.000Z",
+      "manifestHash": "4de9ff55d52bfa74273c92c430c294888a7cc783658edaf2cba677586fe19e64",
+      "computedHash": "4de9ff55d52bfa74273c92c430c294888a7cc783658edaf2cba677586fe19e64",
+      "discoveredSourcePath": "/app/ecobe-engine/data/source/water/nrel-source.html",
+      "verificationStatus": "verified",
+      "hashMatchesManifest": true,
+      "candidateDirectories": [
+        "/app/ecobe-engine/data/source/water",
+        "/app/ecobe-engine/data/sources/water",
+        "/app/ecobe-engine/data/raw/water",
+        "/app/ecobe-engine/data/water"
+      ]
+    }
+  ],
+  "summary": {
+    "verified": 4,
+    "unverified": 0,
+    "missingSource": 0,
+    "mismatch": 0
+  }
+}

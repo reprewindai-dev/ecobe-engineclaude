@@ -1,0 +1,3977 @@
+{
+  "generatedAt": "2026-03-31T00:23:05.283Z",
+  "selectedDecisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+  "header": {
+    "systemActive": true,
+    "systemStatus": "healthy",
+    "saiqEnforced": true,
+    "traceLocked": true,
+    "replayVerified": true,
+    "detail": "p95 56ms | 9 providers | 4 verified water datasets"
+  },
+  "world": {
+    "nodes": [
+      {
+        "region": "us-west-2",
+        "label": "US West 2",
+        "x": 14,
+        "y": 25,
+        "state": "active",
+        "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+        "action": "run_now",
+        "reasonCode": "ALLOW"
+      },
+      {
+        "region": "eu-west-1",
+        "label": "EU West 1",
+        "x": 50,
+        "y": 22,
+        "state": "marginal",
+        "decisionFrameId": "c363aa8a-643a-417a-8cc8-70b0708fd619",
+        "action": "delay",
+        "reasonCode": "SEKED_POLICY_RED_ZONE"
+      }
+    ],
+    "flows": [
+      {
+        "id": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3:us-west-2:us-west-2",
+        "fromRegion": "us-west-2",
+        "toRegion": "us-west-2",
+        "mode": "route"
+      }
+    ]
+  },
+  "decisionCore": {
+    "recentDecisions": [
+      {
+        "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+        "createdAt": "2026-03-31T00:22:09.044Z",
+        "action": "run_now",
+        "reasonCode": "ALLOW",
+        "selectedRegion": "us-west-2",
+        "proofHash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+        "traceAvailable": true,
+        "governanceSource": "SEKED_INTERNAL_V1",
+        "latencyTotalMs": 59,
+        "latencyComputeMs": 44,
+        "signalMode": "marginal",
+        "accountingMethod": "marginal",
+        "waterAuthorityMode": "basin",
+        "fallbackUsed": false,
+        "systemState": "active"
+      },
+      {
+        "decisionFrameId": "c363aa8a-643a-417a-8cc8-70b0708fd619",
+        "createdAt": "2026-03-31T00:16:00.795Z",
+        "action": "delay",
+        "reasonCode": "SEKED_POLICY_RED_ZONE",
+        "selectedRegion": "eu-west-1",
+        "proofHash": "280063060581dcfda9701c3c5cc0537e977f07b2e2f99ef0191347702afdd4b9",
+        "traceAvailable": true,
+        "governanceSource": "SEKED_INTERNAL_V1",
+        "latencyTotalMs": 46,
+        "latencyComputeMs": 31,
+        "signalMode": "fallback",
+        "accountingMethod": "average",
+        "waterAuthorityMode": "basin",
+        "fallbackUsed": true,
+        "systemState": "marginal"
+      },
+      {
+        "decisionFrameId": "ebbaf4b2-8137-4cba-b2cc-0ab29f670979",
+        "createdAt": "2026-03-31T00:16:00.788Z",
+        "action": "delay",
+        "reasonCode": "SEKED_POLICY_RED_ZONE",
+        "selectedRegion": "eu-west-1",
+        "proofHash": "4ddff3c3c80316640baac351a3b217ce289951cfc35ce804890eddb32fabaabd",
+        "traceAvailable": true,
+        "governanceSource": "SEKED_INTERNAL_V1",
+        "latencyTotalMs": 70,
+        "latencyComputeMs": 52,
+        "signalMode": "fallback",
+        "accountingMethod": "average",
+        "waterAuthorityMode": "basin",
+        "fallbackUsed": true,
+        "systemState": "marginal"
+      },
+      {
+        "decisionFrameId": "a5e8a3fa-02a5-4e3a-b772-59aaaffc2e3a",
+        "createdAt": "2026-03-31T00:16:00.743Z",
+        "action": "delay",
+        "reasonCode": "SEKED_POLICY_RED_ZONE",
+        "selectedRegion": "us-west-2",
+        "proofHash": "6befe7b489be67cec5554ca6a731ee9c5500839c3bc0f2ca177bf2a1b390ad42",
+        "traceAvailable": true,
+        "governanceSource": "SEKED_INTERNAL_V1",
+        "latencyTotalMs": 36,
+        "latencyComputeMs": 19,
+        "signalMode": "marginal",
+        "accountingMethod": "marginal",
+        "waterAuthorityMode": "basin",
+        "fallbackUsed": false,
+        "systemState": "marginal"
+      },
+      {
+        "decisionFrameId": "e9c96c83-245e-4eb3-9936-3381242201b8",
+        "createdAt": "2026-03-31T00:16:00.646Z",
+        "action": "delay",
+        "reasonCode": "SEKED_POLICY_RED_ZONE",
+        "selectedRegion": "eu-west-1",
+        "proofHash": "80bedea1f1a045ce87b5953515aab83b055999faf0058759c8cf6eff8974f15d",
+        "traceAvailable": true,
+        "governanceSource": "SEKED_INTERNAL_V1",
+        "latencyTotalMs": 60,
+        "latencyComputeMs": 35,
+        "signalMode": "fallback",
+        "accountingMethod": "average",
+        "waterAuthorityMode": "basin",
+        "fallbackUsed": true,
+        "systemState": "marginal"
+      },
+      {
+        "decisionFrameId": "b6bd8490-62a4-4727-b9f7-e3809c0e7581",
+        "createdAt": "2026-03-31T00:16:00.617Z",
+        "action": "run_now",
+        "reasonCode": "ALLOW",
+        "selectedRegion": "us-west-2",
+        "proofHash": "c36b6a5c1342435165cca1fa90cbc798a5e7aa9b710b9203e4136f383d740cb3",
+        "traceAvailable": true,
+        "governanceSource": "SEKED_INTERNAL_V1",
+        "latencyTotalMs": 59,
+        "latencyComputeMs": 45,
+        "signalMode": "marginal",
+        "accountingMethod": "marginal",
+        "waterAuthorityMode": "basin",
+        "fallbackUsed": false,
+        "systemState": "active"
+      },
+      {
+        "decisionFrameId": "f1ae40b0-45da-4230-8b85-3c9d0c9396f1",
+        "createdAt": "2026-03-31T00:16:00.571Z",
+        "action": "run_now",
+        "reasonCode": "ALLOW",
+        "selectedRegion": "us-west-2",
+        "proofHash": "224c0a92d072a0143e3301a198bd7d825a40fcee69e416a1099d9876c74d2a9e",
+        "traceAvailable": true,
+        "governanceSource": "SEKED_INTERNAL_V1",
+        "latencyTotalMs": 60,
+        "latencyComputeMs": 44,
+        "signalMode": "marginal",
+        "accountingMethod": "marginal",
+        "waterAuthorityMode": "basin",
+        "fallbackUsed": false,
+        "systemState": "active"
+      },
+      {
+        "decisionFrameId": "98f9d915-84c0-496f-a1b5-7c0d0c90afd0",
+        "createdAt": "2026-03-31T00:16:00.551Z",
+        "action": "run_now",
+        "reasonCode": "ALLOW",
+        "selectedRegion": "us-west-2",
+        "proofHash": "3a49c71b3c19c6fcace7f2fc0f78928a13748f952689046525926d03aa9424e6",
+        "traceAvailable": true,
+        "governanceSource": "SEKED_INTERNAL_V1",
+        "latencyTotalMs": 43,
+        "latencyComputeMs": 29,
+        "signalMode": "marginal",
+        "accountingMethod": "marginal",
+        "waterAuthorityMode": "basin",
+        "fallbackUsed": false,
+        "systemState": "active"
+      }
+    ],
+    "selectedDecision": {
+      "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+      "createdAt": "2026-03-31T00:22:09.044Z",
+      "action": "run_now",
+      "reasonCode": "ALLOW",
+      "selectedRegion": "us-west-2",
+      "proofHash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+      "traceAvailable": true,
+      "governanceSource": "SEKED_INTERNAL_V1",
+      "latencyTotalMs": 59,
+      "latencyComputeMs": 44,
+      "signalMode": "marginal",
+      "accountingMethod": "marginal",
+      "waterAuthorityMode": "basin",
+      "fallbackUsed": false,
+      "systemState": "active"
+    },
+    "selectedTrace": {
+      "sequenceNumber": 3692,
+      "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+      "traceHash": "6266b17ee6237cb9ffa29ceb086e51250e644f148b47554efe6c52b81d74a524",
+      "previousTraceHash": "738d05dac053da79b080b9b9d0330394797c24d057179277b753bb890ad78693",
+      "inputSignalHash": "86a654d9c93d69fca63f7ae22b011f92aca8a77e21954f0156b042b17065cc47",
+      "payload": {
+        "proof": {
+          "adapter": {
+            "runtime": "http",
+            "adapterId": "ecobe.http.decision.v1",
+            "transport": "sync_http",
+            "controlPoint": "gateway_preflight",
+            "adapterVersion": "1.0.0",
+            "enforcementResult": "applied"
+          },
+          "proofHash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+          "bundleHash": "90c984f6d095aecf247b64057b7c0ca71d87e48312fb3647947a092718bea691",
+          "evidenceRefs": [
+            "water-bundle:2026-03-30T20:33:52.420Z:us-west-2"
+          ],
+          "manifestHash": "e5bbb12124a7f600287e4b654a904d03139b4a07831eb5e1606bc5036d7843e6",
+          "supplierRefs": [
+            "aqueduct",
+            "aware",
+            "nrel"
+          ],
+          "artifactMetadata": {
+            "suppliers": [
+              "aqueduct",
+              "aware",
+              "nrel"
+            ],
+            "bundleHash": "90c984f6d095aecf247b64057b7c0ca71d87e48312fb3647947a092718bea691",
+            "sourceCount": 3,
+            "manifestHash": "e5bbb12124a7f600287e4b654a904d03139b4a07831eb5e1606bc5036d7843e6",
+            "manifestBuiltAt": "2026-03-30T20:33:52.420Z",
+            "bundleGeneratedAt": "2026-03-30T20:33:52.420Z",
+            "datasetHashesPresent": true
+          },
+          "datasetReferences": [
+            {
+              "name": "aqueduct",
+              "file_hash": "91f22cf2ed2b39cc912743cdcd458c18902c874e9e469fccc9e3ec67a79d00ed",
+              "source_url": "https://www.wri.org/data/aqueduct-global-maps-21-data",
+              "downloaded_at": "2026-03-28T00:00:00.000Z",
+              "dataset_version": "aqueduct_2_1"
+            },
+            {
+              "name": "aware",
+              "file_hash": "94649ec3760b475e3980eba45e0731f52968d819264129525be24ea9f30f1aa4",
+              "source_url": "https://wulca-waterlca.org/aware/",
+              "downloaded_at": "2026-03-28T00:00:00.000Z",
+              "dataset_version": "aware_2_0"
+            },
+            {
+              "name": "wwf",
+              "file_hash": "d86256f989a44f5761dfd0b31ad77bd9407ce6e0a25a17d1f912130ab0b82ba9",
+              "source_url": "https://riskfilter.org/water/explore/countryprofiles",
+              "downloaded_at": "2026-03-28T00:00:00.000Z",
+              "dataset_version": "wwf_water_risk_filter_v1"
+            },
+            {
+              "name": "nrel",
+              "file_hash": "4de9ff55d52bfa74273c92c430c294888a7cc783658edaf2cba677586fe19e64",
+              "source_url": "https://data.nrel.gov/",
+              "downloaded_at": "2026-03-28T00:00:00.000Z",
+              "dataset_version": "nrel_water_factors_v1"
+            }
+          ],
+          "providerSnapshotRefs": [
+            "us-west-2:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z",
+            "us-east-1:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z",
+            "eu-west-1:DEGRADED_SAFE_EMBER_STRUCTURAL_BASELINE:2026-03-31T00:21:53.673Z"
+          ]
+        },
+        "identity": {
+          "traceId": "trace:3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+          "createdAt": "2026-03-31T00:21:53.673Z",
+          "requestId": "evidence-1774916513673",
+          "sequenceNumber": 3692,
+          "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3"
+        },
+        "governance": {
+          "zone": "green",
+          "label": "SAIQ",
+          "score": 0.230155,
+          "seked": {
+            "strict": false,
+            "applied": true,
+            "enabled": true,
+            "evaluated": true,
+            "hookStatus": "success",
+            "reasonCodes": [
+              "SEKED_POLICY_ADAPTER_APPLIED",
+              "SEKED_POLICY_ZONE_GREEN"
+            ],
+            "policyReference": "seked.internal.v1"
+          },
+          "source": "SEKED_INTERNAL_V1",
+          "strict": false,
+          "weights": {
+            "cost": 0.083333,
+            "water": 0.25,
+            "carbon": 0.583333,
+            "latency": 0.083333
+          },
+          "external": {
+            "strict": false,
+            "applied": false,
+            "enabled": false,
+            "evaluated": false,
+            "hookStatus": "not_configured",
+            "reasonCodes": [
+              "EXTERNAL_POLICY_HOOK_DISABLED_OR_UNCONFIGURED"
+            ],
+            "policyReference": null
+          },
+          "thresholds": {
+            "redMin": 0.7,
+            "amberMin": 0.45,
+            "waterStressDeny": 4.7,
+            "waterStressDelay": 4,
+            "minSignalConfidence": 0.6
+          },
+          "policyReferences": [
+            "seked.internal.v1"
+          ],
+          "constraintsApplied": [
+            "SEKED_POLICY_ADAPTER_APPLIED",
+            "SEKED_POLICY_ZONE_GREEN",
+            "EXTERNAL_POLICY_HOOK_DISABLED_OR_UNCONFIGURED"
+          ]
+        },
+        "performance": {
+          "totalMs": 59,
+          "cacheHit": true,
+          "computeMs": 44,
+          "stageTimings": {
+            "policyHookMs": 0,
+            "traceAssemblyMs": 1,
+            "artifactSnapshotMs": 0,
+            "doctrineAssemblyMs": 1,
+            "candidateEvaluationMs": 42
+          },
+          "providerTimings": [
+            {
+              "region": "us-west-2",
+              "latencyMs": 14,
+              "cacheStatus": "redis",
+              "stalenessSec": 69,
+              "waterFreshnessSec": 13697,
+              "carbonFreshnessSec": 69
+            },
+            {
+              "region": "us-east-1",
+              "latencyMs": 14,
+              "cacheStatus": "redis",
+              "stalenessSec": 69,
+              "waterFreshnessSec": 13697,
+              "carbonFreshnessSec": 69
+            },
+            {
+              "region": "eu-west-1",
+              "latencyMs": 27,
+              "cacheStatus": "degraded-safe",
+              "stalenessSec": 15,
+              "waterFreshnessSec": 13697,
+              "carbonFreshnessSec": 15
+            }
+          ]
+        },
+        "decisionPath": {
+          "action": "run_now",
+          "reasonCode": "ALLOW",
+          "delayWindow": {
+            "reason": "delay_allowed",
+            "allowed": true,
+            "notBefore": "2026-03-31T00:36:53.673Z",
+            "delayMinutes": 15
+          },
+          "rerouteFrom": null,
+          "operatingMode": "NORMAL",
+          "baselineRegion": "us-west-2",
+          "selectedRegion": "us-west-2",
+          "rejectedRegions": [
+            {
+              "region": "us-east-1",
+              "reasonCodes": [
+                "WATER_HIGH_STRESS"
+              ]
+            },
+            {
+              "region": "eu-west-1",
+              "reasonCodes": [
+                "CARBON_FALLBACK_USED",
+                "CARBON_LOW_CONFIDENCE"
+              ]
+            }
+          ],
+          "evaluatedRegions": [
+            "us-west-2",
+            "us-east-1",
+            "eu-west-1"
+          ],
+          "precedenceOverrideApplied": false
+        },
+        "inputSignals": {
+          "request": {
+            "jobType": "standard",
+            "requestId": "evidence-1774916513673",
+            "timestamp": "2026-03-31T00:21:53.673Z",
+            "allowDelay": true,
+            "costWeight": 0.1,
+            "criticality": "standard",
+            "waterWeight": 0.3,
+            "carbonWeight": 0.7,
+            "criticalPath": false,
+            "decisionMode": "runtime_authorization",
+            "signalPolicy": "marginal_first",
+            "latencyWeight": 0.1,
+            "policyVersion": "water_policy_v1",
+            "idempotencyKey": "evidence-1774916513673-idempotent",
+            "preferredRegions": [
+              "us-west-2",
+              "us-east-1",
+              "eu-west-1"
+            ],
+            "waterPolicyProfile": "default"
+          },
+          "resolvedCandidates": [
+            {
+              "score": 83.310664,
+              "region": "us-west-2",
+              "runner": "ubuntu-latest",
+              "signalMode": "marginal",
+              "cacheStatus": "redis",
+              "waterSignal": {
+                "region": "us-west-2",
+                "source": [
+                  "aqueduct_4_0",
+                  "aware_2_0",
+                  "nrel_water_factors_v1"
+                ],
+                "scenario": "current",
+                "confidence": 0.85,
+                "facilityId": null,
+                "signalType": "average_operational",
+                "dataQuality": "high",
+                "supplierSet": [
+                  "aqueduct",
+                  "aware",
+                  "nrel"
+                ],
+                "evidenceRefs": [
+                  "water-bundle:2026-03-30T20:33:52.420Z:us-west-2"
+                ],
+                "fallbackUsed": false,
+                "telemetryRef": null,
+                "authorityMode": "basin",
+                "referenceTime": "2026-03-31T00:21:53.673Z",
+                "scarcityFactor": 1.3,
+                "datasetVersions": {
+                  "nrel": "nrel_water_factors_v1",
+                  "aware": "aware_2_0",
+                  "aqueduct": "aqueduct_4_0"
+                },
+                "droughtRiskIndex": 2.2,
+                "waterStressIndex": 2.1,
+                "waterQualityIndex": 2,
+                "artifactGeneratedAt": "2026-03-30T20:33:52.420Z",
+                "waterIntensityLPerKwh": 0.9
+              },
+              "scarcityImpact": 2.925,
+              "waterAuthority": {
+                "scenario": "current",
+                "bundleHash": "90c984f6d095aecf247b64057b7c0ca71d87e48312fb3647947a092718bea691",
+                "confidence": 0.85,
+                "facilityId": null,
+                "supplierSet": [
+                  "aqueduct",
+                  "aware",
+                  "nrel"
+                ],
+                "evidenceRefs": [
+                  "water-bundle:2026-03-30T20:33:52.420Z:us-west-2"
+                ],
+                "manifestHash": "e5bbb12124a7f600287e4b654a904d03139b4a07831eb5e1606bc5036d7843e6",
+                "telemetryRef": null,
+                "authorityMode": "basin"
+              },
+              "carbonIntensity": 29,
+              "accountingMethod": "marginal",
+              "carbonConfidence": 0.9,
+              "carbonSourceUsed": "REDIS_CACHE_WATTTIME_MOER",
+              "guardrailReasons": [],
+              "defensiblePenalty": 0,
+              "waterFreshnessSec": 13697,
+              "waterImpactLiters": 2.25,
+              "carbonFallbackUsed": false,
+              "carbonFreshnessSec": 69,
+              "providerSnapshotRef": "us-west-2:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z",
+              "providerResolutionMs": 14,
+              "carbonDisagreementPct": 0,
+              "defensibleReasonCodes": [],
+              "reliabilityMultiplier": 1.1028,
+              "carbonDisagreementFlag": false,
+              "guardrailCandidateBlocked": false
+            },
+            {
+              "score": 231.84438,
+              "region": "us-east-1",
+              "runner": "ubuntu-latest",
+              "signalMode": "marginal",
+              "cacheStatus": "redis",
+              "waterSignal": {
+                "region": "us-east-1",
+                "source": [
+                  "aqueduct_4_0",
+                  "aware_2_0",
+                  "nrel_water_factors_v1"
+                ],
+                "scenario": "current",
+                "confidence": 0.83,
+                "facilityId": null,
+                "signalType": "average_operational",
+                "dataQuality": "high",
+                "supplierSet": [
+                  "aqueduct",
+                  "aware",
+                  "nrel"
+                ],
+                "evidenceRefs": [
+                  "water-bundle:2026-03-30T20:33:52.420Z:us-east-1"
+                ],
+                "fallbackUsed": false,
+                "telemetryRef": null,
+                "authorityMode": "basin",
+                "referenceTime": "2026-03-31T00:21:53.673Z",
+                "scarcityFactor": 1.9,
+                "datasetVersions": {
+                  "nrel": "nrel_water_factors_v1",
+                  "aware": "aware_2_0",
+                  "aqueduct": "aqueduct_4_0"
+                },
+                "droughtRiskIndex": 2.9,
+                "waterStressIndex": 3.2,
+                "waterQualityIndex": 2.4,
+                "artifactGeneratedAt": "2026-03-30T20:33:52.420Z",
+                "waterIntensityLPerKwh": 1.3
+              },
+              "scarcityImpact": 6.175,
+              "waterAuthority": {
+                "scenario": "current",
+                "bundleHash": "90c984f6d095aecf247b64057b7c0ca71d87e48312fb3647947a092718bea691",
+                "confidence": 0.83,
+                "facilityId": null,
+                "supplierSet": [
+                  "aqueduct",
+                  "aware",
+                  "nrel"
+                ],
+                "evidenceRefs": [
+                  "water-bundle:2026-03-30T20:33:52.420Z:us-east-1"
+                ],
+                "manifestHash": "e5bbb12124a7f600287e4b654a904d03139b4a07831eb5e1606bc5036d7843e6",
+                "telemetryRef": null,
+                "authorityMode": "basin"
+              },
+              "carbonIntensity": 77,
+              "accountingMethod": "marginal",
+              "carbonConfidence": 0.9,
+              "carbonSourceUsed": "REDIS_CACHE_WATTTIME_MOER",
+              "guardrailReasons": [
+                "WATER_HIGH_STRESS"
+              ],
+              "defensiblePenalty": 0,
+              "waterFreshnessSec": 13697,
+              "waterImpactLiters": 3.25,
+              "carbonFallbackUsed": false,
+              "carbonFreshnessSec": 69,
+              "providerSnapshotRef": "us-east-1:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z",
+              "providerResolutionMs": 14,
+              "carbonDisagreementPct": 0,
+              "defensibleReasonCodes": [],
+              "reliabilityMultiplier": 0.8675,
+              "carbonDisagreementFlag": false,
+              "guardrailCandidateBlocked": false
+            },
+            {
+              "score": 456.979167,
+              "region": "eu-west-1",
+              "runner": "ubuntu-latest",
+              "signalMode": "fallback",
+              "cacheStatus": "degraded-safe",
+              "waterSignal": {
+                "region": "eu-west-1",
+                "source": [
+                  "aqueduct_4_0",
+                  "aware_2_0",
+                  "nrel_water_factors_v1"
+                ],
+                "scenario": "current",
+                "confidence": 0.88,
+                "facilityId": null,
+                "signalType": "average_operational",
+                "dataQuality": "high",
+                "supplierSet": [
+                  "aqueduct",
+                  "aware",
+                  "nrel"
+                ],
+                "evidenceRefs": [
+                  "water-bundle:2026-03-30T20:33:52.420Z:eu-west-1"
+                ],
+                "fallbackUsed": false,
+                "telemetryRef": null,
+                "authorityMode": "basin",
+                "referenceTime": "2026-03-31T00:21:53.673Z",
+                "scarcityFactor": 0.9,
+                "datasetVersions": {
+                  "nrel": "nrel_water_factors_v1",
+                  "aware": "aware_2_0",
+                  "aqueduct": "aqueduct_4_0"
+                },
+                "droughtRiskIndex": 1.4,
+                "waterStressIndex": 1.6,
+                "waterQualityIndex": 1.9,
+                "artifactGeneratedAt": "2026-03-30T20:33:52.420Z",
+                "waterIntensityLPerKwh": 0.6
+              },
+              "scarcityImpact": 1.35,
+              "waterAuthority": {
+                "scenario": "current",
+                "bundleHash": "90c984f6d095aecf247b64057b7c0ca71d87e48312fb3647947a092718bea691",
+                "confidence": 0.88,
+                "facilityId": null,
+                "supplierSet": [
+                  "aqueduct",
+                  "aware",
+                  "nrel"
+                ],
+                "evidenceRefs": [
+                  "water-bundle:2026-03-30T20:33:52.420Z:eu-west-1"
+                ],
+                "manifestHash": "e5bbb12124a7f600287e4b654a904d03139b4a07831eb5e1606bc5036d7843e6",
+                "telemetryRef": null,
+                "authorityMode": "basin"
+              },
+              "carbonIntensity": 400,
+              "accountingMethod": "average",
+              "carbonConfidence": 0.05,
+              "carbonSourceUsed": "DEGRADED_SAFE_EMBER_STRUCTURAL_BASELINE",
+              "guardrailReasons": [],
+              "defensiblePenalty": 120,
+              "waterFreshnessSec": 13697,
+              "waterImpactLiters": 1.5,
+              "carbonFallbackUsed": true,
+              "carbonFreshnessSec": 15,
+              "providerSnapshotRef": "eu-west-1:DEGRADED_SAFE_EMBER_STRUCTURAL_BASELINE:2026-03-31T00:21:53.673Z",
+              "providerResolutionMs": 27,
+              "carbonDisagreementPct": 0,
+              "defensibleReasonCodes": [
+                "CARBON_FALLBACK_USED",
+                "CARBON_LOW_CONFIDENCE"
+              ],
+              "reliabilityMultiplier": 0.8,
+              "carbonDisagreementFlag": false,
+              "guardrailCandidateBlocked": false
+            }
+          ]
+        },
+        "normalizedSignals": {
+          "candidates": [
+            {
+              "score": 83.310664,
+              "region": "us-west-2",
+              "signalMode": "marginal",
+              "cacheStatus": "redis",
+              "authorityMode": "basin",
+              "scarcityImpact": 2.925,
+              "carbonIntensity": 29,
+              "fallbackApplied": false,
+              "accountingMethod": "marginal",
+              "guardrailBlocked": false,
+              "guardrailReasons": [],
+              "waterStressIndex": 2.1,
+              "defensiblePenalty": 0,
+              "waterFreshnessSec": 13697,
+              "waterImpactLiters": 2.25,
+              "carbonFreshnessSec": 69,
+              "defensibleReasonCodes": [],
+              "reliabilityMultiplier": 1.1028
+            },
+            {
+              "score": 231.84438,
+              "region": "us-east-1",
+              "signalMode": "marginal",
+              "cacheStatus": "redis",
+              "authorityMode": "basin",
+              "scarcityImpact": 6.175,
+              "carbonIntensity": 77,
+              "fallbackApplied": false,
+              "accountingMethod": "marginal",
+              "guardrailBlocked": false,
+              "guardrailReasons": [
+                "WATER_HIGH_STRESS"
+              ],
+              "waterStressIndex": 3.2,
+              "defensiblePenalty": 0,
+              "waterFreshnessSec": 13697,
+              "waterImpactLiters": 3.25,
+              "carbonFreshnessSec": 69,
+              "defensibleReasonCodes": [],
+              "reliabilityMultiplier": 0.8675
+            },
+            {
+              "score": 456.979167,
+              "region": "eu-west-1",
+              "signalMode": "fallback",
+              "cacheStatus": "degraded-safe",
+              "authorityMode": "basin",
+              "scarcityImpact": 1.35,
+              "carbonIntensity": 400,
+              "fallbackApplied": true,
+              "accountingMethod": "average",
+              "guardrailBlocked": false,
+              "guardrailReasons": [],
+              "waterStressIndex": 1.6,
+              "defensiblePenalty": 120,
+              "waterFreshnessSec": 13697,
+              "waterImpactLiters": 1.5,
+              "carbonFreshnessSec": 15,
+              "defensibleReasonCodes": [
+                "CARBON_FALLBACK_USED",
+                "CARBON_LOW_CONFIDENCE"
+              ],
+              "reliabilityMultiplier": 0.8
+            }
+          ]
+        }
+      },
+      "createdAt": "2026-03-31T00:22:09.079Z"
+    },
+    "selectedReplay": {
+      "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+      "storedResponse": {
+        "mss": {
+          "snapshotId": "33338a36b2a32b1859e2474ce3509f0fcd00b6ca39c802e5361b66620aaa5bf7",
+          "cacheStatus": "redis",
+          "disagreement": {
+            "pct": 0,
+            "flag": false
+          },
+          "waterLineage": [
+            "water-bundle:2026-03-30T20:33:52.420Z:us-west-2"
+          ],
+          "carbonLineage": [
+            "REDIS_CACHE_WATTTIME_MOER",
+            "us-west-2:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z"
+          ],
+          "carbonProvider": "REDIS_CACHE_WATTTIME_MOER",
+          "waterFreshnessSec": 13697,
+          "carbonFreshnessSec": 69,
+          "carbonProviderHealth": "HEALTHY",
+          "lastKnownGoodApplied": true,
+          "waterAuthorityHealth": "HEALTHY"
+        },
+        "water": {
+          "source": [
+            "aqueduct_4_0",
+            "aware_2_0",
+            "nrel_water_factors_v1"
+          ],
+          "confidence": 0.85,
+          "stressIndex": 2.1,
+          "fallbackUsed": false,
+          "qualityIndex": 2,
+          "baselineLiters": 2.25,
+          "datasetVersion": {
+            "nrel": "nrel_water_factors_v1",
+            "aware": "aware_2_0",
+            "aqueduct": "aqueduct_4_0"
+          },
+          "selectedLiters": 2.25,
+          "droughtRiskIndex": 2.2,
+          "intensityLPerKwh": 0.9,
+          "guardrailTriggered": false,
+          "baselineScarcityImpact": 2.925,
+          "selectedScarcityImpact": 2.925
+        },
+        "savings": {
+          "carbonReductionPct": 0,
+          "waterImpactDeltaLiters": 0
+        },
+        "baseline": {
+          "region": "us-west-2",
+          "carbonIntensity": 29,
+          "waterImpactLiters": 2.25,
+          "waterScarcityImpact": 2.925
+        },
+        "decision": "run_now",
+        "selected": {
+          "region": "us-west-2",
+          "carbonIntensity": 29,
+          "waterImpactLiters": 2.25,
+          "waterScarcityImpact": 2.925
+        },
+        "assurance": {
+          "issues": [],
+          "status": "assurance_ready",
+          "assuranceReady": true,
+          "operationallyUsable": true
+        },
+        "latencyMs": {
+          "total": 59,
+          "compute": 44,
+          "cacheStatus": "redis",
+          "influencedDecision": true,
+          "providerResolution": 14
+        },
+        "notBefore": null,
+        "proofHash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+        "reasonCode": "ALLOW",
+        "signalMode": "marginal",
+        "policyTrace": {
+          "profile": "default",
+          "scenario": "current",
+          "facilityId": null,
+          "strictMode": false,
+          "thresholds": {
+            "stressDeny": 4.7,
+            "stressDelay": 4,
+            "scarcityDeny": 10,
+            "scarcityDelay": 6
+          },
+          "policyPacks": [
+            "water.default.water_policy_v1",
+            "seked.pre_action.v1",
+            "external.pre_action.v1"
+          ],
+          "reasonCodes": [
+            "SEKED_POLICY_ADAPTER_APPLIED",
+            "SEKED_POLICY_ZONE_GREEN",
+            "EXTERNAL_POLICY_HOOK_DISABLED_OR_UNCONFIGURED",
+            "OPERATING_MODE_NORMAL"
+          ],
+          "sekedPolicy": {
+            "strict": false,
+            "applied": true,
+            "enabled": true,
+            "evaluated": true,
+            "hookStatus": "success",
+            "reasonCodes": [
+              "SEKED_POLICY_ADAPTER_APPLIED",
+              "SEKED_POLICY_ZONE_GREEN"
+            ],
+            "policyReference": "seked.internal.v1"
+          },
+          "capabilityId": "ci.route.authorization",
+          "fallbackUsed": false,
+          "operatingMode": "NORMAL",
+          "policyVersion": "water_policy_v1",
+          "baselineRegion": "us-west-2",
+          "externalPolicy": {
+            "strict": false,
+            "applied": false,
+            "enabled": false,
+            "evaluated": false,
+            "hookStatus": "not_configured",
+            "reasonCodes": [
+              "EXTERNAL_POLICY_HOOK_DISABLED_OR_UNCONFIGURED"
+            ],
+            "policyReference": null
+          },
+          "selectedRegion": "us-west-2",
+          "authorizationMode": "pre_action",
+          "conflictHierarchy": [
+            "policy_hard_override",
+            "water_guardrail",
+            "latency_sla_protection",
+            "carbon_optimization_within_allowed_envelope",
+            "cost_tie_breaker"
+          ],
+          "guardrailTriggered": false,
+          "reroutedFromRegion": null,
+          "precedenceProtected": false,
+          "scenarioPlanningActive": false,
+          "precedenceOverrideApplied": false
+        },
+        "proofRecord": {
+          "job_id": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+          "timestamp": "2026-03-31T00:22:09.014Z",
+          "transport": "sync_http",
+          "adapter_id": "ecobe.http.decision.v1",
+          "proof_hash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+          "water_delta": 0,
+          "carbon_delta": 0,
+          "signals_used": [
+            "REDIS_CACHE_WATTTIME_MOER",
+            "aqueduct_4_0",
+            "aware_2_0",
+            "nrel_water_factors_v1"
+          ],
+          "supplier_refs": [
+            "aqueduct",
+            "aware",
+            "nrel"
+          ],
+          "water_scenario": "current",
+          "adapter_version": "1.0.0",
+          "baseline_region": "us-west-2",
+          "mss_snapshot_id": "33338a36b2a32b1859e2474ce3509f0fcd00b6ca39c802e5361b66620aaa5bf7",
+          "selected_region": "us-west-2",
+          "confidence_score": 0.875,
+          "dataset_versions": {
+            "nrel": "nrel_water_factors_v1",
+            "aware": "aware_2_0",
+            "aqueduct": "aqueduct_4_0"
+          },
+          "water_bundle_hash": "90c984f6d095aecf247b64057b7c0ca71d87e48312fb3647947a092718bea691",
+          "enforcement_result": "applied",
+          "water_evidence_refs": [
+            "water-bundle:2026-03-30T20:33:52.420Z:us-west-2"
+          ],
+          "water_manifest_hash": "e5bbb12124a7f600287e4b654a904d03139b4a07831eb5e1606bc5036d7843e6",
+          "external_policy_refs": [
+            "seked.internal.v1"
+          ],
+          "provider_snapshot_refs": [
+            "us-west-2:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z",
+            "us-east-1:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z",
+            "eu-west-1:DEGRADED_SAFE_EMBER_STRUCTURAL_BASELINE:2026-03-31T00:21:53.673Z"
+          ],
+          "facility_telemetry_refs": [],
+          "observed_runtime_target": null
+        },
+        "decisionMode": "runtime_authorization",
+        "fallbackUsed": false,
+        "operatingMode": "NORMAL",
+        "proofEnvelope": {
+          "adapter": {
+            "adapterId": "ecobe.http.decision.v1",
+            "transport": "sync_http",
+            "adapterVersion": "1.0.0",
+            "enforcementResult": "applied",
+            "observedRuntimeTarget": null
+          },
+          "posture": "assurance_ready",
+          "baseline": {
+            "region": "us-west-2",
+            "carbonIntensity": 29,
+            "waterImpactLiters": 2.25,
+            "waterScarcityImpact": 2.925
+          },
+          "selected": {
+            "region": "us-west-2",
+            "carbonIntensity": 29,
+            "waterImpactLiters": 2.25,
+            "waterScarcityImpact": 2.925
+          },
+          "proofHash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+          "mssSnapshotId": "33338a36b2a32b1859e2474ce3509f0fcd00b6ca39c802e5361b66620aaa5bf7",
+          "signalLineage": {
+            "fallbackUsed": false,
+            "carbonProvider": "REDIS_CACHE_WATTTIME_MOER",
+            "datasetVersions": {
+              "nrel": "nrel_water_factors_v1",
+              "aware": "aware_2_0",
+              "aqueduct": "aqueduct_4_0"
+            },
+            "disagreementPct": 0,
+            "waterAuthorityMode": "basin",
+            "providerSnapshotRefs": [
+              "us-west-2:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z",
+              "us-east-1:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z",
+              "eu-west-1:DEGRADED_SAFE_EMBER_STRUCTURAL_BASELINE:2026-03-31T00:21:53.673Z"
+            ]
+          }
+        },
+        "adapterContext": {
+          "runtime": "http",
+          "adapterId": "ecobe.http.decision.v1",
+          "transport": "sync_http",
+          "controlPoint": "gateway_preflight",
+          "adapterVersion": "1.0.0",
+          "enforcementResult": "applied"
+        },
+        "recommendation": "Decision run_now under default profile",
+        "selectedRegion": "us-west-2",
+        "selectedRunner": "ubuntu-latest",
+        "waterAuthority": {
+          "scenario": "current",
+          "bundleHash": "90c984f6d095aecf247b64057b7c0ca71d87e48312fb3647947a092718bea691",
+          "confidence": 0.85,
+          "facilityId": null,
+          "supplierSet": [
+            "aqueduct",
+            "aware",
+            "nrel"
+          ],
+          "evidenceRefs": [
+            "water-bundle:2026-03-30T20:33:52.420Z:us-west-2"
+          ],
+          "manifestHash": "e5bbb12124a7f600287e4b654a904d03139b4a07831eb5e1606bc5036d7843e6",
+          "telemetryRef": null,
+          "authorityMode": "basin"
+        },
+        "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+        "doctrineVersion": "co2_router_doctrine_v1",
+        "telemetryBridge": {
+          "export": {
+            "enabled": false,
+            "endpoint": null,
+            "exported": false
+          },
+          "spanId": "976fc3ca99f2475d",
+          "traceId": "8befd71600f34b2b991437f012407739",
+          "spanName": "ecobe.decision.authorize",
+          "attributes": {
+            "ecobe.action": "run_now",
+            "ecobe.runtime": "http",
+            "ecobe.transport": "sync_http",
+            "ecobe.adapter_id": "ecobe.http.decision.v1",
+            "ecobe.proof_hash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+            "ecobe.reason_code": "ALLOW",
+            "ecobe.fallback_used": false,
+            "ecobe.operating_mode": "NORMAL",
+            "ecobe.region_selected": "us-west-2",
+            "ecobe.decision_frame_id": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3"
+          },
+          "durationMs": 59,
+          "serviceName": "ecobe-engine"
+        },
+        "workflowOutputs": {
+          "decision": "run_now",
+          "proofHash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+          "reasonCode": "ALLOW",
+          "signalMode": "marginal",
+          "decisionMode": "runtime_authorization",
+          "waterScenario": "current",
+          "carbonBaseline": 29,
+          "selectedRegion": "us-west-2",
+          "selectedRunner": "ubuntu-latest",
+          "carbonIntensity": 29,
+          "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+          "accountingMethod": "marginal",
+          "kubernetesRegion": "us-west-2",
+          "signalConfidence": 0.875,
+          "waterStressIndex": 2.1,
+          "carbonReductionPct": 0,
+          "kubernetesDecision": "normal",
+          "waterAuthorityMode": "basin",
+          "waterPolicyVersion": "water_policy_v1",
+          "kubernetesNotBefore": null,
+          "waterBaselineLiters": 2.25,
+          "waterScarcityImpact": 2.925,
+          "waterSelectedLiters": 2.25,
+          "githubActionsNotBefore": null,
+          "waterImpactDeltaLiters": 0,
+          "githubActionsExecutable": true,
+          "kubernetesReplicaFactor": 1,
+          "githubActionsEnvironment": "ecobe-authorized",
+          "githubActionsMaxParallel": 1,
+          "selectedRegionReliabilityMultiplier": 1.1028
+        },
+        "accountingMethod": "marginal",
+        "decisionEnvelope": {
+          "action": "run_now",
+          "timing": {
+            "expiresAt": "2026-03-31T00:26:53.673Z",
+            "notBefore": null
+          },
+          "doctrine": {
+            "version": "co2_router_doctrine_v1",
+            "hierarchy": [
+              "policy_hard_override",
+              "water_guardrail",
+              "latency_sla_protection",
+              "carbon_optimization_within_allowed_envelope",
+              "cost_tie_breaker"
+            ],
+            "operatingMode": "NORMAL"
+          },
+          "requestId": "evidence-1774916513673",
+          "transport": {
+            "runtime": "http",
+            "adapterId": "ecobe.http.decision.v1",
+            "transport": "sync_http",
+            "controlPoint": "gateway_preflight",
+            "adapterVersion": "1.0.0",
+            "enforcementResult": "applied"
+          },
+          "confidence": {
+            "mode": "live",
+            "score": 0.875
+          },
+          "reasonCode": "ALLOW",
+          "idempotency": {
+            "key": "evidence-1774916513673-idempotent",
+            "replayed": false
+          },
+          "baselineTarget": {
+            "region": "us-west-2",
+            "runner": null,
+            "runtime": "http"
+          },
+          "selectedTarget": {
+            "region": "us-west-2",
+            "runner": "ubuntu-latest",
+            "runtime": "http",
+            "provider": "generic"
+          },
+          "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3"
+        },
+        "signalConfidence": 0.875,
+        "enforcementBundle": {
+          "kubernetes": {
+            "labels": {
+              "ecobe.io/region": "us-west-2",
+              "ecobe.io/decision": "run_now",
+              "ecobe.io/decision-frame": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+              "ecobe.io/policy-profile": "default",
+              "ecobe.io/water-scenario": "current",
+              "ecobe.io/water-authority": "basin"
+            },
+            "scaling": {
+              "mode": "normal",
+              "maxReplicaFactor": 1,
+              "targetReplicaFactor": 1
+            },
+            "admission": {
+              "allow": true,
+              "reason": "ALLOW"
+            },
+            "execution": {
+              "mode": "immediate",
+              "notBefore": null
+            },
+            "gatekeeper": {
+              "template": {
+                "kind": "ConstraintTemplate",
+                "spec": {
+                  "crd": {
+                    "spec": {
+                      "names": {
+                        "kind": "EcobeDecisionGuard"
+                      }
+                    }
+                  },
+                  "targets": [
+                    {
+                      "rego": "\npackage ecobedecisionguard\n\nviolation[{\"msg\": msg}] {\n  required := {\"ecobe.io/decision-frame\", \"ecobe.io/region\", \"ecobe.io/decision\"}\n  provided := {key | input.review.object.metadata.labels[key]}\n  missing := required - provided\n  count(missing) > 0\n  msg := sprintf(\"missing ecobe labels: %v\", [missing])\n}\n\nviolation[{\"msg\": msg}] {\n  expected := input.parameters.selectedRegion\n  actual := input.review.object.metadata.labels[\"ecobe.io/region\"]\n  expected != actual\n  msg := sprintf(\"region %v violates ecobe authorization region %v\", [actual, expected])\n}\n\nviolation[{\"msg\": msg}] {\n  input.parameters.blocked\n  msg := \"workload is blocked by ecobe authorization\"\n}\n",
+                      "target": "admission.k8s.gatekeeper.sh"
+                    }
+                  ]
+                },
+                "metadata": {
+                  "name": "ecobedecisionguard"
+                },
+                "apiVersion": "templates.gatekeeper.sh/v1beta1"
+              },
+              "constraint": {
+                "kind": "EcobeDecisionGuard",
+                "spec": {
+                  "match": {
+                    "kinds": [
+                      {
+                        "kinds": [
+                          "Pod"
+                        ],
+                        "apiGroups": [
+                          ""
+                        ]
+                      }
+                    ],
+                    "labelSelector": {
+                      "matchLabels": {
+                        "ecobe.io/decision-frame": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3"
+                      }
+                    }
+                  },
+                  "parameters": {
+                    "blocked": false,
+                    "notBefore": null,
+                    "selectedRegion": "us-west-2",
+                    "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+                    "maxReplicaFactor": 1,
+                    "minReplicaFactor": 1
+                  }
+                },
+                "metadata": {
+                  "name": "ecobe-3a3ade46-6861-4be7-87a3-1d9b15ae3ce3"
+                },
+                "apiVersion": "constraints.gatekeeper.sh/v1beta1"
+              },
+              "parameters": {
+                "blocked": false,
+                "notBefore": null,
+                "selectedRegion": "us-west-2",
+                "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+                "maxReplicaFactor": 1,
+                "minReplicaFactor": 1
+              },
+              "constraintName": "ecobe-3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+              "requiredLabels": [
+                "ecobe.io/decision-frame",
+                "ecobe.io/region",
+                "ecobe.io/decision"
+              ],
+              "constraintTemplateName": "ecobedecisionguard"
+            },
+            "annotations": {
+              "ecobe.io/proof-hash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+              "ecobe.io/enforcement": "deterministic",
+              "ecobe.io/reason-code": "ALLOW",
+              "ecobe.io/generated-at": "2026-03-31T00:22:09.014Z",
+              "ecobe.io/decision-mode": "runtime_authorization"
+            },
+            "tolerations": [
+              {
+                "key": "ecobe.io/policy-profile",
+                "value": "default",
+                "effect": "NoSchedule",
+                "operator": "Equal"
+              }
+            ],
+            "nodeAffinity": {
+              "requiredRegion": "us-west-2",
+              "preferredRegions": [
+                "us-west-2"
+              ]
+            },
+            "nodeSelector": {
+              "ecobe.io/region": "us-west-2",
+              "topology.kubernetes.io/region": "us-west-2"
+            }
+          },
+          "githubActions": {
+            "decision": "run_now",
+            "notBefore": null,
+            "executable": true,
+            "concurrency": {
+              "group": "ecobe-3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+              "cancelInProgress": false
+            },
+            "environment": "ecobe-authorized",
+            "maxParallel": 1,
+            "matrixAllowedRegions": [
+              "us-west-2",
+              "us-east-1",
+              "eu-west-1"
+            ]
+          }
+        },
+        "decisionExplanation": {
+          "hierarchy": [
+            "policy_hard_override",
+            "water_guardrail",
+            "latency_sla_protection",
+            "carbon_optimization_within_allowed_envelope",
+            "cost_tie_breaker"
+          ],
+          "whyAction": "Allowed immediately because us-west-2 stayed within policy, water, and SLA constraints under the default doctrine. Reason code: ALLOW.",
+          "whyTarget": "us-west-2 remained the default and selected target because no allowed alternative beat it on deterministic score.",
+          "rejectedAlternatives": [
+            {
+              "reason": "Higher deterministic score (231.844) than selected target us-west-2.",
+              "region": "us-east-1"
+            },
+            {
+              "reason": "Higher deterministic score (456.979) than selected target us-west-2.",
+              "region": "eu-west-1"
+            }
+          ]
+        },
+        "candidateEvaluations": [
+          {
+            "score": 83.310664,
+            "region": "us-west-2",
+            "supplierSet": [
+              "aqueduct",
+              "aware",
+              "nrel"
+            ],
+            "evidenceRefs": [
+              "water-bundle:2026-03-30T20:33:52.420Z:us-west-2"
+            ],
+            "authorityMode": "basin",
+            "scarcityImpact": 2.925,
+            "carbonIntensity": 29,
+            "guardrailReasons": [],
+            "defensiblePenalty": 0,
+            "waterImpactLiters": 2.25,
+            "defensibleReasonCodes": [],
+            "reliabilityMultiplier": 1.1028,
+            "guardrailCandidateBlocked": false
+          },
+          {
+            "score": 231.84438,
+            "region": "us-east-1",
+            "supplierSet": [
+              "aqueduct",
+              "aware",
+              "nrel"
+            ],
+            "evidenceRefs": [
+              "water-bundle:2026-03-30T20:33:52.420Z:us-east-1"
+            ],
+            "authorityMode": "basin",
+            "scarcityImpact": 6.175,
+            "carbonIntensity": 77,
+            "guardrailReasons": [
+              "WATER_HIGH_STRESS"
+            ],
+            "defensiblePenalty": 0,
+            "waterImpactLiters": 3.25,
+            "defensibleReasonCodes": [],
+            "reliabilityMultiplier": 0.8675,
+            "guardrailCandidateBlocked": false
+          },
+          {
+            "score": 456.979167,
+            "region": "eu-west-1",
+            "supplierSet": [
+              "aqueduct",
+              "aware",
+              "nrel"
+            ],
+            "evidenceRefs": [
+              "water-bundle:2026-03-30T20:33:52.420Z:eu-west-1"
+            ],
+            "authorityMode": "basin",
+            "scarcityImpact": 1.35,
+            "carbonIntensity": 400,
+            "guardrailReasons": [],
+            "defensiblePenalty": 120,
+            "waterImpactLiters": 1.5,
+            "defensibleReasonCodes": [
+              "CARBON_FALLBACK_USED",
+              "CARBON_LOW_CONFIDENCE"
+            ],
+            "reliabilityMultiplier": 0.8,
+            "guardrailCandidateBlocked": false
+          }
+        ],
+        "kubernetesEnforcement": {
+          "labels": {
+            "ecobe.io/region": "us-west-2",
+            "ecobe.io/decision": "run_now",
+            "ecobe.io/decision-frame": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+            "ecobe.io/policy-profile": "default",
+            "ecobe.io/water-scenario": "current",
+            "ecobe.io/water-authority": "basin"
+          },
+          "scaling": {
+            "mode": "normal",
+            "maxReplicaFactor": 1,
+            "targetReplicaFactor": 1
+          },
+          "admission": {
+            "allow": true,
+            "reason": "ALLOW"
+          },
+          "execution": {
+            "mode": "immediate",
+            "notBefore": null
+          },
+          "gatekeeper": {
+            "template": {
+              "kind": "ConstraintTemplate",
+              "spec": {
+                "crd": {
+                  "spec": {
+                    "names": {
+                      "kind": "EcobeDecisionGuard"
+                    }
+                  }
+                },
+                "targets": [
+                  {
+                    "rego": "\npackage ecobedecisionguard\n\nviolation[{\"msg\": msg}] {\n  required := {\"ecobe.io/decision-frame\", \"ecobe.io/region\", \"ecobe.io/decision\"}\n  provided := {key | input.review.object.metadata.labels[key]}\n  missing := required - provided\n  count(missing) > 0\n  msg := sprintf(\"missing ecobe labels: %v\", [missing])\n}\n\nviolation[{\"msg\": msg}] {\n  expected := input.parameters.selectedRegion\n  actual := input.review.object.metadata.labels[\"ecobe.io/region\"]\n  expected != actual\n  msg := sprintf(\"region %v violates ecobe authorization region %v\", [actual, expected])\n}\n\nviolation[{\"msg\": msg}] {\n  input.parameters.blocked\n  msg := \"workload is blocked by ecobe authorization\"\n}\n",
+                    "target": "admission.k8s.gatekeeper.sh"
+                  }
+                ]
+              },
+              "metadata": {
+                "name": "ecobedecisionguard"
+              },
+              "apiVersion": "templates.gatekeeper.sh/v1beta1"
+            },
+            "constraint": {
+              "kind": "EcobeDecisionGuard",
+              "spec": {
+                "match": {
+                  "kinds": [
+                    {
+                      "kinds": [
+                        "Pod"
+                      ],
+                      "apiGroups": [
+                        ""
+                      ]
+                    }
+                  ],
+                  "labelSelector": {
+                    "matchLabels": {
+                      "ecobe.io/decision-frame": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3"
+                    }
+                  }
+                },
+                "parameters": {
+                  "blocked": false,
+                  "notBefore": null,
+                  "selectedRegion": "us-west-2",
+                  "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+                  "maxReplicaFactor": 1,
+                  "minReplicaFactor": 1
+                }
+              },
+              "metadata": {
+                "name": "ecobe-3a3ade46-6861-4be7-87a3-1d9b15ae3ce3"
+              },
+              "apiVersion": "constraints.gatekeeper.sh/v1beta1"
+            },
+            "parameters": {
+              "blocked": false,
+              "notBefore": null,
+              "selectedRegion": "us-west-2",
+              "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+              "maxReplicaFactor": 1,
+              "minReplicaFactor": 1
+            },
+            "constraintName": "ecobe-3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+            "requiredLabels": [
+              "ecobe.io/decision-frame",
+              "ecobe.io/region",
+              "ecobe.io/decision"
+            ],
+            "constraintTemplateName": "ecobedecisionguard"
+          },
+          "annotations": {
+            "ecobe.io/proof-hash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+            "ecobe.io/enforcement": "deterministic",
+            "ecobe.io/reason-code": "ALLOW",
+            "ecobe.io/generated-at": "2026-03-31T00:22:09.014Z",
+            "ecobe.io/decision-mode": "runtime_authorization"
+          },
+          "tolerations": [
+            {
+              "key": "ecobe.io/policy-profile",
+              "value": "default",
+              "effect": "NoSchedule",
+              "operator": "Equal"
+            }
+          ],
+          "nodeAffinity": {
+            "requiredRegion": "us-west-2",
+            "preferredRegions": [
+              "us-west-2"
+            ]
+          },
+          "nodeSelector": {
+            "ecobe.io/region": "us-west-2",
+            "topology.kubernetes.io/region": "us-west-2"
+          }
+        }
+      },
+      "replayedResponse": {
+        "decision": "run_now",
+        "decisionMode": "runtime_authorization",
+        "doctrineVersion": "co2_router_doctrine_v1",
+        "operatingMode": "NORMAL",
+        "reasonCode": "ALLOW",
+        "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+        "selectedRunner": "ubuntu-latest",
+        "selectedRegion": "us-west-2",
+        "recommendation": "Decision run_now under default profile",
+        "signalConfidence": 0.875,
+        "fallbackUsed": false,
+        "signalMode": "marginal",
+        "accountingMethod": "marginal",
+        "decisionEnvelope": {
+          "requestId": "evidence-1774916513673",
+          "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+          "action": "run_now",
+          "reasonCode": "ALLOW",
+          "selectedTarget": {
+            "region": "us-west-2",
+            "runtime": "http",
+            "runner": "ubuntu-latest",
+            "provider": "generic"
+          },
+          "baselineTarget": {
+            "region": "us-west-2",
+            "runtime": "http",
+            "runner": null
+          },
+          "timing": {
+            "notBefore": null,
+            "expiresAt": "2026-03-31T00:26:53.673Z"
+          },
+          "confidence": {
+            "score": 0.875,
+            "mode": "live"
+          },
+          "doctrine": {
+            "version": "co2_router_doctrine_v1",
+            "operatingMode": "NORMAL",
+            "hierarchy": [
+              "policy_hard_override",
+              "water_guardrail",
+              "latency_sla_protection",
+              "carbon_optimization_within_allowed_envelope",
+              "cost_tie_breaker"
+            ]
+          },
+          "transport": {
+            "runtime": "http",
+            "transport": "sync_http",
+            "controlPoint": "gateway_preflight",
+            "adapterId": "ecobe.http.decision.v1",
+            "adapterVersion": "1.0.0",
+            "enforcementResult": "applied"
+          },
+          "idempotency": {
+            "key": "evidence-1774916513673-idempotent",
+            "replayed": false
+          }
+        },
+        "proofEnvelope": {
+          "posture": "assurance_ready",
+          "proofHash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+          "mssSnapshotId": "33338a36b2a32b1859e2474ce3509f0fcd00b6ca39c802e5361b66620aaa5bf7",
+          "baseline": {
+            "region": "us-west-2",
+            "carbonIntensity": 29,
+            "waterImpactLiters": 2.25,
+            "waterScarcityImpact": 2.925
+          },
+          "selected": {
+            "region": "us-west-2",
+            "carbonIntensity": 29,
+            "waterImpactLiters": 2.25,
+            "waterScarcityImpact": 2.925
+          },
+          "signalLineage": {
+            "carbonProvider": "REDIS_CACHE_WATTTIME_MOER",
+            "waterAuthorityMode": "basin",
+            "fallbackUsed": false,
+            "disagreementPct": 0,
+            "datasetVersions": {
+              "nrel": "nrel_water_factors_v1",
+              "aware": "aware_2_0",
+              "aqueduct": "aqueduct_4_0"
+            },
+            "providerSnapshotRefs": [
+              "us-west-2:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z",
+              "us-east-1:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z",
+              "eu-west-1:DEGRADED_SAFE_EMBER_STRUCTURAL_BASELINE:2026-03-31T00:21:53.673Z"
+            ]
+          },
+          "adapter": {
+            "transport": "sync_http",
+            "adapterId": "ecobe.http.decision.v1",
+            "adapterVersion": "1.0.0",
+            "enforcementResult": "applied",
+            "observedRuntimeTarget": null
+          }
+        },
+        "notBefore": null,
+        "proofHash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+        "waterAuthority": {
+          "authorityMode": "basin",
+          "scenario": "current",
+          "confidence": 0.85,
+          "supplierSet": [
+            "aqueduct",
+            "aware",
+            "nrel"
+          ],
+          "evidenceRefs": [
+            "water-bundle:2026-03-30T20:33:52.420Z:us-west-2"
+          ],
+          "facilityId": null,
+          "telemetryRef": null,
+          "bundleHash": "90c984f6d095aecf247b64057b7c0ca71d87e48312fb3647947a092718bea691",
+          "manifestHash": "e5bbb12124a7f600287e4b654a904d03139b4a07831eb5e1606bc5036d7843e6"
+        },
+        "assurance": {
+          "operationallyUsable": true,
+          "assuranceReady": true,
+          "status": "assurance_ready",
+          "issues": []
+        },
+        "mss": {
+          "snapshotId": "33338a36b2a32b1859e2474ce3509f0fcd00b6ca39c802e5361b66620aaa5bf7",
+          "carbonProvider": "REDIS_CACHE_WATTTIME_MOER",
+          "carbonProviderHealth": "HEALTHY",
+          "waterAuthorityHealth": "HEALTHY",
+          "carbonFreshnessSec": 69,
+          "waterFreshnessSec": 13697,
+          "cacheStatus": "redis",
+          "disagreement": {
+            "flag": false,
+            "pct": 0
+          },
+          "lastKnownGoodApplied": true,
+          "carbonLineage": [
+            "REDIS_CACHE_WATTTIME_MOER",
+            "us-west-2:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z"
+          ],
+          "waterLineage": [
+            "water-bundle:2026-03-30T20:33:52.420Z:us-west-2"
+          ]
+        },
+        "decisionExplanation": {
+          "hierarchy": [
+            "policy_hard_override",
+            "water_guardrail",
+            "latency_sla_protection",
+            "carbon_optimization_within_allowed_envelope",
+            "cost_tie_breaker"
+          ],
+          "whyAction": "Allowed immediately because us-west-2 stayed within policy, water, and SLA constraints under the default doctrine. Reason code: ALLOW.",
+          "whyTarget": "us-west-2 remained the default and selected target because no allowed alternative beat it on deterministic score.",
+          "rejectedAlternatives": [
+            {
+              "region": "us-east-1",
+              "reason": "Higher deterministic score (231.844) than selected target us-west-2."
+            },
+            {
+              "region": "eu-west-1",
+              "reason": "Higher deterministic score (456.979) than selected target us-west-2."
+            }
+          ]
+        },
+        "policyTrace": {
+          "capabilityId": "ci.route.authorization",
+          "authorizationMode": "pre_action",
+          "policyPacks": [
+            "water.default.water_policy_v1",
+            "seked.pre_action.v1",
+            "external.pre_action.v1"
+          ],
+          "scenarioPlanningActive": false,
+          "policyVersion": "water_policy_v1",
+          "profile": "default",
+          "thresholds": {
+            "stressDeny": 4.7,
+            "stressDelay": 4,
+            "scarcityDeny": 10,
+            "scarcityDelay": 6
+          },
+          "guardrailTriggered": false,
+          "fallbackUsed": false,
+          "strictMode": false,
+          "reasonCodes": [
+            "SEKED_POLICY_ADAPTER_APPLIED",
+            "SEKED_POLICY_ZONE_GREEN",
+            "EXTERNAL_POLICY_HOOK_DISABLED_OR_UNCONFIGURED",
+            "OPERATING_MODE_NORMAL"
+          ],
+          "reroutedFromRegion": null,
+          "selectedRegion": "us-west-2",
+          "baselineRegion": "us-west-2",
+          "precedenceProtected": false,
+          "precedenceOverrideApplied": false,
+          "scenario": "current",
+          "facilityId": null,
+          "conflictHierarchy": [
+            "policy_hard_override",
+            "water_guardrail",
+            "latency_sla_protection",
+            "carbon_optimization_within_allowed_envelope",
+            "cost_tie_breaker"
+          ],
+          "operatingMode": "NORMAL",
+          "externalPolicy": {
+            "enabled": false,
+            "strict": false,
+            "evaluated": false,
+            "applied": false,
+            "hookStatus": "not_configured",
+            "reasonCodes": [
+              "EXTERNAL_POLICY_HOOK_DISABLED_OR_UNCONFIGURED"
+            ],
+            "policyReference": null
+          },
+          "sekedPolicy": {
+            "enabled": true,
+            "strict": false,
+            "evaluated": true,
+            "applied": true,
+            "hookStatus": "success",
+            "reasonCodes": [
+              "SEKED_POLICY_ADAPTER_APPLIED",
+              "SEKED_POLICY_ZONE_GREEN"
+            ],
+            "policyReference": "seked.internal.v1"
+          }
+        },
+        "baseline": {
+          "region": "us-west-2",
+          "carbonIntensity": 29,
+          "waterImpactLiters": 2.25,
+          "waterScarcityImpact": 2.925
+        },
+        "selected": {
+          "region": "us-west-2",
+          "carbonIntensity": 29,
+          "waterImpactLiters": 2.25,
+          "waterScarcityImpact": 2.925
+        },
+        "savings": {
+          "carbonReductionPct": 0,
+          "waterImpactDeltaLiters": 0
+        },
+        "water": {
+          "selectedLiters": 2.25,
+          "baselineLiters": 2.25,
+          "selectedScarcityImpact": 2.925,
+          "baselineScarcityImpact": 2.925,
+          "intensityLPerKwh": 0.9,
+          "stressIndex": 2.1,
+          "qualityIndex": 2,
+          "droughtRiskIndex": 2.2,
+          "confidence": 0.85,
+          "source": [
+            "aqueduct_4_0",
+            "aware_2_0",
+            "nrel_water_factors_v1"
+          ],
+          "datasetVersion": {
+            "nrel": "nrel_water_factors_v1",
+            "aware": "aware_2_0",
+            "aqueduct": "aqueduct_4_0"
+          },
+          "guardrailTriggered": false,
+          "fallbackUsed": false
+        },
+        "kubernetesEnforcement": {
+          "admission": {
+            "allow": true,
+            "reason": "ALLOW"
+          },
+          "labels": {
+            "ecobe.io/decision-frame": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+            "ecobe.io/region": "us-west-2",
+            "ecobe.io/policy-profile": "default",
+            "ecobe.io/decision": "run_now",
+            "ecobe.io/water-authority": "basin",
+            "ecobe.io/water-scenario": "current"
+          },
+          "annotations": {
+            "ecobe.io/reason-code": "ALLOW",
+            "ecobe.io/generated-at": "2026-03-31T00:23:05.273Z",
+            "ecobe.io/enforcement": "deterministic",
+            "ecobe.io/decision-mode": "runtime_authorization",
+            "ecobe.io/proof-hash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a"
+          },
+          "nodeSelector": {
+            "topology.kubernetes.io/region": "us-west-2",
+            "ecobe.io/region": "us-west-2"
+          },
+          "nodeAffinity": {
+            "requiredRegion": "us-west-2",
+            "preferredRegions": [
+              "us-west-2"
+            ]
+          },
+          "tolerations": [
+            {
+              "key": "ecobe.io/policy-profile",
+              "operator": "Equal",
+              "value": "default",
+              "effect": "NoSchedule"
+            }
+          ],
+          "scaling": {
+            "mode": "normal",
+            "targetReplicaFactor": 1,
+            "maxReplicaFactor": 1
+          },
+          "execution": {
+            "mode": "immediate",
+            "notBefore": null
+          },
+          "gatekeeper": {
+            "constraintTemplateName": "ecobedecisionguard",
+            "constraintName": "ecobe-3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+            "requiredLabels": [
+              "ecobe.io/decision-frame",
+              "ecobe.io/region",
+              "ecobe.io/decision"
+            ],
+            "parameters": {
+              "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+              "selectedRegion": "us-west-2",
+              "notBefore": null,
+              "minReplicaFactor": 1,
+              "maxReplicaFactor": 1,
+              "blocked": false
+            },
+            "template": {
+              "apiVersion": "templates.gatekeeper.sh/v1beta1",
+              "kind": "ConstraintTemplate",
+              "metadata": {
+                "name": "ecobedecisionguard"
+              },
+              "spec": {
+                "crd": {
+                  "spec": {
+                    "names": {
+                      "kind": "EcobeDecisionGuard"
+                    }
+                  }
+                },
+                "targets": [
+                  {
+                    "target": "admission.k8s.gatekeeper.sh",
+                    "rego": "\npackage ecobedecisionguard\n\nviolation[{\"msg\": msg}] {\n  required := {\"ecobe.io/decision-frame\", \"ecobe.io/region\", \"ecobe.io/decision\"}\n  provided := {key | input.review.object.metadata.labels[key]}\n  missing := required - provided\n  count(missing) > 0\n  msg := sprintf(\"missing ecobe labels: %v\", [missing])\n}\n\nviolation[{\"msg\": msg}] {\n  expected := input.parameters.selectedRegion\n  actual := input.review.object.metadata.labels[\"ecobe.io/region\"]\n  expected != actual\n  msg := sprintf(\"region %v violates ecobe authorization region %v\", [actual, expected])\n}\n\nviolation[{\"msg\": msg}] {\n  input.parameters.blocked\n  msg := \"workload is blocked by ecobe authorization\"\n}\n"
+                  }
+                ]
+              }
+            },
+            "constraint": {
+              "apiVersion": "constraints.gatekeeper.sh/v1beta1",
+              "kind": "EcobeDecisionGuard",
+              "metadata": {
+                "name": "ecobe-3a3ade46-6861-4be7-87a3-1d9b15ae3ce3"
+              },
+              "spec": {
+                "match": {
+                  "kinds": [
+                    {
+                      "apiGroups": [
+                        ""
+                      ],
+                      "kinds": [
+                        "Pod"
+                      ]
+                    }
+                  ],
+                  "labelSelector": {
+                    "matchLabels": {
+                      "ecobe.io/decision-frame": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3"
+                    }
+                  }
+                },
+                "parameters": {
+                  "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+                  "selectedRegion": "us-west-2",
+                  "notBefore": null,
+                  "minReplicaFactor": 1,
+                  "maxReplicaFactor": 1,
+                  "blocked": false
+                }
+              }
+            }
+          }
+        },
+        "enforcementBundle": {
+          "kubernetes": {
+            "admission": {
+              "allow": true,
+              "reason": "ALLOW"
+            },
+            "labels": {
+              "ecobe.io/decision-frame": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+              "ecobe.io/region": "us-west-2",
+              "ecobe.io/policy-profile": "default",
+              "ecobe.io/decision": "run_now",
+              "ecobe.io/water-authority": "basin",
+              "ecobe.io/water-scenario": "current"
+            },
+            "annotations": {
+              "ecobe.io/reason-code": "ALLOW",
+              "ecobe.io/generated-at": "2026-03-31T00:23:05.273Z",
+              "ecobe.io/enforcement": "deterministic",
+              "ecobe.io/decision-mode": "runtime_authorization",
+              "ecobe.io/proof-hash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a"
+            },
+            "nodeSelector": {
+              "topology.kubernetes.io/region": "us-west-2",
+              "ecobe.io/region": "us-west-2"
+            },
+            "nodeAffinity": {
+              "requiredRegion": "us-west-2",
+              "preferredRegions": [
+                "us-west-2"
+              ]
+            },
+            "tolerations": [
+              {
+                "key": "ecobe.io/policy-profile",
+                "operator": "Equal",
+                "value": "default",
+                "effect": "NoSchedule"
+              }
+            ],
+            "scaling": {
+              "mode": "normal",
+              "targetReplicaFactor": 1,
+              "maxReplicaFactor": 1
+            },
+            "execution": {
+              "mode": "immediate",
+              "notBefore": null
+            },
+            "gatekeeper": {
+              "constraintTemplateName": "ecobedecisionguard",
+              "constraintName": "ecobe-3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+              "requiredLabels": [
+                "ecobe.io/decision-frame",
+                "ecobe.io/region",
+                "ecobe.io/decision"
+              ],
+              "parameters": {
+                "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+                "selectedRegion": "us-west-2",
+                "notBefore": null,
+                "minReplicaFactor": 1,
+                "maxReplicaFactor": 1,
+                "blocked": false
+              },
+              "template": {
+                "apiVersion": "templates.gatekeeper.sh/v1beta1",
+                "kind": "ConstraintTemplate",
+                "metadata": {
+                  "name": "ecobedecisionguard"
+                },
+                "spec": {
+                  "crd": {
+                    "spec": {
+                      "names": {
+                        "kind": "EcobeDecisionGuard"
+                      }
+                    }
+                  },
+                  "targets": [
+                    {
+                      "target": "admission.k8s.gatekeeper.sh",
+                      "rego": "\npackage ecobedecisionguard\n\nviolation[{\"msg\": msg}] {\n  required := {\"ecobe.io/decision-frame\", \"ecobe.io/region\", \"ecobe.io/decision\"}\n  provided := {key | input.review.object.metadata.labels[key]}\n  missing := required - provided\n  count(missing) > 0\n  msg := sprintf(\"missing ecobe labels: %v\", [missing])\n}\n\nviolation[{\"msg\": msg}] {\n  expected := input.parameters.selectedRegion\n  actual := input.review.object.metadata.labels[\"ecobe.io/region\"]\n  expected != actual\n  msg := sprintf(\"region %v violates ecobe authorization region %v\", [actual, expected])\n}\n\nviolation[{\"msg\": msg}] {\n  input.parameters.blocked\n  msg := \"workload is blocked by ecobe authorization\"\n}\n"
+                    }
+                  ]
+                }
+              },
+              "constraint": {
+                "apiVersion": "constraints.gatekeeper.sh/v1beta1",
+                "kind": "EcobeDecisionGuard",
+                "metadata": {
+                  "name": "ecobe-3a3ade46-6861-4be7-87a3-1d9b15ae3ce3"
+                },
+                "spec": {
+                  "match": {
+                    "kinds": [
+                      {
+                        "apiGroups": [
+                          ""
+                        ],
+                        "kinds": [
+                          "Pod"
+                        ]
+                      }
+                    ],
+                    "labelSelector": {
+                      "matchLabels": {
+                        "ecobe.io/decision-frame": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3"
+                      }
+                    }
+                  },
+                  "parameters": {
+                    "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+                    "selectedRegion": "us-west-2",
+                    "notBefore": null,
+                    "minReplicaFactor": 1,
+                    "maxReplicaFactor": 1,
+                    "blocked": false
+                  }
+                }
+              }
+            }
+          },
+          "githubActions": {
+            "executable": true,
+            "decision": "run_now",
+            "concurrency": {
+              "group": "ecobe-3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+              "cancelInProgress": false
+            },
+            "maxParallel": 1,
+            "environment": "ecobe-authorized",
+            "notBefore": null,
+            "matrixAllowedRegions": [
+              "us-west-2",
+              "us-east-1",
+              "eu-west-1"
+            ]
+          }
+        },
+        "workflowOutputs": {
+          "decision": "run_now",
+          "reasonCode": "ALLOW",
+          "selectedRegion": "us-west-2",
+          "selectedRunner": "ubuntu-latest",
+          "carbonIntensity": 29,
+          "carbonBaseline": 29,
+          "carbonReductionPct": 0,
+          "waterSelectedLiters": 2.25,
+          "waterBaselineLiters": 2.25,
+          "waterImpactDeltaLiters": 0,
+          "waterStressIndex": 2.1,
+          "waterScarcityImpact": 2.925,
+          "signalConfidence": 0.875,
+          "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+          "waterPolicyVersion": "water_policy_v1",
+          "signalMode": "marginal",
+          "accountingMethod": "marginal",
+          "proofHash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+          "decisionMode": "runtime_authorization",
+          "waterAuthorityMode": "basin",
+          "waterScenario": "current",
+          "githubActionsExecutable": true,
+          "githubActionsMaxParallel": 1,
+          "githubActionsEnvironment": "ecobe-authorized",
+          "githubActionsNotBefore": null,
+          "kubernetesRegion": "us-west-2",
+          "kubernetesDecision": "normal",
+          "kubernetesNotBefore": null,
+          "kubernetesReplicaFactor": 1,
+          "selectedRegionReliabilityMultiplier": 1.1028
+        },
+        "candidateEvaluations": [
+          {
+            "region": "us-west-2",
+            "score": 83.310664,
+            "carbonIntensity": 29,
+            "waterImpactLiters": 2.25,
+            "scarcityImpact": 2.925,
+            "reliabilityMultiplier": 1.1028,
+            "supplierSet": [
+              "aqueduct",
+              "aware",
+              "nrel"
+            ],
+            "evidenceRefs": [
+              "water-bundle:2026-03-30T20:33:52.420Z:us-west-2"
+            ],
+            "authorityMode": "basin",
+            "guardrailCandidateBlocked": false,
+            "guardrailReasons": [],
+            "defensiblePenalty": 0,
+            "defensibleReasonCodes": []
+          },
+          {
+            "region": "us-east-1",
+            "score": 231.84438,
+            "carbonIntensity": 77,
+            "waterImpactLiters": 3.25,
+            "scarcityImpact": 6.175,
+            "reliabilityMultiplier": 0.8675,
+            "supplierSet": [
+              "aqueduct",
+              "aware",
+              "nrel"
+            ],
+            "evidenceRefs": [
+              "water-bundle:2026-03-30T20:33:52.420Z:us-east-1"
+            ],
+            "authorityMode": "basin",
+            "guardrailCandidateBlocked": false,
+            "guardrailReasons": [
+              "WATER_HIGH_STRESS"
+            ],
+            "defensiblePenalty": 0,
+            "defensibleReasonCodes": []
+          },
+          {
+            "region": "eu-west-1",
+            "score": 456.979167,
+            "carbonIntensity": 400,
+            "waterImpactLiters": 1.5,
+            "scarcityImpact": 1.35,
+            "reliabilityMultiplier": 0.8,
+            "supplierSet": [
+              "aqueduct",
+              "aware",
+              "nrel"
+            ],
+            "evidenceRefs": [
+              "water-bundle:2026-03-30T20:33:52.420Z:eu-west-1"
+            ],
+            "authorityMode": "basin",
+            "guardrailCandidateBlocked": false,
+            "guardrailReasons": [],
+            "defensiblePenalty": 120,
+            "defensibleReasonCodes": [
+              "CARBON_FALLBACK_USED",
+              "CARBON_LOW_CONFIDENCE"
+            ]
+          }
+        ],
+        "proofRecord": {
+          "job_id": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+          "baseline_region": "us-west-2",
+          "selected_region": "us-west-2",
+          "carbon_delta": 0,
+          "water_delta": 0,
+          "signals_used": [
+            "REDIS_CACHE_WATTTIME_MOER",
+            "aqueduct_4_0",
+            "aware_2_0",
+            "nrel_water_factors_v1"
+          ],
+          "timestamp": "2026-03-31T00:23:05.273Z",
+          "dataset_versions": {
+            "nrel": "nrel_water_factors_v1",
+            "aware": "aware_2_0",
+            "aqueduct": "aqueduct_4_0"
+          },
+          "confidence_score": 0.875,
+          "proof_hash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+          "provider_snapshot_refs": [
+            "us-west-2:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z",
+            "us-east-1:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z",
+            "eu-west-1:DEGRADED_SAFE_EMBER_STRUCTURAL_BASELINE:2026-03-31T00:21:53.673Z"
+          ],
+          "mss_snapshot_id": "33338a36b2a32b1859e2474ce3509f0fcd00b6ca39c802e5361b66620aaa5bf7",
+          "water_bundle_hash": "90c984f6d095aecf247b64057b7c0ca71d87e48312fb3647947a092718bea691",
+          "water_manifest_hash": "e5bbb12124a7f600287e4b654a904d03139b4a07831eb5e1606bc5036d7843e6",
+          "supplier_refs": [
+            "aqueduct",
+            "aware",
+            "nrel"
+          ],
+          "facility_telemetry_refs": [],
+          "water_scenario": "current",
+          "external_policy_refs": [
+            "seked.internal.v1"
+          ],
+          "water_evidence_refs": [
+            "water-bundle:2026-03-30T20:33:52.420Z:us-west-2"
+          ],
+          "transport": "sync_http",
+          "adapter_id": "ecobe.http.decision.v1",
+          "adapter_version": "1.0.0",
+          "enforcement_result": "applied",
+          "observed_runtime_target": null
+        },
+        "telemetryBridge": {
+          "spanName": "ecobe.decision.authorize",
+          "serviceName": "ecobe-engine",
+          "traceId": "05742568621641c191db9ee6c0817a1e",
+          "spanId": "913eb8f0b6434596",
+          "durationMs": 0,
+          "attributes": {
+            "ecobe.decision_frame_id": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+            "ecobe.action": "run_now",
+            "ecobe.reason_code": "ALLOW",
+            "ecobe.operating_mode": "NORMAL",
+            "ecobe.proof_hash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+            "ecobe.fallback_used": false,
+            "ecobe.runtime": "http",
+            "ecobe.region_selected": "us-west-2",
+            "ecobe.adapter_id": "ecobe.http.decision.v1",
+            "ecobe.transport": "sync_http"
+          },
+          "export": {
+            "enabled": false,
+            "exported": false,
+            "endpoint": null
+          }
+        },
+        "adapterContext": {
+          "runtime": "http",
+          "transport": "sync_http",
+          "controlPoint": "gateway_preflight",
+          "adapterId": "ecobe.http.decision.v1",
+          "adapterVersion": "1.0.0",
+          "enforcementResult": "applied"
+        }
+      },
+      "persisted": {
+        "mss": {
+          "snapshotId": "33338a36b2a32b1859e2474ce3509f0fcd00b6ca39c802e5361b66620aaa5bf7",
+          "cacheStatus": "redis",
+          "disagreement": {
+            "pct": 0,
+            "flag": false
+          },
+          "waterLineage": [
+            "water-bundle:2026-03-30T20:33:52.420Z:us-west-2"
+          ],
+          "carbonLineage": [
+            "REDIS_CACHE_WATTTIME_MOER",
+            "us-west-2:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z"
+          ],
+          "carbonProvider": "REDIS_CACHE_WATTTIME_MOER",
+          "waterFreshnessSec": 13697,
+          "carbonFreshnessSec": 69,
+          "carbonProviderHealth": "HEALTHY",
+          "lastKnownGoodApplied": true,
+          "waterAuthorityHealth": "HEALTHY"
+        },
+        "water": {
+          "source": [
+            "aqueduct_4_0",
+            "aware_2_0",
+            "nrel_water_factors_v1"
+          ],
+          "confidence": 0.85,
+          "stressIndex": 2.1,
+          "fallbackUsed": false,
+          "qualityIndex": 2,
+          "baselineLiters": 2.25,
+          "datasetVersion": {
+            "nrel": "nrel_water_factors_v1",
+            "aware": "aware_2_0",
+            "aqueduct": "aqueduct_4_0"
+          },
+          "selectedLiters": 2.25,
+          "droughtRiskIndex": 2.2,
+          "intensityLPerKwh": 0.9,
+          "guardrailTriggered": false,
+          "baselineScarcityImpact": 2.925,
+          "selectedScarcityImpact": 2.925
+        },
+        "savings": {
+          "carbonReductionPct": 0,
+          "waterImpactDeltaLiters": 0
+        },
+        "baseline": {
+          "region": "us-west-2",
+          "carbonIntensity": 29,
+          "waterImpactLiters": 2.25,
+          "waterScarcityImpact": 2.925
+        },
+        "decision": "run_now",
+        "selected": {
+          "region": "us-west-2",
+          "carbonIntensity": 29,
+          "waterImpactLiters": 2.25,
+          "waterScarcityImpact": 2.925
+        },
+        "assurance": {
+          "issues": [],
+          "status": "assurance_ready",
+          "assuranceReady": true,
+          "operationallyUsable": true
+        },
+        "latencyMs": {
+          "total": 59,
+          "compute": 44,
+          "cacheStatus": "redis",
+          "influencedDecision": true,
+          "providerResolution": 14
+        },
+        "notBefore": null,
+        "proofHash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+        "reasonCode": "ALLOW",
+        "signalMode": "marginal",
+        "policyTrace": {
+          "profile": "default",
+          "scenario": "current",
+          "facilityId": null,
+          "strictMode": false,
+          "thresholds": {
+            "stressDeny": 4.7,
+            "stressDelay": 4,
+            "scarcityDeny": 10,
+            "scarcityDelay": 6
+          },
+          "policyPacks": [
+            "water.default.water_policy_v1",
+            "seked.pre_action.v1",
+            "external.pre_action.v1"
+          ],
+          "reasonCodes": [
+            "SEKED_POLICY_ADAPTER_APPLIED",
+            "SEKED_POLICY_ZONE_GREEN",
+            "EXTERNAL_POLICY_HOOK_DISABLED_OR_UNCONFIGURED",
+            "OPERATING_MODE_NORMAL"
+          ],
+          "sekedPolicy": {
+            "strict": false,
+            "applied": true,
+            "enabled": true,
+            "evaluated": true,
+            "hookStatus": "success",
+            "reasonCodes": [
+              "SEKED_POLICY_ADAPTER_APPLIED",
+              "SEKED_POLICY_ZONE_GREEN"
+            ],
+            "policyReference": "seked.internal.v1"
+          },
+          "capabilityId": "ci.route.authorization",
+          "fallbackUsed": false,
+          "operatingMode": "NORMAL",
+          "policyVersion": "water_policy_v1",
+          "baselineRegion": "us-west-2",
+          "externalPolicy": {
+            "strict": false,
+            "applied": false,
+            "enabled": false,
+            "evaluated": false,
+            "hookStatus": "not_configured",
+            "reasonCodes": [
+              "EXTERNAL_POLICY_HOOK_DISABLED_OR_UNCONFIGURED"
+            ],
+            "policyReference": null
+          },
+          "selectedRegion": "us-west-2",
+          "authorizationMode": "pre_action",
+          "conflictHierarchy": [
+            "policy_hard_override",
+            "water_guardrail",
+            "latency_sla_protection",
+            "carbon_optimization_within_allowed_envelope",
+            "cost_tie_breaker"
+          ],
+          "guardrailTriggered": false,
+          "reroutedFromRegion": null,
+          "precedenceProtected": false,
+          "scenarioPlanningActive": false,
+          "precedenceOverrideApplied": false
+        },
+        "proofRecord": {
+          "job_id": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+          "timestamp": "2026-03-31T00:22:09.014Z",
+          "transport": "sync_http",
+          "adapter_id": "ecobe.http.decision.v1",
+          "proof_hash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+          "water_delta": 0,
+          "carbon_delta": 0,
+          "signals_used": [
+            "REDIS_CACHE_WATTTIME_MOER",
+            "aqueduct_4_0",
+            "aware_2_0",
+            "nrel_water_factors_v1"
+          ],
+          "supplier_refs": [
+            "aqueduct",
+            "aware",
+            "nrel"
+          ],
+          "water_scenario": "current",
+          "adapter_version": "1.0.0",
+          "baseline_region": "us-west-2",
+          "mss_snapshot_id": "33338a36b2a32b1859e2474ce3509f0fcd00b6ca39c802e5361b66620aaa5bf7",
+          "selected_region": "us-west-2",
+          "confidence_score": 0.875,
+          "dataset_versions": {
+            "nrel": "nrel_water_factors_v1",
+            "aware": "aware_2_0",
+            "aqueduct": "aqueduct_4_0"
+          },
+          "water_bundle_hash": "90c984f6d095aecf247b64057b7c0ca71d87e48312fb3647947a092718bea691",
+          "enforcement_result": "applied",
+          "water_evidence_refs": [
+            "water-bundle:2026-03-30T20:33:52.420Z:us-west-2"
+          ],
+          "water_manifest_hash": "e5bbb12124a7f600287e4b654a904d03139b4a07831eb5e1606bc5036d7843e6",
+          "external_policy_refs": [
+            "seked.internal.v1"
+          ],
+          "provider_snapshot_refs": [
+            "us-west-2:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z",
+            "us-east-1:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z",
+            "eu-west-1:DEGRADED_SAFE_EMBER_STRUCTURAL_BASELINE:2026-03-31T00:21:53.673Z"
+          ],
+          "facility_telemetry_refs": [],
+          "observed_runtime_target": null
+        },
+        "decisionMode": "runtime_authorization",
+        "fallbackUsed": false,
+        "operatingMode": "NORMAL",
+        "proofEnvelope": {
+          "adapter": {
+            "adapterId": "ecobe.http.decision.v1",
+            "transport": "sync_http",
+            "adapterVersion": "1.0.0",
+            "enforcementResult": "applied",
+            "observedRuntimeTarget": null
+          },
+          "posture": "assurance_ready",
+          "baseline": {
+            "region": "us-west-2",
+            "carbonIntensity": 29,
+            "waterImpactLiters": 2.25,
+            "waterScarcityImpact": 2.925
+          },
+          "selected": {
+            "region": "us-west-2",
+            "carbonIntensity": 29,
+            "waterImpactLiters": 2.25,
+            "waterScarcityImpact": 2.925
+          },
+          "proofHash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+          "mssSnapshotId": "33338a36b2a32b1859e2474ce3509f0fcd00b6ca39c802e5361b66620aaa5bf7",
+          "signalLineage": {
+            "fallbackUsed": false,
+            "carbonProvider": "REDIS_CACHE_WATTTIME_MOER",
+            "datasetVersions": {
+              "nrel": "nrel_water_factors_v1",
+              "aware": "aware_2_0",
+              "aqueduct": "aqueduct_4_0"
+            },
+            "disagreementPct": 0,
+            "waterAuthorityMode": "basin",
+            "providerSnapshotRefs": [
+              "us-west-2:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z",
+              "us-east-1:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z",
+              "eu-west-1:DEGRADED_SAFE_EMBER_STRUCTURAL_BASELINE:2026-03-31T00:21:53.673Z"
+            ]
+          }
+        },
+        "adapterContext": {
+          "runtime": "http",
+          "adapterId": "ecobe.http.decision.v1",
+          "transport": "sync_http",
+          "controlPoint": "gateway_preflight",
+          "adapterVersion": "1.0.0",
+          "enforcementResult": "applied"
+        },
+        "recommendation": "Decision run_now under default profile",
+        "selectedRegion": "us-west-2",
+        "selectedRunner": "ubuntu-latest",
+        "waterAuthority": {
+          "scenario": "current",
+          "bundleHash": "90c984f6d095aecf247b64057b7c0ca71d87e48312fb3647947a092718bea691",
+          "confidence": 0.85,
+          "facilityId": null,
+          "supplierSet": [
+            "aqueduct",
+            "aware",
+            "nrel"
+          ],
+          "evidenceRefs": [
+            "water-bundle:2026-03-30T20:33:52.420Z:us-west-2"
+          ],
+          "manifestHash": "e5bbb12124a7f600287e4b654a904d03139b4a07831eb5e1606bc5036d7843e6",
+          "telemetryRef": null,
+          "authorityMode": "basin"
+        },
+        "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+        "doctrineVersion": "co2_router_doctrine_v1",
+        "telemetryBridge": {
+          "export": {
+            "enabled": false,
+            "endpoint": null,
+            "exported": false
+          },
+          "spanId": "976fc3ca99f2475d",
+          "traceId": "8befd71600f34b2b991437f012407739",
+          "spanName": "ecobe.decision.authorize",
+          "attributes": {
+            "ecobe.action": "run_now",
+            "ecobe.runtime": "http",
+            "ecobe.transport": "sync_http",
+            "ecobe.adapter_id": "ecobe.http.decision.v1",
+            "ecobe.proof_hash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+            "ecobe.reason_code": "ALLOW",
+            "ecobe.fallback_used": false,
+            "ecobe.operating_mode": "NORMAL",
+            "ecobe.region_selected": "us-west-2",
+            "ecobe.decision_frame_id": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3"
+          },
+          "durationMs": 59,
+          "serviceName": "ecobe-engine"
+        },
+        "workflowOutputs": {
+          "decision": "run_now",
+          "proofHash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+          "reasonCode": "ALLOW",
+          "signalMode": "marginal",
+          "decisionMode": "runtime_authorization",
+          "waterScenario": "current",
+          "carbonBaseline": 29,
+          "selectedRegion": "us-west-2",
+          "selectedRunner": "ubuntu-latest",
+          "carbonIntensity": 29,
+          "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+          "accountingMethod": "marginal",
+          "kubernetesRegion": "us-west-2",
+          "signalConfidence": 0.875,
+          "waterStressIndex": 2.1,
+          "carbonReductionPct": 0,
+          "kubernetesDecision": "normal",
+          "waterAuthorityMode": "basin",
+          "waterPolicyVersion": "water_policy_v1",
+          "kubernetesNotBefore": null,
+          "waterBaselineLiters": 2.25,
+          "waterScarcityImpact": 2.925,
+          "waterSelectedLiters": 2.25,
+          "githubActionsNotBefore": null,
+          "waterImpactDeltaLiters": 0,
+          "githubActionsExecutable": true,
+          "kubernetesReplicaFactor": 1,
+          "githubActionsEnvironment": "ecobe-authorized",
+          "githubActionsMaxParallel": 1,
+          "selectedRegionReliabilityMultiplier": 1.1028
+        },
+        "accountingMethod": "marginal",
+        "decisionEnvelope": {
+          "action": "run_now",
+          "timing": {
+            "expiresAt": "2026-03-31T00:26:53.673Z",
+            "notBefore": null
+          },
+          "doctrine": {
+            "version": "co2_router_doctrine_v1",
+            "hierarchy": [
+              "policy_hard_override",
+              "water_guardrail",
+              "latency_sla_protection",
+              "carbon_optimization_within_allowed_envelope",
+              "cost_tie_breaker"
+            ],
+            "operatingMode": "NORMAL"
+          },
+          "requestId": "evidence-1774916513673",
+          "transport": {
+            "runtime": "http",
+            "adapterId": "ecobe.http.decision.v1",
+            "transport": "sync_http",
+            "controlPoint": "gateway_preflight",
+            "adapterVersion": "1.0.0",
+            "enforcementResult": "applied"
+          },
+          "confidence": {
+            "mode": "live",
+            "score": 0.875
+          },
+          "reasonCode": "ALLOW",
+          "idempotency": {
+            "key": "evidence-1774916513673-idempotent",
+            "replayed": false
+          },
+          "baselineTarget": {
+            "region": "us-west-2",
+            "runner": null,
+            "runtime": "http"
+          },
+          "selectedTarget": {
+            "region": "us-west-2",
+            "runner": "ubuntu-latest",
+            "runtime": "http",
+            "provider": "generic"
+          },
+          "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3"
+        },
+        "signalConfidence": 0.875,
+        "enforcementBundle": {
+          "kubernetes": {
+            "labels": {
+              "ecobe.io/region": "us-west-2",
+              "ecobe.io/decision": "run_now",
+              "ecobe.io/decision-frame": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+              "ecobe.io/policy-profile": "default",
+              "ecobe.io/water-scenario": "current",
+              "ecobe.io/water-authority": "basin"
+            },
+            "scaling": {
+              "mode": "normal",
+              "maxReplicaFactor": 1,
+              "targetReplicaFactor": 1
+            },
+            "admission": {
+              "allow": true,
+              "reason": "ALLOW"
+            },
+            "execution": {
+              "mode": "immediate",
+              "notBefore": null
+            },
+            "gatekeeper": {
+              "template": {
+                "kind": "ConstraintTemplate",
+                "spec": {
+                  "crd": {
+                    "spec": {
+                      "names": {
+                        "kind": "EcobeDecisionGuard"
+                      }
+                    }
+                  },
+                  "targets": [
+                    {
+                      "rego": "\npackage ecobedecisionguard\n\nviolation[{\"msg\": msg}] {\n  required := {\"ecobe.io/decision-frame\", \"ecobe.io/region\", \"ecobe.io/decision\"}\n  provided := {key | input.review.object.metadata.labels[key]}\n  missing := required - provided\n  count(missing) > 0\n  msg := sprintf(\"missing ecobe labels: %v\", [missing])\n}\n\nviolation[{\"msg\": msg}] {\n  expected := input.parameters.selectedRegion\n  actual := input.review.object.metadata.labels[\"ecobe.io/region\"]\n  expected != actual\n  msg := sprintf(\"region %v violates ecobe authorization region %v\", [actual, expected])\n}\n\nviolation[{\"msg\": msg}] {\n  input.parameters.blocked\n  msg := \"workload is blocked by ecobe authorization\"\n}\n",
+                      "target": "admission.k8s.gatekeeper.sh"
+                    }
+                  ]
+                },
+                "metadata": {
+                  "name": "ecobedecisionguard"
+                },
+                "apiVersion": "templates.gatekeeper.sh/v1beta1"
+              },
+              "constraint": {
+                "kind": "EcobeDecisionGuard",
+                "spec": {
+                  "match": {
+                    "kinds": [
+                      {
+                        "kinds": [
+                          "Pod"
+                        ],
+                        "apiGroups": [
+                          ""
+                        ]
+                      }
+                    ],
+                    "labelSelector": {
+                      "matchLabels": {
+                        "ecobe.io/decision-frame": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3"
+                      }
+                    }
+                  },
+                  "parameters": {
+                    "blocked": false,
+                    "notBefore": null,
+                    "selectedRegion": "us-west-2",
+                    "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+                    "maxReplicaFactor": 1,
+                    "minReplicaFactor": 1
+                  }
+                },
+                "metadata": {
+                  "name": "ecobe-3a3ade46-6861-4be7-87a3-1d9b15ae3ce3"
+                },
+                "apiVersion": "constraints.gatekeeper.sh/v1beta1"
+              },
+              "parameters": {
+                "blocked": false,
+                "notBefore": null,
+                "selectedRegion": "us-west-2",
+                "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+                "maxReplicaFactor": 1,
+                "minReplicaFactor": 1
+              },
+              "constraintName": "ecobe-3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+              "requiredLabels": [
+                "ecobe.io/decision-frame",
+                "ecobe.io/region",
+                "ecobe.io/decision"
+              ],
+              "constraintTemplateName": "ecobedecisionguard"
+            },
+            "annotations": {
+              "ecobe.io/proof-hash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+              "ecobe.io/enforcement": "deterministic",
+              "ecobe.io/reason-code": "ALLOW",
+              "ecobe.io/generated-at": "2026-03-31T00:22:09.014Z",
+              "ecobe.io/decision-mode": "runtime_authorization"
+            },
+            "tolerations": [
+              {
+                "key": "ecobe.io/policy-profile",
+                "value": "default",
+                "effect": "NoSchedule",
+                "operator": "Equal"
+              }
+            ],
+            "nodeAffinity": {
+              "requiredRegion": "us-west-2",
+              "preferredRegions": [
+                "us-west-2"
+              ]
+            },
+            "nodeSelector": {
+              "ecobe.io/region": "us-west-2",
+              "topology.kubernetes.io/region": "us-west-2"
+            }
+          },
+          "githubActions": {
+            "decision": "run_now",
+            "notBefore": null,
+            "executable": true,
+            "concurrency": {
+              "group": "ecobe-3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+              "cancelInProgress": false
+            },
+            "environment": "ecobe-authorized",
+            "maxParallel": 1,
+            "matrixAllowedRegions": [
+              "us-west-2",
+              "us-east-1",
+              "eu-west-1"
+            ]
+          }
+        },
+        "decisionExplanation": {
+          "hierarchy": [
+            "policy_hard_override",
+            "water_guardrail",
+            "latency_sla_protection",
+            "carbon_optimization_within_allowed_envelope",
+            "cost_tie_breaker"
+          ],
+          "whyAction": "Allowed immediately because us-west-2 stayed within policy, water, and SLA constraints under the default doctrine. Reason code: ALLOW.",
+          "whyTarget": "us-west-2 remained the default and selected target because no allowed alternative beat it on deterministic score.",
+          "rejectedAlternatives": [
+            {
+              "reason": "Higher deterministic score (231.844) than selected target us-west-2.",
+              "region": "us-east-1"
+            },
+            {
+              "reason": "Higher deterministic score (456.979) than selected target us-west-2.",
+              "region": "eu-west-1"
+            }
+          ]
+        },
+        "candidateEvaluations": [
+          {
+            "score": 83.310664,
+            "region": "us-west-2",
+            "supplierSet": [
+              "aqueduct",
+              "aware",
+              "nrel"
+            ],
+            "evidenceRefs": [
+              "water-bundle:2026-03-30T20:33:52.420Z:us-west-2"
+            ],
+            "authorityMode": "basin",
+            "scarcityImpact": 2.925,
+            "carbonIntensity": 29,
+            "guardrailReasons": [],
+            "defensiblePenalty": 0,
+            "waterImpactLiters": 2.25,
+            "defensibleReasonCodes": [],
+            "reliabilityMultiplier": 1.1028,
+            "guardrailCandidateBlocked": false
+          },
+          {
+            "score": 231.84438,
+            "region": "us-east-1",
+            "supplierSet": [
+              "aqueduct",
+              "aware",
+              "nrel"
+            ],
+            "evidenceRefs": [
+              "water-bundle:2026-03-30T20:33:52.420Z:us-east-1"
+            ],
+            "authorityMode": "basin",
+            "scarcityImpact": 6.175,
+            "carbonIntensity": 77,
+            "guardrailReasons": [
+              "WATER_HIGH_STRESS"
+            ],
+            "defensiblePenalty": 0,
+            "waterImpactLiters": 3.25,
+            "defensibleReasonCodes": [],
+            "reliabilityMultiplier": 0.8675,
+            "guardrailCandidateBlocked": false
+          },
+          {
+            "score": 456.979167,
+            "region": "eu-west-1",
+            "supplierSet": [
+              "aqueduct",
+              "aware",
+              "nrel"
+            ],
+            "evidenceRefs": [
+              "water-bundle:2026-03-30T20:33:52.420Z:eu-west-1"
+            ],
+            "authorityMode": "basin",
+            "scarcityImpact": 1.35,
+            "carbonIntensity": 400,
+            "guardrailReasons": [],
+            "defensiblePenalty": 120,
+            "waterImpactLiters": 1.5,
+            "defensibleReasonCodes": [
+              "CARBON_FALLBACK_USED",
+              "CARBON_LOW_CONFIDENCE"
+            ],
+            "reliabilityMultiplier": 0.8,
+            "guardrailCandidateBlocked": false
+          }
+        ],
+        "kubernetesEnforcement": {
+          "labels": {
+            "ecobe.io/region": "us-west-2",
+            "ecobe.io/decision": "run_now",
+            "ecobe.io/decision-frame": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+            "ecobe.io/policy-profile": "default",
+            "ecobe.io/water-scenario": "current",
+            "ecobe.io/water-authority": "basin"
+          },
+          "scaling": {
+            "mode": "normal",
+            "maxReplicaFactor": 1,
+            "targetReplicaFactor": 1
+          },
+          "admission": {
+            "allow": true,
+            "reason": "ALLOW"
+          },
+          "execution": {
+            "mode": "immediate",
+            "notBefore": null
+          },
+          "gatekeeper": {
+            "template": {
+              "kind": "ConstraintTemplate",
+              "spec": {
+                "crd": {
+                  "spec": {
+                    "names": {
+                      "kind": "EcobeDecisionGuard"
+                    }
+                  }
+                },
+                "targets": [
+                  {
+                    "rego": "\npackage ecobedecisionguard\n\nviolation[{\"msg\": msg}] {\n  required := {\"ecobe.io/decision-frame\", \"ecobe.io/region\", \"ecobe.io/decision\"}\n  provided := {key | input.review.object.metadata.labels[key]}\n  missing := required - provided\n  count(missing) > 0\n  msg := sprintf(\"missing ecobe labels: %v\", [missing])\n}\n\nviolation[{\"msg\": msg}] {\n  expected := input.parameters.selectedRegion\n  actual := input.review.object.metadata.labels[\"ecobe.io/region\"]\n  expected != actual\n  msg := sprintf(\"region %v violates ecobe authorization region %v\", [actual, expected])\n}\n\nviolation[{\"msg\": msg}] {\n  input.parameters.blocked\n  msg := \"workload is blocked by ecobe authorization\"\n}\n",
+                    "target": "admission.k8s.gatekeeper.sh"
+                  }
+                ]
+              },
+              "metadata": {
+                "name": "ecobedecisionguard"
+              },
+              "apiVersion": "templates.gatekeeper.sh/v1beta1"
+            },
+            "constraint": {
+              "kind": "EcobeDecisionGuard",
+              "spec": {
+                "match": {
+                  "kinds": [
+                    {
+                      "kinds": [
+                        "Pod"
+                      ],
+                      "apiGroups": [
+                        ""
+                      ]
+                    }
+                  ],
+                  "labelSelector": {
+                    "matchLabels": {
+                      "ecobe.io/decision-frame": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3"
+                    }
+                  }
+                },
+                "parameters": {
+                  "blocked": false,
+                  "notBefore": null,
+                  "selectedRegion": "us-west-2",
+                  "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+                  "maxReplicaFactor": 1,
+                  "minReplicaFactor": 1
+                }
+              },
+              "metadata": {
+                "name": "ecobe-3a3ade46-6861-4be7-87a3-1d9b15ae3ce3"
+              },
+              "apiVersion": "constraints.gatekeeper.sh/v1beta1"
+            },
+            "parameters": {
+              "blocked": false,
+              "notBefore": null,
+              "selectedRegion": "us-west-2",
+              "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+              "maxReplicaFactor": 1,
+              "minReplicaFactor": 1
+            },
+            "constraintName": "ecobe-3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+            "requiredLabels": [
+              "ecobe.io/decision-frame",
+              "ecobe.io/region",
+              "ecobe.io/decision"
+            ],
+            "constraintTemplateName": "ecobedecisionguard"
+          },
+          "annotations": {
+            "ecobe.io/proof-hash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+            "ecobe.io/enforcement": "deterministic",
+            "ecobe.io/reason-code": "ALLOW",
+            "ecobe.io/generated-at": "2026-03-31T00:22:09.014Z",
+            "ecobe.io/decision-mode": "runtime_authorization"
+          },
+          "tolerations": [
+            {
+              "key": "ecobe.io/policy-profile",
+              "value": "default",
+              "effect": "NoSchedule",
+              "operator": "Equal"
+            }
+          ],
+          "nodeAffinity": {
+            "requiredRegion": "us-west-2",
+            "preferredRegions": [
+              "us-west-2"
+            ]
+          },
+          "nodeSelector": {
+            "ecobe.io/region": "us-west-2",
+            "topology.kubernetes.io/region": "us-west-2"
+          }
+        }
+      },
+      "replay": {
+        "decision": "run_now",
+        "decisionMode": "runtime_authorization",
+        "doctrineVersion": "co2_router_doctrine_v1",
+        "operatingMode": "NORMAL",
+        "reasonCode": "ALLOW",
+        "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+        "selectedRunner": "ubuntu-latest",
+        "selectedRegion": "us-west-2",
+        "recommendation": "Decision run_now under default profile",
+        "signalConfidence": 0.875,
+        "fallbackUsed": false,
+        "signalMode": "marginal",
+        "accountingMethod": "marginal",
+        "decisionEnvelope": {
+          "requestId": "evidence-1774916513673",
+          "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+          "action": "run_now",
+          "reasonCode": "ALLOW",
+          "selectedTarget": {
+            "region": "us-west-2",
+            "runtime": "http",
+            "runner": "ubuntu-latest",
+            "provider": "generic"
+          },
+          "baselineTarget": {
+            "region": "us-west-2",
+            "runtime": "http",
+            "runner": null
+          },
+          "timing": {
+            "notBefore": null,
+            "expiresAt": "2026-03-31T00:26:53.673Z"
+          },
+          "confidence": {
+            "score": 0.875,
+            "mode": "live"
+          },
+          "doctrine": {
+            "version": "co2_router_doctrine_v1",
+            "operatingMode": "NORMAL",
+            "hierarchy": [
+              "policy_hard_override",
+              "water_guardrail",
+              "latency_sla_protection",
+              "carbon_optimization_within_allowed_envelope",
+              "cost_tie_breaker"
+            ]
+          },
+          "transport": {
+            "runtime": "http",
+            "transport": "sync_http",
+            "controlPoint": "gateway_preflight",
+            "adapterId": "ecobe.http.decision.v1",
+            "adapterVersion": "1.0.0",
+            "enforcementResult": "applied"
+          },
+          "idempotency": {
+            "key": "evidence-1774916513673-idempotent",
+            "replayed": false
+          }
+        },
+        "proofEnvelope": {
+          "posture": "assurance_ready",
+          "proofHash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+          "mssSnapshotId": "33338a36b2a32b1859e2474ce3509f0fcd00b6ca39c802e5361b66620aaa5bf7",
+          "baseline": {
+            "region": "us-west-2",
+            "carbonIntensity": 29,
+            "waterImpactLiters": 2.25,
+            "waterScarcityImpact": 2.925
+          },
+          "selected": {
+            "region": "us-west-2",
+            "carbonIntensity": 29,
+            "waterImpactLiters": 2.25,
+            "waterScarcityImpact": 2.925
+          },
+          "signalLineage": {
+            "carbonProvider": "REDIS_CACHE_WATTTIME_MOER",
+            "waterAuthorityMode": "basin",
+            "fallbackUsed": false,
+            "disagreementPct": 0,
+            "datasetVersions": {
+              "nrel": "nrel_water_factors_v1",
+              "aware": "aware_2_0",
+              "aqueduct": "aqueduct_4_0"
+            },
+            "providerSnapshotRefs": [
+              "us-west-2:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z",
+              "us-east-1:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z",
+              "eu-west-1:DEGRADED_SAFE_EMBER_STRUCTURAL_BASELINE:2026-03-31T00:21:53.673Z"
+            ]
+          },
+          "adapter": {
+            "transport": "sync_http",
+            "adapterId": "ecobe.http.decision.v1",
+            "adapterVersion": "1.0.0",
+            "enforcementResult": "applied",
+            "observedRuntimeTarget": null
+          }
+        },
+        "notBefore": null,
+        "proofHash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+        "waterAuthority": {
+          "authorityMode": "basin",
+          "scenario": "current",
+          "confidence": 0.85,
+          "supplierSet": [
+            "aqueduct",
+            "aware",
+            "nrel"
+          ],
+          "evidenceRefs": [
+            "water-bundle:2026-03-30T20:33:52.420Z:us-west-2"
+          ],
+          "facilityId": null,
+          "telemetryRef": null,
+          "bundleHash": "90c984f6d095aecf247b64057b7c0ca71d87e48312fb3647947a092718bea691",
+          "manifestHash": "e5bbb12124a7f600287e4b654a904d03139b4a07831eb5e1606bc5036d7843e6"
+        },
+        "assurance": {
+          "operationallyUsable": true,
+          "assuranceReady": true,
+          "status": "assurance_ready",
+          "issues": []
+        },
+        "mss": {
+          "snapshotId": "33338a36b2a32b1859e2474ce3509f0fcd00b6ca39c802e5361b66620aaa5bf7",
+          "carbonProvider": "REDIS_CACHE_WATTTIME_MOER",
+          "carbonProviderHealth": "HEALTHY",
+          "waterAuthorityHealth": "HEALTHY",
+          "carbonFreshnessSec": 69,
+          "waterFreshnessSec": 13697,
+          "cacheStatus": "redis",
+          "disagreement": {
+            "flag": false,
+            "pct": 0
+          },
+          "lastKnownGoodApplied": true,
+          "carbonLineage": [
+            "REDIS_CACHE_WATTTIME_MOER",
+            "us-west-2:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z"
+          ],
+          "waterLineage": [
+            "water-bundle:2026-03-30T20:33:52.420Z:us-west-2"
+          ]
+        },
+        "decisionExplanation": {
+          "hierarchy": [
+            "policy_hard_override",
+            "water_guardrail",
+            "latency_sla_protection",
+            "carbon_optimization_within_allowed_envelope",
+            "cost_tie_breaker"
+          ],
+          "whyAction": "Allowed immediately because us-west-2 stayed within policy, water, and SLA constraints under the default doctrine. Reason code: ALLOW.",
+          "whyTarget": "us-west-2 remained the default and selected target because no allowed alternative beat it on deterministic score.",
+          "rejectedAlternatives": [
+            {
+              "region": "us-east-1",
+              "reason": "Higher deterministic score (231.844) than selected target us-west-2."
+            },
+            {
+              "region": "eu-west-1",
+              "reason": "Higher deterministic score (456.979) than selected target us-west-2."
+            }
+          ]
+        },
+        "policyTrace": {
+          "capabilityId": "ci.route.authorization",
+          "authorizationMode": "pre_action",
+          "policyPacks": [
+            "water.default.water_policy_v1",
+            "seked.pre_action.v1",
+            "external.pre_action.v1"
+          ],
+          "scenarioPlanningActive": false,
+          "policyVersion": "water_policy_v1",
+          "profile": "default",
+          "thresholds": {
+            "stressDeny": 4.7,
+            "stressDelay": 4,
+            "scarcityDeny": 10,
+            "scarcityDelay": 6
+          },
+          "guardrailTriggered": false,
+          "fallbackUsed": false,
+          "strictMode": false,
+          "reasonCodes": [
+            "SEKED_POLICY_ADAPTER_APPLIED",
+            "SEKED_POLICY_ZONE_GREEN",
+            "EXTERNAL_POLICY_HOOK_DISABLED_OR_UNCONFIGURED",
+            "OPERATING_MODE_NORMAL"
+          ],
+          "reroutedFromRegion": null,
+          "selectedRegion": "us-west-2",
+          "baselineRegion": "us-west-2",
+          "precedenceProtected": false,
+          "precedenceOverrideApplied": false,
+          "scenario": "current",
+          "facilityId": null,
+          "conflictHierarchy": [
+            "policy_hard_override",
+            "water_guardrail",
+            "latency_sla_protection",
+            "carbon_optimization_within_allowed_envelope",
+            "cost_tie_breaker"
+          ],
+          "operatingMode": "NORMAL",
+          "externalPolicy": {
+            "enabled": false,
+            "strict": false,
+            "evaluated": false,
+            "applied": false,
+            "hookStatus": "not_configured",
+            "reasonCodes": [
+              "EXTERNAL_POLICY_HOOK_DISABLED_OR_UNCONFIGURED"
+            ],
+            "policyReference": null
+          },
+          "sekedPolicy": {
+            "enabled": true,
+            "strict": false,
+            "evaluated": true,
+            "applied": true,
+            "hookStatus": "success",
+            "reasonCodes": [
+              "SEKED_POLICY_ADAPTER_APPLIED",
+              "SEKED_POLICY_ZONE_GREEN"
+            ],
+            "policyReference": "seked.internal.v1"
+          }
+        },
+        "baseline": {
+          "region": "us-west-2",
+          "carbonIntensity": 29,
+          "waterImpactLiters": 2.25,
+          "waterScarcityImpact": 2.925
+        },
+        "selected": {
+          "region": "us-west-2",
+          "carbonIntensity": 29,
+          "waterImpactLiters": 2.25,
+          "waterScarcityImpact": 2.925
+        },
+        "savings": {
+          "carbonReductionPct": 0,
+          "waterImpactDeltaLiters": 0
+        },
+        "water": {
+          "selectedLiters": 2.25,
+          "baselineLiters": 2.25,
+          "selectedScarcityImpact": 2.925,
+          "baselineScarcityImpact": 2.925,
+          "intensityLPerKwh": 0.9,
+          "stressIndex": 2.1,
+          "qualityIndex": 2,
+          "droughtRiskIndex": 2.2,
+          "confidence": 0.85,
+          "source": [
+            "aqueduct_4_0",
+            "aware_2_0",
+            "nrel_water_factors_v1"
+          ],
+          "datasetVersion": {
+            "nrel": "nrel_water_factors_v1",
+            "aware": "aware_2_0",
+            "aqueduct": "aqueduct_4_0"
+          },
+          "guardrailTriggered": false,
+          "fallbackUsed": false
+        },
+        "kubernetesEnforcement": {
+          "admission": {
+            "allow": true,
+            "reason": "ALLOW"
+          },
+          "labels": {
+            "ecobe.io/decision-frame": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+            "ecobe.io/region": "us-west-2",
+            "ecobe.io/policy-profile": "default",
+            "ecobe.io/decision": "run_now",
+            "ecobe.io/water-authority": "basin",
+            "ecobe.io/water-scenario": "current"
+          },
+          "annotations": {
+            "ecobe.io/reason-code": "ALLOW",
+            "ecobe.io/generated-at": "2026-03-31T00:23:05.273Z",
+            "ecobe.io/enforcement": "deterministic",
+            "ecobe.io/decision-mode": "runtime_authorization",
+            "ecobe.io/proof-hash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a"
+          },
+          "nodeSelector": {
+            "topology.kubernetes.io/region": "us-west-2",
+            "ecobe.io/region": "us-west-2"
+          },
+          "nodeAffinity": {
+            "requiredRegion": "us-west-2",
+            "preferredRegions": [
+              "us-west-2"
+            ]
+          },
+          "tolerations": [
+            {
+              "key": "ecobe.io/policy-profile",
+              "operator": "Equal",
+              "value": "default",
+              "effect": "NoSchedule"
+            }
+          ],
+          "scaling": {
+            "mode": "normal",
+            "targetReplicaFactor": 1,
+            "maxReplicaFactor": 1
+          },
+          "execution": {
+            "mode": "immediate",
+            "notBefore": null
+          },
+          "gatekeeper": {
+            "constraintTemplateName": "ecobedecisionguard",
+            "constraintName": "ecobe-3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+            "requiredLabels": [
+              "ecobe.io/decision-frame",
+              "ecobe.io/region",
+              "ecobe.io/decision"
+            ],
+            "parameters": {
+              "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+              "selectedRegion": "us-west-2",
+              "notBefore": null,
+              "minReplicaFactor": 1,
+              "maxReplicaFactor": 1,
+              "blocked": false
+            },
+            "template": {
+              "apiVersion": "templates.gatekeeper.sh/v1beta1",
+              "kind": "ConstraintTemplate",
+              "metadata": {
+                "name": "ecobedecisionguard"
+              },
+              "spec": {
+                "crd": {
+                  "spec": {
+                    "names": {
+                      "kind": "EcobeDecisionGuard"
+                    }
+                  }
+                },
+                "targets": [
+                  {
+                    "target": "admission.k8s.gatekeeper.sh",
+                    "rego": "\npackage ecobedecisionguard\n\nviolation[{\"msg\": msg}] {\n  required := {\"ecobe.io/decision-frame\", \"ecobe.io/region\", \"ecobe.io/decision\"}\n  provided := {key | input.review.object.metadata.labels[key]}\n  missing := required - provided\n  count(missing) > 0\n  msg := sprintf(\"missing ecobe labels: %v\", [missing])\n}\n\nviolation[{\"msg\": msg}] {\n  expected := input.parameters.selectedRegion\n  actual := input.review.object.metadata.labels[\"ecobe.io/region\"]\n  expected != actual\n  msg := sprintf(\"region %v violates ecobe authorization region %v\", [actual, expected])\n}\n\nviolation[{\"msg\": msg}] {\n  input.parameters.blocked\n  msg := \"workload is blocked by ecobe authorization\"\n}\n"
+                  }
+                ]
+              }
+            },
+            "constraint": {
+              "apiVersion": "constraints.gatekeeper.sh/v1beta1",
+              "kind": "EcobeDecisionGuard",
+              "metadata": {
+                "name": "ecobe-3a3ade46-6861-4be7-87a3-1d9b15ae3ce3"
+              },
+              "spec": {
+                "match": {
+                  "kinds": [
+                    {
+                      "apiGroups": [
+                        ""
+                      ],
+                      "kinds": [
+                        "Pod"
+                      ]
+                    }
+                  ],
+                  "labelSelector": {
+                    "matchLabels": {
+                      "ecobe.io/decision-frame": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3"
+                    }
+                  }
+                },
+                "parameters": {
+                  "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+                  "selectedRegion": "us-west-2",
+                  "notBefore": null,
+                  "minReplicaFactor": 1,
+                  "maxReplicaFactor": 1,
+                  "blocked": false
+                }
+              }
+            }
+          }
+        },
+        "enforcementBundle": {
+          "kubernetes": {
+            "admission": {
+              "allow": true,
+              "reason": "ALLOW"
+            },
+            "labels": {
+              "ecobe.io/decision-frame": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+              "ecobe.io/region": "us-west-2",
+              "ecobe.io/policy-profile": "default",
+              "ecobe.io/decision": "run_now",
+              "ecobe.io/water-authority": "basin",
+              "ecobe.io/water-scenario": "current"
+            },
+            "annotations": {
+              "ecobe.io/reason-code": "ALLOW",
+              "ecobe.io/generated-at": "2026-03-31T00:23:05.273Z",
+              "ecobe.io/enforcement": "deterministic",
+              "ecobe.io/decision-mode": "runtime_authorization",
+              "ecobe.io/proof-hash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a"
+            },
+            "nodeSelector": {
+              "topology.kubernetes.io/region": "us-west-2",
+              "ecobe.io/region": "us-west-2"
+            },
+            "nodeAffinity": {
+              "requiredRegion": "us-west-2",
+              "preferredRegions": [
+                "us-west-2"
+              ]
+            },
+            "tolerations": [
+              {
+                "key": "ecobe.io/policy-profile",
+                "operator": "Equal",
+                "value": "default",
+                "effect": "NoSchedule"
+              }
+            ],
+            "scaling": {
+              "mode": "normal",
+              "targetReplicaFactor": 1,
+              "maxReplicaFactor": 1
+            },
+            "execution": {
+              "mode": "immediate",
+              "notBefore": null
+            },
+            "gatekeeper": {
+              "constraintTemplateName": "ecobedecisionguard",
+              "constraintName": "ecobe-3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+              "requiredLabels": [
+                "ecobe.io/decision-frame",
+                "ecobe.io/region",
+                "ecobe.io/decision"
+              ],
+              "parameters": {
+                "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+                "selectedRegion": "us-west-2",
+                "notBefore": null,
+                "minReplicaFactor": 1,
+                "maxReplicaFactor": 1,
+                "blocked": false
+              },
+              "template": {
+                "apiVersion": "templates.gatekeeper.sh/v1beta1",
+                "kind": "ConstraintTemplate",
+                "metadata": {
+                  "name": "ecobedecisionguard"
+                },
+                "spec": {
+                  "crd": {
+                    "spec": {
+                      "names": {
+                        "kind": "EcobeDecisionGuard"
+                      }
+                    }
+                  },
+                  "targets": [
+                    {
+                      "target": "admission.k8s.gatekeeper.sh",
+                      "rego": "\npackage ecobedecisionguard\n\nviolation[{\"msg\": msg}] {\n  required := {\"ecobe.io/decision-frame\", \"ecobe.io/region\", \"ecobe.io/decision\"}\n  provided := {key | input.review.object.metadata.labels[key]}\n  missing := required - provided\n  count(missing) > 0\n  msg := sprintf(\"missing ecobe labels: %v\", [missing])\n}\n\nviolation[{\"msg\": msg}] {\n  expected := input.parameters.selectedRegion\n  actual := input.review.object.metadata.labels[\"ecobe.io/region\"]\n  expected != actual\n  msg := sprintf(\"region %v violates ecobe authorization region %v\", [actual, expected])\n}\n\nviolation[{\"msg\": msg}] {\n  input.parameters.blocked\n  msg := \"workload is blocked by ecobe authorization\"\n}\n"
+                    }
+                  ]
+                }
+              },
+              "constraint": {
+                "apiVersion": "constraints.gatekeeper.sh/v1beta1",
+                "kind": "EcobeDecisionGuard",
+                "metadata": {
+                  "name": "ecobe-3a3ade46-6861-4be7-87a3-1d9b15ae3ce3"
+                },
+                "spec": {
+                  "match": {
+                    "kinds": [
+                      {
+                        "apiGroups": [
+                          ""
+                        ],
+                        "kinds": [
+                          "Pod"
+                        ]
+                      }
+                    ],
+                    "labelSelector": {
+                      "matchLabels": {
+                        "ecobe.io/decision-frame": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3"
+                      }
+                    }
+                  },
+                  "parameters": {
+                    "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+                    "selectedRegion": "us-west-2",
+                    "notBefore": null,
+                    "minReplicaFactor": 1,
+                    "maxReplicaFactor": 1,
+                    "blocked": false
+                  }
+                }
+              }
+            }
+          },
+          "githubActions": {
+            "executable": true,
+            "decision": "run_now",
+            "concurrency": {
+              "group": "ecobe-3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+              "cancelInProgress": false
+            },
+            "maxParallel": 1,
+            "environment": "ecobe-authorized",
+            "notBefore": null,
+            "matrixAllowedRegions": [
+              "us-west-2",
+              "us-east-1",
+              "eu-west-1"
+            ]
+          }
+        },
+        "workflowOutputs": {
+          "decision": "run_now",
+          "reasonCode": "ALLOW",
+          "selectedRegion": "us-west-2",
+          "selectedRunner": "ubuntu-latest",
+          "carbonIntensity": 29,
+          "carbonBaseline": 29,
+          "carbonReductionPct": 0,
+          "waterSelectedLiters": 2.25,
+          "waterBaselineLiters": 2.25,
+          "waterImpactDeltaLiters": 0,
+          "waterStressIndex": 2.1,
+          "waterScarcityImpact": 2.925,
+          "signalConfidence": 0.875,
+          "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+          "waterPolicyVersion": "water_policy_v1",
+          "signalMode": "marginal",
+          "accountingMethod": "marginal",
+          "proofHash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+          "decisionMode": "runtime_authorization",
+          "waterAuthorityMode": "basin",
+          "waterScenario": "current",
+          "githubActionsExecutable": true,
+          "githubActionsMaxParallel": 1,
+          "githubActionsEnvironment": "ecobe-authorized",
+          "githubActionsNotBefore": null,
+          "kubernetesRegion": "us-west-2",
+          "kubernetesDecision": "normal",
+          "kubernetesNotBefore": null,
+          "kubernetesReplicaFactor": 1,
+          "selectedRegionReliabilityMultiplier": 1.1028
+        },
+        "candidateEvaluations": [
+          {
+            "region": "us-west-2",
+            "score": 83.310664,
+            "carbonIntensity": 29,
+            "waterImpactLiters": 2.25,
+            "scarcityImpact": 2.925,
+            "reliabilityMultiplier": 1.1028,
+            "supplierSet": [
+              "aqueduct",
+              "aware",
+              "nrel"
+            ],
+            "evidenceRefs": [
+              "water-bundle:2026-03-30T20:33:52.420Z:us-west-2"
+            ],
+            "authorityMode": "basin",
+            "guardrailCandidateBlocked": false,
+            "guardrailReasons": [],
+            "defensiblePenalty": 0,
+            "defensibleReasonCodes": []
+          },
+          {
+            "region": "us-east-1",
+            "score": 231.84438,
+            "carbonIntensity": 77,
+            "waterImpactLiters": 3.25,
+            "scarcityImpact": 6.175,
+            "reliabilityMultiplier": 0.8675,
+            "supplierSet": [
+              "aqueduct",
+              "aware",
+              "nrel"
+            ],
+            "evidenceRefs": [
+              "water-bundle:2026-03-30T20:33:52.420Z:us-east-1"
+            ],
+            "authorityMode": "basin",
+            "guardrailCandidateBlocked": false,
+            "guardrailReasons": [
+              "WATER_HIGH_STRESS"
+            ],
+            "defensiblePenalty": 0,
+            "defensibleReasonCodes": []
+          },
+          {
+            "region": "eu-west-1",
+            "score": 456.979167,
+            "carbonIntensity": 400,
+            "waterImpactLiters": 1.5,
+            "scarcityImpact": 1.35,
+            "reliabilityMultiplier": 0.8,
+            "supplierSet": [
+              "aqueduct",
+              "aware",
+              "nrel"
+            ],
+            "evidenceRefs": [
+              "water-bundle:2026-03-30T20:33:52.420Z:eu-west-1"
+            ],
+            "authorityMode": "basin",
+            "guardrailCandidateBlocked": false,
+            "guardrailReasons": [],
+            "defensiblePenalty": 120,
+            "defensibleReasonCodes": [
+              "CARBON_FALLBACK_USED",
+              "CARBON_LOW_CONFIDENCE"
+            ]
+          }
+        ],
+        "proofRecord": {
+          "job_id": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+          "baseline_region": "us-west-2",
+          "selected_region": "us-west-2",
+          "carbon_delta": 0,
+          "water_delta": 0,
+          "signals_used": [
+            "REDIS_CACHE_WATTTIME_MOER",
+            "aqueduct_4_0",
+            "aware_2_0",
+            "nrel_water_factors_v1"
+          ],
+          "timestamp": "2026-03-31T00:23:05.273Z",
+          "dataset_versions": {
+            "nrel": "nrel_water_factors_v1",
+            "aware": "aware_2_0",
+            "aqueduct": "aqueduct_4_0"
+          },
+          "confidence_score": 0.875,
+          "proof_hash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+          "provider_snapshot_refs": [
+            "us-west-2:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z",
+            "us-east-1:REDIS_CACHE_WATTTIME_MOER:2026-03-31T00:21:00.000Z",
+            "eu-west-1:DEGRADED_SAFE_EMBER_STRUCTURAL_BASELINE:2026-03-31T00:21:53.673Z"
+          ],
+          "mss_snapshot_id": "33338a36b2a32b1859e2474ce3509f0fcd00b6ca39c802e5361b66620aaa5bf7",
+          "water_bundle_hash": "90c984f6d095aecf247b64057b7c0ca71d87e48312fb3647947a092718bea691",
+          "water_manifest_hash": "e5bbb12124a7f600287e4b654a904d03139b4a07831eb5e1606bc5036d7843e6",
+          "supplier_refs": [
+            "aqueduct",
+            "aware",
+            "nrel"
+          ],
+          "facility_telemetry_refs": [],
+          "water_scenario": "current",
+          "external_policy_refs": [
+            "seked.internal.v1"
+          ],
+          "water_evidence_refs": [
+            "water-bundle:2026-03-30T20:33:52.420Z:us-west-2"
+          ],
+          "transport": "sync_http",
+          "adapter_id": "ecobe.http.decision.v1",
+          "adapter_version": "1.0.0",
+          "enforcement_result": "applied",
+          "observed_runtime_target": null
+        },
+        "telemetryBridge": {
+          "spanName": "ecobe.decision.authorize",
+          "serviceName": "ecobe-engine",
+          "traceId": "05742568621641c191db9ee6c0817a1e",
+          "spanId": "913eb8f0b6434596",
+          "durationMs": 0,
+          "attributes": {
+            "ecobe.decision_frame_id": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+            "ecobe.action": "run_now",
+            "ecobe.reason_code": "ALLOW",
+            "ecobe.operating_mode": "NORMAL",
+            "ecobe.proof_hash": "64a29e019bc665e530d37dbffe1bc880e386ff337b65089596a04b655c10735a",
+            "ecobe.fallback_used": false,
+            "ecobe.runtime": "http",
+            "ecobe.region_selected": "us-west-2",
+            "ecobe.adapter_id": "ecobe.http.decision.v1",
+            "ecobe.transport": "sync_http"
+          },
+          "export": {
+            "enabled": false,
+            "exported": false,
+            "endpoint": null
+          }
+        },
+        "adapterContext": {
+          "runtime": "http",
+          "transport": "sync_http",
+          "controlPoint": "gateway_preflight",
+          "adapterId": "ecobe.http.decision.v1",
+          "adapterVersion": "1.0.0",
+          "enforcementResult": "applied"
+        }
+      },
+      "consistent": true,
+      "deterministicMatch": true,
+      "traceBacked": true,
+      "legacy": false,
+      "mismatches": [],
+      "replayedAt": "2026-03-31T00:23:05.274Z"
+    }
+  },
+  "governance": {
+    "frameworkLabel": "SAIQ",
+    "source": "SEKED_INTERNAL_V1",
+    "active": true,
+    "strict": false,
+    "enforcementMode": "NORMAL",
+    "selectedScore": 0.230155,
+    "thresholds": {
+      "redMin": 0.7,
+      "amberMin": 0.45,
+      "waterStressDeny": 4.7,
+      "waterStressDelay": 4,
+      "minSignalConfidence": 0.6
+    },
+    "weights": {
+      "carbon": 0.583333,
+      "water": 0.25,
+      "latency": 0.083333,
+      "cost": 0.083333
+    },
+    "impact": {
+      "carbonReductionPct": 0,
+      "waterImpactDeltaLiters": 0,
+      "signalConfidence": 0.875,
+      "constraintsApplied": 3,
+      "cacheHit": true
+    }
+  },
+  "traceStream": {
+    "items": [
+      {
+        "decisionFrameId": "3a3ade46-6861-4be7-87a3-1d9b15ae3ce3",
+        "createdAt": "2026-03-31T00:22:09.044Z",
+        "action": "run_now",
+        "region": "us-west-2",
+        "reasonCode": "ALLOW",
+        "proofAvailable": true,
+        "traceAvailable": true,
+        "governanceSource": "SEKED_INTERNAL_V1",
+        "replayVerified": true
+      },
+      {
+        "decisionFrameId": "c363aa8a-643a-417a-8cc8-70b0708fd619",
+        "createdAt": "2026-03-31T00:16:00.795Z",
+        "action": "delay",
+        "region": "eu-west-1",
+        "reasonCode": "SEKED_POLICY_RED_ZONE",
+        "proofAvailable": true,
+        "traceAvailable": true,
+        "governanceSource": "SEKED_INTERNAL_V1",
+        "replayVerified": null
+      },
+      {
+        "decisionFrameId": "ebbaf4b2-8137-4cba-b2cc-0ab29f670979",
+        "createdAt": "2026-03-31T00:16:00.788Z",
+        "action": "delay",
+        "region": "eu-west-1",
+        "reasonCode": "SEKED_POLICY_RED_ZONE",
+        "proofAvailable": true,
+        "traceAvailable": true,
+        "governanceSource": "SEKED_INTERNAL_V1",
+        "replayVerified": null
+      },
+      {
+        "decisionFrameId": "a5e8a3fa-02a5-4e3a-b772-59aaaffc2e3a",
+        "createdAt": "2026-03-31T00:16:00.743Z",
+        "action": "delay",
+        "region": "us-west-2",
+        "reasonCode": "SEKED_POLICY_RED_ZONE",
+        "proofAvailable": true,
+        "traceAvailable": true,
+        "governanceSource": "SEKED_INTERNAL_V1",
+        "replayVerified": null
+      },
+      {
+        "decisionFrameId": "e9c96c83-245e-4eb3-9936-3381242201b8",
+        "createdAt": "2026-03-31T00:16:00.646Z",
+        "action": "delay",
+        "region": "eu-west-1",
+        "reasonCode": "SEKED_POLICY_RED_ZONE",
+        "proofAvailable": true,
+        "traceAvailable": true,
+        "governanceSource": "SEKED_INTERNAL_V1",
+        "replayVerified": null
+      },
+      {
+        "decisionFrameId": "b6bd8490-62a4-4727-b9f7-e3809c0e7581",
+        "createdAt": "2026-03-31T00:16:00.617Z",
+        "action": "run_now",
+        "region": "us-west-2",
+        "reasonCode": "ALLOW",
+        "proofAvailable": true,
+        "traceAvailable": true,
+        "governanceSource": "SEKED_INTERNAL_V1",
+        "replayVerified": null
+      },
+      {
+        "decisionFrameId": "f1ae40b0-45da-4230-8b85-3c9d0c9396f1",
+        "createdAt": "2026-03-31T00:16:00.571Z",
+        "action": "run_now",
+        "region": "us-west-2",
+        "reasonCode": "ALLOW",
+        "proofAvailable": true,
+        "traceAvailable": true,
+        "governanceSource": "SEKED_INTERNAL_V1",
+        "replayVerified": null
+      },
+      {
+        "decisionFrameId": "98f9d915-84c0-496f-a1b5-7c0d0c90afd0",
+        "createdAt": "2026-03-31T00:16:00.551Z",
+        "action": "run_now",
+        "region": "us-west-2",
+        "reasonCode": "ALLOW",
+        "proofAvailable": true,
+        "traceAvailable": true,
+        "governanceSource": "SEKED_INTERNAL_V1",
+        "replayVerified": null
+      }
+    ]
+  },
+  "health": {
+    "service": {
+      "status": "healthy",
+      "proofPosture": "Replay verified",
+      "detail": "DB ok | Water artifacts verified | Rolling p95 56ms"
+    },
+    "latency": {
+      "available": true,
+      "error": null,
+      "samples": 250,
+      "p95TotalMs": 56,
+      "p95ComputeMs": 39,
+      "budgetTotalP95Ms": 100,
+      "budgetComputeP95Ms": 50,
+      "withinBudget": {
+        "total": true,
+        "compute": true
+      }
+    },
+    "provenance": {
+      "available": true,
+      "error": null,
+      "datasets": [
+        {
+          "name": "aqueduct",
+          "verificationStatus": "verified",
+          "datasetVersion": "aqueduct_2_1",
+          "manifestHash": "91f22cf2ed2b39cc912743cdcd458c18902c874e9e469fccc9e3ec67a79d00ed",
+          "computedHash": "91f22cf2ed2b39cc912743cdcd458c18902c874e9e469fccc9e3ec67a79d00ed"
+        },
+        {
+          "name": "aware",
+          "verificationStatus": "verified",
+          "datasetVersion": "aware_2_0",
+          "manifestHash": "94649ec3760b475e3980eba45e0731f52968d819264129525be24ea9f30f1aa4",
+          "computedHash": "94649ec3760b475e3980eba45e0731f52968d819264129525be24ea9f30f1aa4"
+        },
+        {
+          "name": "wwf",
+          "verificationStatus": "verified",
+          "datasetVersion": "wwf_water_risk_filter_v1",
+          "manifestHash": "d86256f989a44f5761dfd0b31ad77bd9407ce6e0a25a17d1f912130ab0b82ba9",
+          "computedHash": "d86256f989a44f5761dfd0b31ad77bd9407ce6e0a25a17d1f912130ab0b82ba9"
+        },
+        {
+          "name": "nrel",
+          "verificationStatus": "verified",
+          "datasetVersion": "nrel_water_factors_v1",
+          "manifestHash": "4de9ff55d52bfa74273c92c430c294888a7cc783658edaf2cba677586fe19e64",
+          "computedHash": "4de9ff55d52bfa74273c92c430c294888a7cc783658edaf2cba677586fe19e64"
+        }
+      ]
+    },
+    "providers": [
+      {
+        "id": "WATTTIME_MOER",
+        "label": "WATTTIME MOER",
+        "providerType": "carbon",
+        "status": "healthy",
+        "statusReasonCode": "HEALTHY_LIVE",
+        "statusLabel": "healthy live",
+        "freshnessSec": 5,
+        "latencyMs": null,
+        "confidence": 0.9,
+        "mirrored": false,
+        "lineageCount": 33,
+        "mode": "live",
+        "signalAuthority": "marginal",
+        "degradedReason": null,
+        "mirrorVersion": null
+      },
+      {
+        "id": "GRIDSTATUS",
+        "label": "GRIDSTATUS",
+        "providerType": "carbon",
+        "status": "degraded",
+        "statusReasonCode": "DEGRADED_STALE",
+        "statusLabel": "degraded stale",
+        "freshnessSec": 715982,
+        "latencyMs": null,
+        "confidence": null,
+        "mirrored": false,
+        "lineageCount": 0,
+        "mode": "fallback",
+        "signalAuthority": "fallback",
+        "degradedReason": "Freshness breached the safe live-signal window.",
+        "mirrorVersion": null
+      },
+      {
+        "id": "EIA_930",
+        "label": "EIA 930",
+        "providerType": "carbon",
+        "status": "degraded",
+        "statusReasonCode": "DEGRADED_STALE",
+        "statusLabel": "degraded stale",
+        "freshnessSec": 528772,
+        "latencyMs": null,
+        "confidence": null,
+        "mirrored": false,
+        "lineageCount": 0,
+        "mode": "fallback",
+        "signalAuthority": "fallback",
+        "degradedReason": "Freshness breached the safe live-signal window.",
+        "mirrorVersion": null
+      },
+      {
+        "id": "EMBER_STRUCTURAL_BASELINE",
+        "label": "EMBER STRUCTURAL BASELINE",
+        "providerType": "carbon",
+        "status": "healthy",
+        "statusReasonCode": "HEALTHY_LIVE",
+        "statusLabel": "healthy live",
+        "freshnessSec": 3542,
+        "latencyMs": null,
+        "confidence": 0.25,
+        "mirrored": true,
+        "lineageCount": 38,
+        "mode": "mirrored",
+        "signalAuthority": "average",
+        "degradedReason": null,
+        "mirrorVersion": null
+      },
+      {
+        "id": "GB_CARBON",
+        "label": "GB CARBON",
+        "providerType": "carbon",
+        "status": "degraded",
+        "statusReasonCode": "DEGRADED_STALE",
+        "statusLabel": "degraded stale",
+        "freshnessSec": 527265,
+        "latencyMs": null,
+        "confidence": null,
+        "mirrored": false,
+        "lineageCount": 0,
+        "mode": "fallback",
+        "signalAuthority": "fallback",
+        "degradedReason": "Freshness breached the safe live-signal window.",
+        "mirrorVersion": null
+      },
+      {
+        "id": "water:aqueduct",
+        "label": "aqueduct",
+        "providerType": "water",
+        "status": "healthy",
+        "statusReasonCode": "VERIFIED_STATIC",
+        "statusLabel": "verified static",
+        "freshnessSec": 13752,
+        "latencyMs": null,
+        "confidence": 0.85,
+        "mirrored": false,
+        "lineageCount": 1,
+        "mode": "mirrored",
+        "signalAuthority": "average",
+        "authorityRole": "authoritative",
+        "authorityMode": "basin",
+        "scenario": "current",
+        "degradedReason": null,
+        "mirrorVersion": "aqueduct_2_1",
+        "ttlSec": 2592000,
+        "provenanceStatus": "verified"
+      },
+      {
+        "id": "water:aware",
+        "label": "aware",
+        "providerType": "water",
+        "status": "healthy",
+        "statusReasonCode": "VERIFIED_STATIC",
+        "statusLabel": "verified static",
+        "freshnessSec": 13752,
+        "latencyMs": null,
+        "confidence": 0.85,
+        "mirrored": false,
+        "lineageCount": 1,
+        "mode": "mirrored",
+        "signalAuthority": "average",
+        "authorityRole": "advisory",
+        "authorityMode": "basin",
+        "scenario": "current",
+        "degradedReason": null,
+        "mirrorVersion": "aware_2_0",
+        "ttlSec": 2592000,
+        "provenanceStatus": "verified"
+      },
+      {
+        "id": "water:wwf",
+        "label": "wwf",
+        "providerType": "water",
+        "status": "healthy",
+        "statusReasonCode": "VERIFIED_STATIC",
+        "statusLabel": "verified static",
+        "freshnessSec": 13752,
+        "latencyMs": null,
+        "confidence": null,
+        "mirrored": false,
+        "lineageCount": 0,
+        "mode": "mirrored",
+        "signalAuthority": "average",
+        "authorityRole": "advisory",
+        "authorityMode": "basin",
+        "scenario": "current",
+        "degradedReason": null,
+        "mirrorVersion": "wwf_water_risk_filter_v1",
+        "ttlSec": 2592000,
+        "provenanceStatus": "verified"
+      },
+      {
+        "id": "water:nrel",
+        "label": "nrel",
+        "providerType": "water",
+        "status": "healthy",
+        "statusReasonCode": "VERIFIED_STATIC",
+        "statusLabel": "verified static",
+        "freshnessSec": 13752,
+        "latencyMs": null,
+        "confidence": 0.85,
+        "mirrored": false,
+        "lineageCount": 1,
+        "mode": "mirrored",
+        "signalAuthority": "average",
+        "authorityRole": "advisory",
+        "authorityMode": "basin",
+        "scenario": "current",
+        "degradedReason": null,
+        "mirrorVersion": "nrel_water_factors_v1",
+        "ttlSec": 2592000,
+        "provenanceStatus": "verified"
+      }
+    ]
+  }
+}
