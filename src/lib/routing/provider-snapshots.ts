@@ -23,20 +23,12 @@ export interface ProviderSignalSnapshot {
 
 /**
  * Store a provider signal snapshot.
- * Upserts to avoid duplicates.
+ * Inserts once to preserve the original observation for each unique key.
  */
 export async function storeProviderSnapshot(snapshot: ProviderSignalSnapshot): Promise<void> {
   try {
-    await prisma.providerSnapshot.upsert({
-      where: {
-        provider_zone_signalType_observedAt: {
-          provider: snapshot.provider,
-          zone: snapshot.zone,
-          signalType: snapshot.signalType,
-          observedAt: snapshot.observedAt,
-        },
-      },
-      create: {
+    await prisma.providerSnapshot.createMany({
+      data: [{
         provider: snapshot.provider,
         zone: snapshot.zone,
         signalType: snapshot.signalType,
@@ -46,14 +38,8 @@ export async function storeProviderSnapshot(snapshot: ProviderSignalSnapshot): P
         freshnessSec: snapshot.freshnessSec ?? null,
         confidence: snapshot.confidence ?? null,
         metadata: (snapshot.metadata ?? {}) as Prisma.InputJsonValue,
-      },
-      update: {
-        signalValue: snapshot.signalValue,
-        forecastForTs: snapshot.forecastForTs ?? null,
-        freshnessSec: snapshot.freshnessSec ?? null,
-        confidence: snapshot.confidence ?? null,
-        metadata: (snapshot.metadata ?? {}) as Prisma.InputJsonValue,
-      },
+      }],
+      skipDuplicates: true,
     })
   } catch (error) {
     // Silently ignore duplicates

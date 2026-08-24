@@ -13,6 +13,7 @@ import {
   warmCacheOnStartup,
 } from './lib/cache-warmer'
 import { startEIAIngestionWorker } from './workers/eia-ingestion'
+import { startEntsoeIngestionWorker, stopEntsoeIngestionWorker } from './workers/entsoe-ingestion'
 import { startForecastVerificationWorker } from './workers/forecast-verification'
 import { startForecastWorker } from './workers/forecast-poller'
 import { scheduleIntelligenceJobs } from './workers/intelligence-scheduler'
@@ -169,6 +170,7 @@ async function gracefulShutdown(signal: string) {
       Promise.resolve(stopDecisionEventDispatcherWorker()),
       Promise.resolve(stopPglAuditRetryWorker()),
       Promise.resolve(stopRoutingSignalWarmLoop()),
+      Promise.resolve(stopEntsoeIngestionWorker()),
     ])
 
     console.log('Disconnecting from database...')
@@ -203,6 +205,10 @@ function startBackgroundWorkers() {
 
   startEIAIngestionWorker().catch((error) => {
     console.error('EIA ingestion worker failed to start:', error)
+  })
+
+  startEntsoeIngestionWorker().catch((error) => {
+    console.error('ENTSO-E ingestion worker failed to start:', error)
   })
 
   scheduleIntelligenceJobs().catch((error) => {

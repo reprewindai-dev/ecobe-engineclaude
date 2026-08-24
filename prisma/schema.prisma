@@ -1077,6 +1077,24 @@ model GridSignalSnapshot {
   @@unique([region, timestamp, source])
 }
 
+model EntsoeGenerationRaw {
+  id                     String   @id @default(cuid())
+  zone                   String
+  domain                 String
+  observedAt             DateTime
+  carbonIntensityGco2Kwh Float
+  fuelBreakdownMw        Json     @default("{}")
+  method                 String
+  sourceUrl              String
+  sourceFreshness        String
+  fetchedAt              DateTime
+  createdAt              DateTime @default(now())
+
+  @@index([zone, observedAt])
+  @@index([observedAt])
+  @@unique([zone, observedAt])
+}
+
 enum SignalQuality {
   HIGH
   MEDIUM
