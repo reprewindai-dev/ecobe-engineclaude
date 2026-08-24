@@ -13,13 +13,18 @@ type WorkerStatusEntry = {
 };
 type WorkerRegistry = Record<string, WorkerStatusEntry>;
 
-let workerStatus: WorkerRegistry = {
+const workerStatus: WorkerRegistry = {
   forecastPoller: {
     running: false,
     lastRun: null as string | null,
     nextRun: null as string | null,
   },
   eiaIngestion: {
+    running: false,
+    lastRun: null as string | null,
+    nextRun: null as string | null,
+  },
+  entsoeIngestion: {
     running: false,
     lastRun: null as string | null,
     nextRun: null as string | null,

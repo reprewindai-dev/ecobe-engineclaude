@@ -98,6 +98,14 @@ const ENTSOE_DOMAINS: Record<string, string> = {
   "EU-AT": "10YAT-APG------L",
 };
 
+export function getEntsoeZones(): string[] {
+  return Object.keys(ENTSOE_DOMAINS);
+}
+
+export function getEntsoeDomain(zone: string): string | undefined {
+  return ENTSOE_DOMAINS[zone];
+}
+
 const ENTSOE_PSR_TO_FUEL: Record<string, string> = {
   B01: "biomass",
   B02: "lignite",
