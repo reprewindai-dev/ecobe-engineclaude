@@ -31,11 +31,6 @@ router.get('/', async (req, res) => {
     const greenRouteRate = totalDecisions > 0 ? decisions.filter((d: any) => !d.fallbackUsed).length / totalDecisions : 0
     const fallbackRate = 1 - greenRouteRate
 
-    // Provider health metrics (mock for now)
-    const watttimeSuccessRate = 0.92
-    const watttimeSuccessCount = Math.floor(totalDecisions * watttimeSuccessRate)
-    const watttimeFailureCount = totalDecisions - watttimeSuccessCount
-
     const metrics = {
       window: window as '24h' | '7d',
       windowHours,
@@ -48,23 +43,17 @@ router.get('/', async (req, res) => {
       topChosenRegion: null, // Could calculate from decisions
       p95LatencyDeltaMs: null, // Would need timing data
       dataFreshnessMaxSeconds: null, // Would need freshness tracking
-      watttimeSuccessRate,
+      watttimeSuccessRate: null,
       watttime: {
-        successRate: watttimeSuccessRate,
-        successCount: watttimeSuccessCount,
-        failureCount: watttimeFailureCount,
-        lastSuccessAt: new Date().toISOString(),
+        successRate: null,
+        successCount: null,
+        failureCount: null,
+        lastSuccessAt: null,
         lastFailureAt: null,
         lastError: null,
       },
       forecastRefresh: {
-        lastRun: {
-          timestamp: new Date().toISOString(),
-          totalRegions: 10,
-          totalRecords: 240,
-          totalForecasts: 2400,
-          status: 'ok'
-        }
+        lastRun: null
       }
     }
 

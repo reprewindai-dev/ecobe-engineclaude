@@ -13,20 +13,6 @@ import {
 const projectRoot = path.resolve(__dirname, '..', '..')
 const srcRoot = path.join(projectRoot, 'src')
 
-function listFilesRecursive(dir: string): string[] {
-  const entries = fs.readdirSync(dir, { withFileTypes: true })
-  const files: string[] = []
-  for (const entry of entries) {
-    const full = path.join(dir, entry.name)
-    if (entry.isDirectory()) {
-      files.push(...listFilesRecursive(full))
-    } else {
-      files.push(full)
-    }
-  }
-  return files
-}
-
 function extractImports(filePath: string): string[] {
   const source = fs.readFileSync(filePath, 'utf8')
   const imports = new Set<string>()
@@ -76,7 +62,6 @@ describe('Architecture Laws', () => {
   it('prevents route layer from importing provider-specific clients directly', () => {
     const routeFiles = [
       path.join(srcRoot, 'routes', 'ci.ts'),
-      path.join(srcRoot, 'routes', 'route-debug.ts'),
     ]
     const violations: string[] = []
 

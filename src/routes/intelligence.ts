@@ -263,7 +263,7 @@ router.get('/patterns', async (req, res) => {
 router.post('/best-window', async (req, res) => {
   try {
     const { prisma } = await import('../lib/db')
-    const { region, lookAheadHours = 24, workloadType = 'general' } = req.body || {}
+    const { region, lookAheadHours = 24 } = req.body || {}
     const targetRegion = region || 'us-east-1'
 
     // Get forecasts for the region
@@ -276,43 +276,19 @@ router.post('/best-window', async (req, res) => {
     })
 
     if (forecasts.length === 0) {
-      // Fallback: generate synthetic windows based on typical patterns
-      const windows = []
-      const now = new Date()
-      for (let h = 0; h < Math.min(lookAheadHours, 48); h += 2) {
-        const windowStart = new Date(now.getTime() + h * 3600000)
-        const hour = windowStart.getHours()
-        // Typical pattern: low carbon 2-6am, 11am-2pm (solar peak), high carbon 5-9pm
-        const typicalIntensity =
-          hour >= 2 && hour <= 6
-            ? 180 + Math.random() * 40
-            : hour >= 11 && hour <= 14
-              ? 200 + Math.random() * 60
-              : hour >= 17 && hour <= 21
-                ? 380 + Math.random() * 80
-                : 280 + Math.random() * 60
-        windows.push({
-          startTime: windowStart.toISOString(),
-          endTime: new Date(windowStart.getTime() + 2 * 3600000).toISOString(),
-          predictedIntensity: Math.round(typicalIntensity),
-          confidence: 0.65,
-          source: 'pattern_model',
-        })
-      }
-
-      windows.sort((a, b) => a.predictedIntensity - b.predictedIntensity)
-
       return res.json({
         region: targetRegion,
         lookAheadHours,
-        bestWindow: windows[0] || null,
-        topWindows: windows.slice(0, 5),
-        worstWindow: windows[windows.length - 1] || null,
-        currentIntensity: windows.find((w) => new Date(w.startTime).getHours() === new Date().getHours())?.predictedIntensity ?? null,
-        potentialSavingsPct:
-          windows.length > 1 ? Math.round((1 - windows[0].predictedIntensity / windows[windows.length - 1].predictedIntensity) * 100) : null,
-        source: 'pattern_model',
+        bestWindow: null,
+        topWindows: [],
+        worstWindow: null,
+        currentIntensity: null,
+        potentialSavingsPct: null,
+        source: null,
         generatedAt: new Date().toISOString(),
+        windows: [],
+        degraded: true,
+        reason: 'no_forecast_data',
       })
     }
 

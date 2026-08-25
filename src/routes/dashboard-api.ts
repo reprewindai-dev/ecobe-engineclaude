@@ -93,23 +93,23 @@ router.get('/regions/:region/current', async (req, res) => {
   } catch (error) {
     console.error(`Region ${req.params.region} current data error:`, error)
     
-    // Return fallback data
-    res.json({
+    return res.status(503).json({
       region: req.params.region,
-      carbonIntensity: 400,
+      carbonIntensity: null,
       demand: 'Unknown',
       renewable: 'Unknown',
-      confidence: 0.3,
-      source: 'static',
+      confidence: null,
+      source: null,
       timestamp: new Date().toISOString(),
       isForecast: false,
-      estimatedFlag: false,
+      estimatedFlag: null,
       syntheticFlag: true,
       trustLevel: 'low' as const,
       fallbackUsed: true,
       degraded: true,
-      providerStatus: { static: 'available' as const },
-      arbitrationLog: ['All providers failed, using static fallback']
+      providerStatus: {},
+      arbitrationLog: ['No provider signal available'],
+      reason: 'provider_unavailable',
     })
   }
 })

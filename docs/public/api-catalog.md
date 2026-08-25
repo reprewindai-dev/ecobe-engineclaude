@@ -131,8 +131,6 @@ The broker route on the runtime forwards allowlisted paths to the internal engin
   - Core green routing decision.
 - `POST /api/v1/route`
   - Compatibility routing endpoint.
-- `POST /api/v1/route-simple`
-  - Simplified routing endpoint for testing.
 - `GET /api/v1/intelligence/grid/hero-metrics`
   - Hero KPIs for the dashboard.
 - `GET /api/v1/intelligence/grid/summary`
