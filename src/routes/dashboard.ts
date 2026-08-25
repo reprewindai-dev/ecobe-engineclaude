@@ -5,8 +5,6 @@ import {
   startOfWeek,
   startOfMonth,
   addDays,
-  addWeeks,
-  addMonths,
   formatISO,
 } from "date-fns";
 import { Prisma } from "@prisma/client";
@@ -54,15 +52,6 @@ const resolveAccuracyRange = (
   const end = new Date();
   const start = addDays(end, -days);
   return { start, end };
-};
-
-const groupAdders: Record<
-  AccuracyGroupBy,
-  (date: Date, amount: number) => Date
-> = {
-  day: addDays,
-  week: addWeeks,
-  month: addMonths,
 };
 
 const groupStarts: Record<AccuracyGroupBy, (date: Date) => Date> = {
@@ -1155,9 +1144,7 @@ router.post("/what-if/intensities", async (req, res) => {
           return { zone, carbonIntensity: latest.carbonIntensity };
         }
 
-        // Use static fallback since Electricity Maps is disabled
-        const carbonIntensity = 400; // Static fallback value
-        return { zone, carbonIntensity };
+        return { zone, carbonIntensity: null };
       }),
     );
 
@@ -1650,74 +1637,6 @@ router.get("/methodology/providers", async (_req, res) => {
   });
 });
 
-router.post("/demo-seed", async (req, res) => {
-  try {
-    const regions = ["US-CAL-CISO", "FR", "DE", "US-NEISO", "JP-TK", "SG"];
-    const now = new Date();
-    const decisions = [];
-
-    for (let i = 0; i < 100; i++) {
-      const ts = new Date(now.getTime() - i * 15 * 60000); // every 15 min for ~25 hours
-      const baselineRegion =
-        regions[Math.floor(Math.random() * regions.length)];
-      const chosenRegion = regions[Math.floor(Math.random() * regions.length)];
-      const baselineIntensity = 250 + Math.floor(Math.random() * 300);
-      const chosenIntensity = 80 + Math.floor(Math.random() * 200);
-      const kwh = 0.1 + Math.random() * 0.5;
-
-      decisions.push({
-        ts,
-        workloadName: [
-          "ml-training",
-          "data-pipeline",
-          "video-encode",
-          "batch-process",
-          "api-inference",
-        ][Math.floor(Math.random() * 5)],
-        opName: [
-          "train-model",
-          "etl-job",
-          "transcode",
-          "batch-run",
-          "inference",
-        ][Math.floor(Math.random() * 5)],
-        baselineRegion,
-        chosenRegion,
-        zoneBaseline: baselineRegion,
-        zoneChosen: chosenRegion,
-        carbonIntensityBaselineGPerKwh: baselineIntensity,
-        carbonIntensityChosenGPerKwh: chosenIntensity,
-        estimatedKwh: Math.round(kwh * 1000) / 1000,
-        co2BaselineG: Math.round(baselineIntensity * kwh),
-        co2ChosenG: Math.round(chosenIntensity * kwh),
-        requestCount: 1,
-        reason: "carbon-optimization",
-        meta: { source: "demo-seed", iteration: i },
-      });
-    }
-
-    // Batch insert
-    let created = 0;
-    for (const d of decisions) {
-      try {
-        await prisma.dashboardRoutingDecision.create({ data: d as any });
-        created++;
-      } catch (e) {
-        // Skip duplicates
-      }
-    }
-
-    res.json({
-      success: true,
-      created,
-      message: `Seeded ${created} demo routing decisions across ${regions.length} regions`,
-    });
-  } catch (error) {
-    console.error("Demo seed error:", error);
-    res.status(500).json({ error: "Failed to seed demo data" });
-  }
-});
-
 /**
  * GET /api/v1/dashboard/carbon-ledger-summary
  * Unified carbon ledger KPIs for the dashboard hero panel.
@@ -1790,11 +1709,6 @@ router.get("/carbon-ledger-summary", async (req, res) => {
       (s: number, e: any) => s + e.carbonSavedG,
       0,
     );
-    const todayBaselineG = todayEntries.reduce(
-      (s: number, e: any) => s + e.baselineCarbonG,
-      0,
-    );
-
     // High confidence %
     const highConfidence = allEntries.filter(
       (e: any) => (e.confidenceScore ?? 0) >= 0.7,

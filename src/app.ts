@@ -20,16 +20,10 @@ import integrationsRoutes from './routes/integrations'
 import systemRoutes from './routes/system'
 import dekesHandoffRoutes from './routes/dekes-handoff'
 import carbonLedgerRoutes from './routes/carbon-ledger'
-import routeSimpleRoutes from './routes/route-simple'
-import routeTestRoutes from './routes/route-test'
-import simpleTestRoutes from './routes/simple-test'
 import healthRoutes from './routes/health'
 import metricsRoutes from './routes/metrics'
 import regionMappingRoutes from './routes/region-mapping'
-import patternsRoutes from './routes/patterns'
 import dksRoutes from './routes/dks'
-import testPostRoutes from './routes/test-post'
-import routeDebugRoutes from './routes/route-debug'
 import ciRoutes from './routes/ci'
 import waterRoutes from './routes/water'
 import eventsRoutes from './routes/events'
@@ -327,17 +321,10 @@ function attachApiRoutes(app: express.Express) {
   app.use('/api/v1/events', eventsRoutes)
   app.use('/api/v1/adapters', adaptersRoutes)
   app.use('/api/v1/water', waterRoutes)
-  // Additional routes from remote merge
-  app.use('/api/v1/route-simple', routeSimpleRoutes)
-  app.use('/api/v1/route-test', routeTestRoutes)
-  app.use('/api/v1/simple-test', simpleTestRoutes)
   app.use('/api/v1/health-ext', healthRoutes)
   app.use('/api/v1/metrics', metricsRoutes)
   app.use('/api/v1/region-mapping', regionMappingRoutes)
-  app.use('/api/v1/patterns', patternsRoutes)
   app.use('/api/v1/dks', dksRoutes)
-  app.use('/api/v1/test-post', testPostRoutes)
-  app.use('/api/v1/route-debug', routeDebugRoutes)
 }
 
 function attachFallbackHandlers(app: express.Express) {
