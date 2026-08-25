@@ -293,9 +293,11 @@ export const ecobeApi = {
 
   async getWhatIfIntensities(
     zones: string[]
-  ): Promise<{ intensities: Array<{ zone: string; carbonIntensity: number }> }> {
+  ): Promise<{ intensities: Array<{ zone: string; carbonIntensity: number | null }> }> {
     try {
-      const { data } = await api.post<{ intensities: Array<{ zone: string; carbonIntensity: number }> }>(
+      const { data } = await api.post<{
+        intensities: Array<{ zone: string; carbonIntensity: number | null }>
+      }>(
         '/dashboard/what-if/intensities',
         { zones }
       )
