@@ -1015,6 +1015,22 @@ model DecisionTraceEnvelope {
   @@index([traceHash])
 }
 
+// VDB-C0 signed decision receipt: Ed25519 signature over the RFC 8785 JCS hash
+// of a payload that binds the decision to its stored trace envelope.
+model DecisionReceipt {
+  id              String   @id @default(cuid())
+  decisionFrameId String   @unique
+  receiptHash     String   @unique
+  keyId           String
+  alg             String
+  signature       String
+  traceHash       String
+  envelope        Json
+  createdAt       DateTime @default(now())
+
+  @@index([keyId, createdAt])
+}
+
 // ============================================================================
 // WORKLOAD DECISION OUTCOMES
 // ============================================================================

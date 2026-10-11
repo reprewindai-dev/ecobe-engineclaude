@@ -113,6 +113,9 @@ const envSchema = z.object({
   DECISION_EVENT_ALERT_DEADLETTER_COUNT: z.string().default("25"),
   DECISION_API_IDEMPOTENCY_TTL_SEC: z.string().default("900"),
   DECISION_API_SIGNATURE_SECRET: z.string().optional(),
+  // Ed25519 private key (PKCS#8 PEM, base64 PKCS#8 DER, or base64 32-byte seed).
+  // When unset, VDB-C0 decision receipts are not issued.
+  DECISION_RECEIPT_SIGNING_KEY: z.string().optional(),
 
   // PGL (Provenance Governance Layer)
   PGL_SIGNING_KEY: z.string().optional(),
@@ -281,6 +284,7 @@ export const env = {
     parsed.data.DECISION_API_IDEMPOTENCY_TTL_SEC,
   ),
   DECISION_API_SIGNATURE_SECRET: parsed.data.DECISION_API_SIGNATURE_SECRET,
+  DECISION_RECEIPT_SIGNING_KEY: parsed.data.DECISION_RECEIPT_SIGNING_KEY,
   PGL_SIGNING_KEY: parsed.data.PGL_SIGNING_KEY,
   PGL_SIGNING_KEY_ID: parsed.data.PGL_SIGNING_KEY_ID,
   PGL_SIGNING_ALG: parsed.data.PGL_SIGNING_ALG,

@@ -109,6 +109,13 @@ import {
   verifyMerkleProof,
   type MerkleProof,
 } from "../lib/proof/merkle";
+import {
+  describeReceiptPublicKey,
+  getDecisionReceiptSigner,
+  issueDecisionReceipt,
+  type DecisionReceiptInput,
+} from "../lib/proof/decision-receipt";
+import { verifyDecisionReceipt } from "../lib/proof/receipt-verifier";
 import { env } from "../config/env";
 import { trackRecentRoutingRegions } from "../lib/cache-warmer";
 import {
@@ -2167,6 +2174,7 @@ export async function persistCiDecisionResult(
   );
   const manifestDatasets = result.persistable.manifestDatasets;
   const waterArtifacts = result.persistable.waterArtifactMetadata;
+  let receiptInput: DecisionReceiptInput | null = null;
   await prisma.$transaction(async (tx: any) => {
     const previousTrace = await tx.decisionTraceEnvelope.findFirst({
       orderBy: { sequenceNumber: "desc" },
@@ -2189,6 +2197,18 @@ export async function persistCiDecisionResult(
       traceEnvelope,
       previousTrace?.traceHash ?? null,
     );
+    receiptInput = {
+      nodeId: env.PGL_ROUTER_NODE_ID,
+      issuedAt: traceEnvelope.identity.createdAt,
+      response: validatedResponse,
+      trace: {
+        payload: traceEnvelope,
+        sequenceNumber: traceSequenceNumber,
+        traceHash: traceHashes.traceHash,
+        previousTraceHash: previousTrace?.traceHash ?? null,
+        inputSignalHash: traceHashes.inputSignalHash,
+      },
+    };
 
     const persisted = await tx.cIDecision.create({
       data: {
@@ -2377,6 +2397,10 @@ export async function persistCiDecisionResult(
       });
     }
   });
+
+  if (receiptInput) {
+    await issueDecisionReceipt(prisma as any, receiptInput);
+  }
 
   if (options?.pglValidation) {
     const preparedPglLifecycle = buildPreparedPglLifecycle(
@@ -3571,6 +3595,76 @@ router.get(
     } catch (error) {
       return res.status(500).json({
         error: "Failed to fetch decision trace",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  },
+);
+
+// Verification keys for VDB-C0 decision receipts. The keys themselves are not
+// secret, but the engine is private by contract; third parties receive them
+// through the broker or out of band and verify offline.
+router.get("/receipts/keys", internalServiceGuard, (_req, res) => {
+  try {
+    const signer = getDecisionReceiptSigner();
+    return res.json({
+      protocol: "veklom.decision-receipt.v1",
+      status: signer ? "active" : "not_configured",
+      keys: signer ? [describeReceiptPublicKey(signer)] : [],
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: "Decision receipt signing key is misconfigured",
+      code: "RECEIPT_KEY_INVALID",
+      message: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+});
+
+router.get(
+  "/decisions/:decisionFrameId/receipt",
+  internalServiceGuard,
+  async (req, res) => {
+    try {
+      const receipt = await prisma.decisionReceipt.findUnique({
+        where: { decisionFrameId: req.params.decisionFrameId },
+      });
+      if (!receipt) {
+        const decision = await prisma.cIDecision.findFirst({
+          where: { decisionFrameId: req.params.decisionFrameId },
+          select: { decisionFrameId: true },
+        });
+        return res.status(404).json({
+          error: decision
+            ? "No signed receipt was issued for this decision"
+            : "Decision not found",
+          code: decision ? "RECEIPT_NOT_ISSUED" : "DECISION_NOT_FOUND",
+        });
+      }
+
+      // Self-check against the stored trace so database tampering after
+      // signing is reported here, not only by external verifiers.
+      const traceRecord = await getDecisionTraceRecord(
+        req.params.decisionFrameId,
+      );
+      const signer = getDecisionReceiptSigner();
+      const verification = verifyDecisionReceipt(
+        receipt.envelope,
+        signer ? { [signer.keyId]: signer.publicKey } : {},
+        traceRecord ? { tracePayload: traceRecord.payload } : undefined,
+      );
+
+      return res.json({
+        decisionFrameId: receipt.decisionFrameId,
+        receipt: receipt.envelope,
+        engineVerification: {
+          ...verification,
+          traceChecked: Boolean(traceRecord),
+        },
+      });
+    } catch (error) {
+      return res.status(500).json({
+        error: "Failed to fetch decision receipt",
         message: error instanceof Error ? error.message : "Unknown error",
       });
     }
