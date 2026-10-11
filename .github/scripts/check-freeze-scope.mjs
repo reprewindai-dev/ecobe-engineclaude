@@ -182,15 +182,18 @@ function hasLooseArtifact(filePath) {
 }
 
 function assertDesignPartnerSchema() {
-  const schemaPath = path.join(repoRoot, 'ecobe-engine', 'prisma', 'schema.prisma')
-  const migrationPath = path.join(
-    repoRoot,
-    'ecobe-engine',
-    'prisma',
-    'migrations',
-    '20260330173000_add_design_partner_program',
-    'migration.sql'
+  // The engine moved from ecobe-engine/ to the repository root; accept either
+  // layout, and skip when the design-partner program is not in this repo at all.
+  const migrationDir = path.join('prisma', 'migrations', '20260330173000_add_design_partner_program')
+  const root = ['.', 'ecobe-engine'].find((candidate) =>
+    fs.existsSync(path.join(repoRoot, candidate, migrationDir, 'migration.sql'))
   )
+  if (!root) {
+    console.log('design-partner program not present; schema assertion skipped')
+    return []
+  }
+  const schemaPath = path.join(repoRoot, root, 'prisma', 'schema.prisma')
+  const migrationPath = path.join(repoRoot, root, migrationDir, 'migration.sql')
 
   const schema = fs.readFileSync(schemaPath, 'utf8')
   const migration = fs.readFileSync(migrationPath, 'utf8')

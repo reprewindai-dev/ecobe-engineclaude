@@ -77,6 +77,11 @@ export async function fetchEngineJson<T>(
   return (await response.json()) as T
 }
 
+/** Engine origin without the /api/v1 suffix, for routes that build their own path. */
+export function getEngineBaseUrl() {
+  return resolveEngineBaseUrl()
+}
+
 export function hasInternalApiKey() {
   return Boolean(getInternalApiKey())
 }

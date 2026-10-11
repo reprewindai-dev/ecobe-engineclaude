@@ -19,6 +19,8 @@
     "water:normalize": "tsx scripts/normalize-water-bundle.ts",
     "water:verify-provenance": "tsx scripts/verify-water-provenance.ts",
     "water:refresh": "tsx scripts/refresh-water-bundle.ts",
+    "receipt:keygen": "tsx scripts/generate-decision-receipt-key.ts",
+    "receipt:verify": "tsx scripts/verify-decision-receipt.ts",
     "bench:ci-latency": "npm run verify:canonical-root && tsx scripts/benchmark-ci-latency.ts",
     "db:setup": "npm run prisma:migrate:deploy && npm run prisma:seed",
     "format": "prettier --write \"src/**/*.ts\"",
