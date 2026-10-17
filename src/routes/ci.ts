@@ -57,7 +57,7 @@ import {
   type TraceEnvelopeSeed,
   type TraceStageTimings,
 } from "../lib/ci/trace";
-import { pinReplayProofHash } from "../lib/ci/replay";
+import { findReplayMismatches, pinReplayProofHash } from "../lib/ci/replay";
 import { prisma } from "../lib/db";
 import { buildGithubActionsEnforcementBundle } from "../lib/enforcement/github-actions-policy";
 import { buildKubernetesEnforcementPlan } from "../lib/enforcement/k8s-policy";
@@ -3854,6 +3854,8 @@ router.get(
             traceRecord?.payload.inputSignals.resolvedCandidates,
         },
       );
+      // Hash the replay produced on its own, before any pinning (compared below).
+      const recomputedProofHash = replayResult.response.proofHash;
       const replayResultForVerification = traceRecord
         ? {
             ...replayResult,
@@ -3866,21 +3868,11 @@ router.get(
       const replayResponse = await finalizeCiDecisionResponse(
         replayResultForVerification,
       );
-      const mismatches = [
-        (metadata.response?.decision ?? null) === replayResponse.decision
-          ? null
-          : "decision",
-        (metadata.response?.selectedRegion ?? null) ===
-        replayResponse.selectedRegion
-          ? null
-          : "selectedRegion",
-        (metadata.response?.reasonCode ?? null) === replayResponse.reasonCode
-          ? null
-          : "reasonCode",
-        (metadata.response?.proofHash ?? null) === replayResponse.proofHash
-          ? null
-          : "proofHash",
-      ].filter((value): value is string => Boolean(value));
+      const mismatches = findReplayMismatches({
+        stored: metadata.response,
+        replayed: replayResponse,
+        recomputedProofHash,
+      });
 
       if (mismatches.length === 0) {
         recordTelemetryMetric(
